@@ -12,6 +12,7 @@ ORGANUM_MOTEUR ?= tool/organum/../moteur/libaeolus.a
 TOOL_ORGANUM_OBJS =							\
 	o/$(MODE)/tool/organum/organum.o				\
 	o/$(MODE)/tool/organum/lorganum.o				\
+	o/$(MODE)/tool/organum/lnuklear.o				\
 	o/$(MODE)/tool/organum/plateforme_audio.o			\
 	o/$(MODE)/tool/organum/plateforme_midi.o			\
 	o/$(MODE)/tool/organum/plateforme_audio_win.o		\
