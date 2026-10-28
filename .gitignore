@@ -1,0 +1,15 @@
+# Dépendances (scripts/dependances.sh)
+/externe/
+# Produits de construction
+o/
+.aarch64/
+*.o
+*.a
+*.dbg
+*.elf
+/web/build/
+/moteur/tests/rendu
+/moteur/tests/*.wav
+/plateforme/tests/bip
+/plateforme/tests/ecoute
+/cosmo/aide/dlopen-helper-*-x86_64

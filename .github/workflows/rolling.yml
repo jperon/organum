@@ -1,0 +1,56 @@
+# À chaque push sur master : construit organum.com et remplace la
+# publication « rolling » (étiquette déplacée sur le nouveau commit).
+name: rolling
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rolling
+  cancel-in-progress: true
+
+jobs:
+  construire:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Outils
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools zip luarocks liblua5.1-0-dev
+          sudo luarocks install moonscript
+
+      # La chaîne cosmocc se construit depuis l'arbre cosmopolitan corrigé :
+      # long (environ une heure), d'où le cache, invalidé quand le commit ou
+      # le correctif changent.
+      - name: Cache cosmocc
+        uses: actions/cache@v4
+        with:
+          path: |
+            externe/cosmocc
+          key: cosmocc-${{ hashFiles('scripts/dependances.sh', 'cosmo/cosmopolitan.patch') }}
+
+      - name: Construction
+        run: scripts/construire.sh
+
+      - name: Vérification
+        run: |
+          test -s web/build/organum.com
+          unzip -l web/build/organum.com | grep -q '\.init\.lua'
+
+      - name: Publication rolling
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete rolling --yes --cleanup-tag || true
+          gh release create rolling web/build/organum.com \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "organum (rolling)" \
+            --notes "Construction automatique du commit $GITHUB_SHA. Linux x86-64 : chmod +x organum.com && ./organum.com puis http://localhost:8080"

@@ -1,0 +1,86 @@
+diff --git a/Makefile b/Makefile
+index 9af827e5..084b4b31 100644
+--- a/Makefile
++++ b/Makefile
+@@ -362,6 +362,7 @@ include tool/lambda/BUILD.mk
+ include tool/plinko/BUILD.mk
+ include test/tool/plinko/BUILD.mk
+ include tool/net/BUILD.mk
++include tool/organum/BUILD.mk
+ include tool/viz/BUILD.mk
+ include tool/BUILD.mk
+ include net/turfwar/BUILD.mk
+diff --git a/libc/dlopen/dlopen.c b/libc/dlopen/dlopen.c
+index 6a2f5907..6549e3f0 100644
+--- a/libc/dlopen/dlopen.c
++++ b/libc/dlopen/dlopen.c
+@@ -138,6 +138,31 @@ void __dlopen_unlock(void);
+ 
+ static _Thread_local char dlerror_buf[128];
+ 
++#ifdef __x86_64__
++// Base brute de %fs (ARCH_GET_FS), sans la convention de cosmo.
++static struct CosmoTib *__foreign_get_fs(void) {
++  long ax = 158, base = 0;  // __NR_arch_prctl
++  asm volatile("syscall"
++               : "+a"(ax)
++               : "D"(0x1003), "S"(&base)  // ARCH_GET_FS
++               : "rcx", "r11", "memory");
++  return (struct CosmoTib *)base;
++}
++
++// Appelé par foreign_tramp pour passer au TLS de la libc étrangère.
++dontinstrument void __foreign_set_tls(struct CosmoTib *tib) {
++  if (IsLinux()) {
++    long ax = 158;
++    asm volatile("syscall"
++                 : "+a"(ax)
++                 : "D"(0x1002), "S"(tib)  // ARCH_SET_FS
++                 : "rcx", "r11", "memory");
++  } else {
++    __set_tls(tib);
++  }
++}
++#endif
++
+ static const char *get_tmp_dir(void) {
+   const char *tmpdir;
+   if (!(tmpdir = getenv("TMPDIR")) || !*tmpdir)
+@@ -494,9 +519,8 @@ static uint8_t *movimm(uint8_t p[static 16], int reg, uint64_t val) {
+ static void *foreign_thunk_sysv(void *func) {
+   uint8_t *code, *p;
+ #ifdef __x86_64__
+-  // it is no longer needed
+-  if (1)
+-    return func;
++  // Toujours nécessaire sous Linux : la glibc lit son propre bloc de fil
++  // via %fs (fopen() → _IO_link_in), qui n'existe pas dans celui de cosmo.
+   // movabs $func,%rax
+   // movabs $foreign_tramp,%r10
+   // jmp *%r10
+@@ -666,7 +690,11 @@ static bool foreign_setup(void) {
+     return false;  // if elf_exec() returns, it failed
+   }
+ #ifdef __x86_64__
+-  __foreign.tib = __get_tls();
++  // Depuis que cosmo range son TLS dans %fs, comme la glibc, __get_tls()
++  // (réécrit par fixupobj en lecture de %fs:0x30) et __set_tls() (qui
++  // ajuste l'adresse) ne conviennent plus pour le TLS étranger : on lit la
++  // base brute, et __foreign_set_tls() la remettra telle quelle.
++  __foreign.tib = IsLinux() ? __foreign_get_fs() : __get_tls();
+   __set_tls(cosmo_tib);
+ #endif
+   __foreign.dlopen = foreign_thunk_sysv(__foreign.dlopen);
+diff --git a/libc/dlopen/foreign_tramp.S b/libc/dlopen/foreign_tramp.S
+index 0ce5b42e..611d4314 100644
+--- a/libc/dlopen/foreign_tramp.S
++++ b/libc/dlopen/foreign_tramp.S
+@@ -63,7 +63,7 @@ foreign_tramp:
+ #endif
+ 	mov	%rax,-0xc8(%rbp)
+ 	mov	__foreign+8(%rip),%rdi
+-	call	__set_tls
++	call	__foreign_set_tls
+ 
+ //	move stack arguments
+ 	movdqu	SKEW+0x00(%rbp),%xmm0
