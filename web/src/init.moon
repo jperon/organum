@@ -194,6 +194,24 @@ if organum.demarrer
     for i, g in ipairs etat_sauve.gains
       organum.gain i, g if type(g) == "number" and i <= #organum.etat!.divisions
 
+-- Interface native (Nuklear, voir fenetre.moon) dans un processus fils, à
+-- côté de l'interface web, si un serveur d'affichage local est joignable.
+-- ORGANUM_FENETRE=non la désactive (x11 ou wayland imposent le protocole).
+-- La fenêtre fermée, organum continue ; organum arrêté, elle se ferme.
+lancer_fenetre = ->
+  return if os.getenv("ORGANUM_FENETRE") == "non" or not nk or not organum.demarrer
+  return unless os.getenv("WAYLAND_DISPLAY") or os.getenv("DISPLAY")
+  return unless unix.fork! == 0
+  maitre = unix.getppid!
+  ok, err = pcall ->
+    lancer = require "fenetre"
+    ouvert, raison = lancer organum, nk, continuer: -> unix.getppid! == maitre
+    Log kLogWarn, "fenêtre : #{raison}" unless ouvert
+  Log kLogWarn, "fenêtre : #{err}" unless ok
+  unix.exit 0
+
+lancer_fenetre!
+
 -- Sauvegarde, dans le processus principal (seul à accéder au moteur), dès
 -- que l'état a changé ; redbean appelle ce crochet régulièrement.
 seq_sauve = nil

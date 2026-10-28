@@ -50,6 +50,15 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   `/api/volume`), persistance. `page.moon`, `page_midi.moon`, `client.moon`,
   `style.moon` : interface. `web/src/.lua/html.moon` : générateur HTML.
 
+- `ui/fenetre.h` : fenêtre sans bibliothèque ; `ui/wayland.c` et `ui/x11.c`
+  parlent les protocoles directement sur la socket du serveur (aucun
+  dlopen). `cosmo/lnuklear.c` : module Lua `nk` (Nuklear, rendu logiciel
+  rawfb, police recuite à la taille voulue). `web/src/fenetre.moon` :
+  console d'orgue, lancée par `init.moon` dans un processus fils
+  (`ORGANUM_FENETRE=non` pour s'en passer). Exigence : tout doit tenir dans
+  la fenêtre, sans défilement, et grossir quand elle est agrandie.
+  Essai hors moteur : `ui/essai_fenetre.moon` (état factice).
+
 ## Construire et tester
 
 ```bash

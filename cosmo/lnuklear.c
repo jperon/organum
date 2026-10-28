@@ -52,6 +52,26 @@ static int ui_gc(lua_State *L) {
   return 0;
 }
 
+// (Re)cuit la police par défaut à la taille donnée. Coûteux : à n'appeler
+// qu'au changement de taille (mise à l'échelle de la fenêtre).
+static int cuire_police(ui_t *u, int taille) {
+  if (taille < 6) taille = 6;
+  if (taille > 96) taille = 96;
+  struct nk_font_atlas *atlas = &u->rf->atlas;
+  nk_font_atlas_clear(atlas);
+  nk_font_atlas_init_default(atlas);
+  nk_font_atlas_begin(atlas);
+  struct nk_font *fonte = nk_font_atlas_add_default(atlas, taille, NULL);
+  int tl, th;
+  const void *tex = nk_font_atlas_bake(atlas, &tl, &th, NK_FONT_ATLAS_ALPHA8);
+  if (!tex || (size_t)tl * th > sizeof police) return -1;
+  memcpy(police, tex, (size_t)tl * th);
+  u->rf->font_tex.w = tl, u->rf->font_tex.h = th, u->rf->font_tex.pitch = tl;
+  nk_font_atlas_end(atlas, nk_handle_ptr(NULL), NULL);
+  nk_style_set_font(u->ctx, &fonte->handle);
+  return 0;
+}
+
 static int lnk_ouvrir(lua_State *L) {
   const char *titre = luaL_checkstring(L, 1);
   int l = (int)luaL_checkinteger(L, 2);
@@ -68,21 +88,35 @@ static int lnk_ouvrir(lua_State *L) {
   u->ctx = &u->rf->ctx;
   // nk_rawfb_init cuit la police par défaut en 13 px : on la recuit à la
   // taille demandée, lisible sur une tablette.
-  struct nk_font_atlas *atlas = &u->rf->atlas;
-  nk_font_atlas_clear(atlas);
-  nk_font_atlas_init_default(atlas);
-  nk_font_atlas_begin(atlas);
-  struct nk_font *fonte = nk_font_atlas_add_default(atlas, taille, NULL);
-  int tl, th;
-  const void *tex = nk_font_atlas_bake(atlas, &tl, &th, NK_FONT_ATLAS_ALPHA8);
-  if (tex && (size_t)tl * th <= sizeof police) {
-    memcpy(police, tex, (size_t)tl * th);
-    u->rf->font_tex.w = tl, u->rf->font_tex.h = th, u->rf->font_tex.pitch = tl;
-    nk_font_atlas_end(atlas, nk_handle_ptr(NULL), NULL);
-    nk_style_set_font(u->ctx, &fonte->handle);
-  }
+  cuire_police(u, taille);
+  // Jeux tirés, accouplements et combinaison courante bien visibles :
+  // couleur d'accent pour les éléments actifs des boutons-bascule.
+  struct nk_style_selectable *sel = &u->ctx->style.selectable;
+  struct nk_color accent = nk_rgb(59, 130, 246), accent_clair = nk_rgb(96, 156, 250);
+  sel->normal_active = nk_style_item_color(accent);
+  sel->hover_active = nk_style_item_color(accent_clair);
+  sel->pressed_active = nk_style_item_color(accent_clair);
+  sel->text_normal_active = sel->text_hover_active = sel->text_pressed_active = nk_rgb(255, 255, 255);
+  sel->normal = nk_style_item_color(nk_rgb(50, 50, 50));
+  sel->hover = nk_style_item_color(nk_rgb(65, 65, 65));
   luaL_getmetatable(L, "nk.ui");
   lua_setmetatable(L, -2);
+  return 1;
+}
+
+static int ui_police(lua_State *L) {
+  ui_t *u = luaL_checkudata(L, 1, "nk.ui");
+  lua_pushboolean(L, cuire_police(u, (int)luaL_checkinteger(L, 2)) == 0);
+  return 1;
+}
+
+// ui:largeur_texte(s) → largeur en pixels avec la police courante.
+static int ui_largeur_texte(lua_State *L) {
+  ui_t *u = luaL_checkudata(L, 1, "nk.ui");
+  size_t n;
+  const char *s = luaL_checklstring(L, 2, &n);
+  const struct nk_user_font *f = u->ctx->style.font;
+  lua_pushnumber(L, f->width(f->userdata, f->height, s, (int)n));
   return 1;
 }
 
@@ -132,7 +166,8 @@ static int ui_debut(lua_State *L) {
   float y = (float)luaL_checknumber(L, 4);
   float l = (float)luaL_checknumber(L, 5);
   float h = (float)luaL_checknumber(L, 6);
-  nk_flags flags = *titre ? NK_WINDOW_TITLE : 0;  // titre vide : pas de barre
+  // L'interface est calculée pour tenir dans la fenêtre : pas de défilement.
+  nk_flags flags = (*titre ? NK_WINDOW_TITLE : 0) | NK_WINDOW_NO_SCROLLBAR;
   int r = nk_begin(u->ctx, titre, nk_rect(x, y, l, h), flags);
   lua_pushboolean(L, r);
   return 1;
@@ -211,8 +246,8 @@ static int ui_curseur(lua_State *L) {
 static int ui_groupe_debut(lua_State *L) {
   ui_t *u = luaL_checkudata(L, 1, "nk.ui");
   const char *nom = luaL_checkstring(L, 2);
-  nk_group_begin(u->ctx, nom, NK_WINDOW_BORDER);
-  return 0;
+  lua_pushboolean(L, nk_group_begin(u->ctx, nom, NK_WINDOW_BORDER | NK_WINDOW_NO_SCROLLBAR));
+  return 1;
 }
 
 static int ui_groupe_fin(lua_State *L) {
@@ -239,6 +274,8 @@ static const struct luaL_Reg nkfuncs[] = {
 
 static const struct luaL_Reg uifuncs[] = {
   {"protocole", ui_protocole},
+  {"police", ui_police},
+  {"largeur_texte", ui_largeur_texte},
   {"evenements", ui_evenements},
   {"debut", ui_debut},
   {"fin", ui_fin},

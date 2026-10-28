@@ -15,6 +15,9 @@ exécutable [cosmopolitan](https://github.com/jart/cosmopolitan)/redbean.
   présents et branchés à chaud.
 - **Interface web** (téléphone, tablette, ordinateur) : jeux, accouplements,
   combinaisons, volumes par clavier, réverbération, volume du système.
+- **Fenêtre native** (Wayland ou X11, sans bibliothèque) ouverte au
+  démarrage à côté de l'interface web : console d'orgue qui s'adapte à la
+  taille de la fenêtre, sans défilement.
 - **Page MIDI** (`/midi`) : canaux MIDI ↔ claviers, contrôleurs ↔ réglages
   (par exemple la molette sur le volume), avec apprentissage.
 - **Persistance** : registration, combinaisons et réglages sont restaurés
@@ -49,6 +52,7 @@ reconnecter. L'état courant est visible dans `/api/orgue` (`temps_reel`).
 
 | Variable | Défaut | Rôle |
 |---|---|---|
+| `ORGANUM_FENETRE` | auto | `non` : pas de fenêtre native ; `x11` ou `wayland` : impose le protocole |
 | `ORGANUM_PERIODE` | `512` | Taille de période audio (trames) |
 | `ORGANUM_TAUX` | `48000` | Fréquence d'échantillonnage |
 | `ORGANUM_PERIPHERIQUE` | `default` | Périphérique ALSA |
@@ -92,7 +96,8 @@ un lien) dans `externe/` avant de lancer le script.
 | `moteur/` | Moteur d'Aeolus (C++/JUCE), API C (`api/`), ressources embarquées |
 | `plateforme/` | Audio et MIDI : ALSA (Linux), WinMM (Windows) |
 | `cosmo/` | Module Lua `organum`, intégration à redbean, correctif cosmopolitan |
-| `web/` | Interface web (MoonScript) et assemblage de `organum.com` |
+| `ui/` | Fenêtre sans bibliothèque (protocoles Wayland et X11), Nuklear |
+| `web/` | Interfaces web et native (MoonScript), assemblage de `organum.com` |
 | `scripts/` | Dépendances et construction complète |
 
 ## Licence
