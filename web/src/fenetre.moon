@@ -61,8 +61,12 @@ disposer = (e, l, h, rapport) ->
   meilleure
 
 (organum, nk, options = {}) ->
+  -- Police : Alegreya Sans (OFL), réduite au latin, embarquée dans le zip.
+  -- ORGANUM_POLICE : autre fichier .ttf, pour essayer une police.
+  ttf = Slurp and (os.getenv("ORGANUM_POLICE") and Slurp(os.getenv "ORGANUM_POLICE") or
+    Slurp "/zip/.polices/AlegreyaSans-Latin1.ttf")
   ui, err = nk.ouvrir options.titre or "organum", options.largeur or 1024,
-    options.hauteur or 640, 20
+    options.hauteur or 640, 20, ttf
   return nil, err unless ui
   continuer = options.continuer or -> true
   police, seq = 20, nil

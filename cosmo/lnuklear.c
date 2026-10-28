@@ -38,7 +38,13 @@ typedef struct {
   struct nk_context *ctx;
   int l, h;
   int sale;
+  char *ttf;  // police TrueType (copie), ou NULL : police bitmap de Nuklear
+  size_t nttf;
 } ui_t;
+
+// Glyphes cuits : latin de base et Latin-1, œ, tirets, guillemets, points de suspension.
+static const nk_rune kGlyphes[] = {0x0020, 0x00FF, 0x0152, 0x0153, 0x2013, 0x2014,
+                                   0x2018, 0x201E, 0x2026, 0x2026, 0};
 
 static int ui_gc(lua_State *L) {
   ui_t *u = luaL_checkudata(L, 1, "nk.ui");
@@ -49,6 +55,7 @@ static int ui_gc(lua_State *L) {
   }
   if (u->f) { fenetre_fermer(u->f); u->f = NULL; }
   free(u->fb); u->fb = NULL;
+  free(u->ttf); u->ttf = NULL;
   return 0;
 }
 
@@ -61,7 +68,16 @@ static int cuire_police(ui_t *u, int taille) {
   nk_font_atlas_clear(atlas);
   nk_font_atlas_init_default(atlas);
   nk_font_atlas_begin(atlas);
-  struct nk_font *fonte = nk_font_atlas_add_default(atlas, taille, NULL);
+  struct nk_font *fonte;
+  if (u->ttf) {
+    struct nk_font_config c = nk_font_config(taille);
+    c.range = kGlyphes;
+    c.oversample_h = 3, c.oversample_v = 1;  // lissage horizontal fin
+    fonte = nk_font_atlas_add_from_memory(atlas, u->ttf, u->nttf, taille, &c);
+  } else {
+    fonte = nk_font_atlas_add_default(atlas, taille, NULL);
+  }
+  if (!fonte) return -1;
   int tl, th;
   const void *tex = nk_font_atlas_bake(atlas, &tl, &th, NK_FONT_ATLAS_ALPHA8);
   if (!tex || (size_t)tl * th > sizeof police) return -1;
@@ -76,13 +92,16 @@ static int lnk_ouvrir(lua_State *L) {
   const char *titre = luaL_checkstring(L, 1);
   int l = (int)luaL_checkinteger(L, 2);
   int h = (int)luaL_checkinteger(L, 3);
-  int taille = (lua_gettop(L) >= 4) ? (int)luaL_checkinteger(L, 4) : 20;
+  int taille = (int)luaL_optinteger(L, 4, 20);
+  size_t nttf = 0;
+  const char *ttf = luaL_optlstring(L, 5, NULL, &nttf);  // police TrueType facultative
   fenetre_t *f = fenetre_ouvrir(titre, l, h);
   if (!f) { lua_pushnil(L); lua_pushstring(L, "pas de serveur d'affichage"); return 2; }
   ui_t *u = lua_newuserdata(L, sizeof(*u));
   memset(u, 0, sizeof(*u));
   fenetre_taille(f, &l, &h);
   u->f = f; u->l = l; u->h = h; u->sale = 1;
+  if (ttf && nttf && (u->ttf = malloc(nttf))) memcpy(u->ttf, ttf, nttf), u->nttf = nttf;
   u->fb = calloc((size_t)l * h, 4);
   struct rawfb_pl pl = {4, 16, 8, 0, 24, 0, 0, 0, 8};
   u->rf = nk_rawfb_init(u->fb, police, l, h, l * 4, pl);

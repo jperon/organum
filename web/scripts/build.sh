@@ -33,9 +33,12 @@ AIDE="$ROOT/../cosmo/aide"
 [ -x "$AIDE/dlopen-helper-glibc-x86_64" ] || "$AIDE/construire.sh"
 mkdir -p "$STAGE/.cosmo"
 cp "$AIDE"/dlopen-helper-*-x86_64 "$AIDE/dlopen-helper.c" "$STAGE/.cosmo/"
+# Police de l'interface native (voir fenetre.moon), avec sa licence.
+mkdir -p "$STAGE/.polices"
+cp "$ROOT/../ui/polices/"* "$STAGE/.polices/"
 
 cp "$ORGANUM" "$OUT.tmp"
-(cd "$STAGE" && zip -q ../organum.com.tmp .init.lua .lua/*.lua .cosmo/*)
+(cd "$STAGE" && zip -q ../organum.com.tmp .init.lua .lua/*.lua .cosmo/* .polices/*)
 chmod +x "$OUT.tmp"
 mv -f "$OUT.tmp" "$OUT"
 
