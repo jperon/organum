@@ -32,16 +32,20 @@ $(TOOL_ORGANUM_OBJS) $(TOOL_ORGANUM_WEB_OBJS): private CFLAGS += -Wno-error
 
 # L'édition des liens reçoit les prérequis en ordre inverse (uniqr) : les
 # bibliothèques sont donc déclarées avant le code qui s'en sert.
+# Dépendances communes aux deux exécutables, bibliothèques d'abord.
+TOOL_ORGANUM_LIEN =							\
+	$(TOOL_NET_DEPS)						\
+	o/$(MODE)/libc/dlopen/dlopen.a					\
+	o/$(MODE)/third_party/libcxx/libcxx.a				\
+	$(ORGANUM_MOTEUR)						\
+	$(TOOL_NET_REDBEAN_LUA_MODULES)					\
+	o/$(MODE)/tool/net/.init.lua.zip.o				\
+	o/$(MODE)/tool/net/favicon.ico.zip.o				\
+	o/$(MODE)/tool/net/redbean.png.zip.o				\
+	o/$(MODE)/tool/net/help.txt.zip.o
+
 o/$(MODE)/tool/organum/organum.dbg:					\
-		$(TOOL_NET_DEPS)					\
-		o/$(MODE)/libc/dlopen/dlopen.a				\
-		o/$(MODE)/third_party/libcxx/libcxx.a			\
-		$(ORGANUM_MOTEUR)					\
-		$(TOOL_NET_REDBEAN_LUA_MODULES)				\
-		o/$(MODE)/tool/net/.init.lua.zip.o			\
-		o/$(MODE)/tool/net/favicon.ico.zip.o			\
-		o/$(MODE)/tool/net/redbean.png.zip.o			\
-		o/$(MODE)/tool/net/help.txt.zip.o			\
+		$(TOOL_ORGANUM_LIEN)					\
 		$(TOOL_ORGANUM_OBJS)					\
 		o/$(MODE)/tool/net/net.pkg				\
 		$(CRT)							\
@@ -49,16 +53,8 @@ o/$(MODE)/tool/organum/organum.dbg:					\
 	@$(APELINK)
 
 o/$(MODE)/tool/organum/organum-web.dbg:					\
-		$(TOOL_NET_DEPS)					\
-		o/$(MODE)/libc/dlopen/dlopen.a				\
-		o/$(MODE)/third_party/libcxx/libcxx.a			\
-		$(ORGANUM_MOTEUR)					\
-		$(TOOL_NET_REDBEAN_LUA_MODULES)				\
-		o/$(MODE)/tool/net/.init.lua.zip.o			\
-		o/$(MODE)/tool/net/favicon.ico.zip.o			\
-		o/$(MODE)/tool/net/redbean.png.zip.o			\
-		o/$(MODE)/tool/net/help.txt.zip.o			\
-		$(TOOL_ORGANUM_WEB_OBJS)					\
+		$(TOOL_ORGANUM_LIEN)					\
+		$(TOOL_ORGANUM_WEB_OBJS)				\
 		o/$(MODE)/tool/net/net.pkg				\
 		$(CRT)							\
 		$(APE_NO_MODIFY_SELF)
