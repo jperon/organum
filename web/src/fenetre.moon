@@ -4,7 +4,11 @@
 -- commandes que l'interface web.
 --
 --   lancer = require "fenetre"
---   lancer organum, nk, {titre:, largeur:, hauteur:, continuer: -> bool}
+--   lancer organum, nk, {titre:, largeur:, hauteur:, continuer: -> bool,
+--     volume: {lire: -> v, regler: (v) ->}}
+--
+-- volume (facultatif) : volume du système, 0 à 100, comme le curseur de la
+-- page web ; à défaut, le curseur règle le volume interne du moteur.
 --
 -- Disposition en console : un clavier par colonne. Tout est calculé pour
 -- tenir dans la fenêtre, sans défilement : hauteur des lignes et taille de
@@ -63,9 +67,28 @@ disposer = (e, l, h, rapport) ->
   continuer = options.continuer or -> true
   police, seq = 20, nil
 
+  -- Volume du système : lu par un outil externe, donc relu toutes les
+  -- 20 itérations (environ une seconde) ; pendant un glissement, envoyé au
+  -- plus une itération sur trois, puis à sa valeur finale.
+  systeme = options.volume
+  vol_sys, a_envoyer, tour, envoye_au = nil, nil, 0, -10
+  lire_sys = ->
+    v = systeme.lire!
+    v and v / 100
+
   while continuer!
     ouverte, sale = ui\evenements 50
     break unless ouverte
+    tour += 1
+    if systeme
+      if a_envoyer and tour - envoye_au >= 3
+        systeme.regler math.floor a_envoyer * 100 + 0.5
+        a_envoyer, envoye_au = nil, tour
+      elseif not a_envoyer and tour - envoye_au > 20 and tour % 20 == 0
+        v = lire_sys!
+        sale = true if v and v != vol_sys
+        vol_sys = v or vol_sys
+      vol_sys or= lire_sys!
     e = organum.etat!
     continue unless sale or e.seq != seq
     seq = e.seq
@@ -86,8 +109,12 @@ disposer = (e, l, h, rapport) ->
       -- Réglages généraux
       ui\ligne ligne, 6
       ui\texte "Volume", "droite"
-      v = ui\curseur e.volume, 0, 1, 0.01
-      organum.volume v if bouge e.volume, v
+      if systeme and vol_sys
+        v = ui\curseur vol_sys, 0, 1, 0.01
+        vol_sys, a_envoyer = v, v if bouge vol_sys, v
+      else
+        v = ui\curseur e.volume, 0, 1, 0.01
+        organum.volume v if bouge e.volume, v
       ui\texte "Réverb.", "droite"
       r = ui\curseur e.reverb, 0, 1, 0.01
       organum.reverb r if bouge e.reverb, r

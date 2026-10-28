@@ -205,7 +205,12 @@ lancer_fenetre = ->
   maitre = unix.getppid!
   ok, err = pcall ->
     lancer = require "fenetre"
-    ouvert, raison = lancer organum, nk, continuer: -> unix.getppid! == maitre
+    volume = if VOLUME
+      {
+        lire: -> (get_state! or {}).volume
+        regler: apply_volume
+      }
+    ouvert, raison = lancer organum, nk, :volume, continuer: -> unix.getppid! == maitre
     Log kLogWarn, "fenêtre : #{raison}" unless ouvert
   Log kLogWarn, "fenêtre : #{err}" unless ok
   unix.exit 0
