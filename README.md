@@ -88,6 +88,16 @@ Le résultat est `web/build/organum.com`. Le script :
 4. lie l'exécutable dans l'arbre cosmopolitan (`tool/organum` → `cosmo/`) ;
 5. compile l'interface MoonScript et l'ajoute au zip de l'exécutable.
 
+Variante sans interface native (ni Nuklear ni fenêtre X11/Wayland),
+seulement l'interface web, après `scripts/construire.sh` :
+
+```bash
+make -C externe/cosmopolitan -j m= o//tool/organum/organum-web
+ORGANUM_WEB=1 web/scripts/build.sh
+```
+
+Résultat : `web/build/organum-web.com`.
+
 Une copie existante d'une dépendance peut être réutilisée en la plaçant (ou
 un lien) dans `externe/` avant de lancer le script.
 

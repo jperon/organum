@@ -68,6 +68,8 @@ scripts/construire.sh                 # tout ; résultat web/build/organum.com
 make -C moteur -j                     # moteur seul
 make -C externe/cosmopolitan -j m= o//tool/organum/organum
 web/scripts/build.sh                  # réassemble seulement l'interface
+make -C externe/cosmopolitan -j m= o//tool/organum/organum-web
+ORGANUM_WEB=1 web/scripts/build.sh    # variante sans UI native : web/build/organum-web.com
 ```
 
 Test rapide : lancer `web/build/organum.com -p 8099`, puis
