@@ -30,6 +30,8 @@ fenetre_t *fenetre_ouvrir(const char *titre, int largeur, int hauteur);
 // Nom du protocole utilisé : "wayland" ou "x11".
 const char *fenetre_protocole(fenetre_t *f);
 int fenetre_fd(fenetre_t *f);
+// Taille effective (peut différer de celle demandée : écran plus petit…).
+void fenetre_taille(fenetre_t *f, int *largeur, int *hauteur);
 // Renvoie 1 et remplit *ev si un événement est disponible, 0 sinon ;
 // attend au plus attente_ms (0 : n'attend pas, -1 : indéfiniment).
 int fenetre_evenement(fenetre_t *f, fenetre_ev_t *ev, int attente_ms);

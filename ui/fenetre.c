@@ -28,6 +28,7 @@ const char *fenetre_protocole(fenetre_t *f) { return f->wayland ? "wayland" : "x
 #define AIGUILLER(appel, ...) (f->wayland ? wl_##appel(f->p, __VA_ARGS__) : x11_##appel(f->p, __VA_ARGS__))
 
 int fenetre_fd(fenetre_t *f) { return f->wayland ? wl_fd(f->p) : x11_fd(f->p); }
+void fenetre_taille(fenetre_t *f, int *l, int *h) { AIGUILLER(taille, l, h); }
 int fenetre_evenement(fenetre_t *f, fenetre_ev_t *ev, int attente_ms) { return AIGUILLER(evenement, ev, attente_ms); }
 void fenetre_afficher(fenetre_t *f, const uint32_t *p, int l, int h) { AIGUILLER(afficher, p, l, h); }
 

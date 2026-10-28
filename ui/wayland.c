@@ -359,6 +359,7 @@ echec:
 }
 
 int wl_fd(wl_t *w) { return w->fd; }
+void wl_taille(wl_t *w, int *l, int *h) { *l = w->largeur, *h = w->hauteur; }
 
 int wl_evenement(wl_t *w, fenetre_ev_t *ev, int attente_ms) {
   for (;;) {

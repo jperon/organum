@@ -57,7 +57,9 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   console d'orgue, lancée par `init.moon` dans un processus fils
   (`ORGANUM_FENETRE=non` pour s'en passer). Exigence : tout doit tenir dans
   la fenêtre, sans défilement, et grossir quand elle est agrandie.
-  Essai hors moteur : `ui/essai_fenetre.moon` (état factice).
+  Essai hors moteur : `ui/essai_fenetre.moon` (état factice). X11 : socket
+  Unix pour `:n`, TCP (port 6000+n) pour `hôte:n` ; testable avec
+  `Xephyr :2 -listen tcp -ac` et `DISPLAY=localhost:2`.
 
 ## Construire et tester
 

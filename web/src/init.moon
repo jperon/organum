@@ -200,7 +200,8 @@ if organum.demarrer
 -- La fenêtre fermée, organum continue ; organum arrêté, elle se ferme.
 lancer_fenetre = ->
   return if os.getenv("ORGANUM_FENETRE") == "non" or not nk or not organum.demarrer
-  return unless os.getenv("WAYLAND_DISPLAY") or os.getenv("DISPLAY")
+  -- Sous Windows, un serveur X local (VcXsrv, Xming…) est essayé par défaut.
+  return unless os.getenv("WAYLAND_DISPLAY") or os.getenv("DISPLAY") or GetHostOs! == "WINDOWS"
   return unless unix.fork! == 0
   maitre = unix.getppid!
   ok, err = pcall ->

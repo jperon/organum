@@ -81,6 +81,7 @@ static int lnk_ouvrir(lua_State *L) {
   if (!f) { lua_pushnil(L); lua_pushstring(L, "pas de serveur d'affichage"); return 2; }
   ui_t *u = lua_newuserdata(L, sizeof(*u));
   memset(u, 0, sizeof(*u));
+  fenetre_taille(f, &l, &h);
   u->f = f; u->l = l; u->h = h; u->sale = 1;
   u->fb = calloc((size_t)l * h, 4);
   struct rawfb_pl pl = {4, 16, 8, 0, 24, 0, 0, 0, 8};

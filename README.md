@@ -17,7 +17,9 @@ exécutable [cosmopolitan](https://github.com/jart/cosmopolitan)/redbean.
   combinaisons, volumes par clavier, réverbération, volume du système.
 - **Fenêtre native** (Wayland ou X11, sans bibliothèque) ouverte au
   démarrage à côté de l'interface web : console d'orgue qui s'adapte à la
-  taille de la fenêtre, sans défilement.
+  taille de la fenêtre, sans défilement. X11 aussi par TCP (`DISPLAY=hôte:n`),
+  ce qui permet en principe un serveur X pour Windows (VcXsrv, Xming…), non
+  testé sous Windows.
 - **Page MIDI** (`/midi`) : canaux MIDI ↔ claviers, contrôleurs ↔ réglages
   (par exemple la molette sur le volume), avec apprentissage.
 - **Persistance** : registration, combinaisons et réglages sont restaurés

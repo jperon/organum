@@ -12,6 +12,10 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <cosmo.h>
 
 struct x11 {
   int fd;
@@ -102,8 +106,9 @@ static int lire_cookie(const char *numero, uint8_t *cookie, int *ncookie) {
     }
     if (!ok) break;
     // champs : adresse, numéro d'affichage, nom du protocole, données
-    int local = famille == 256 /* FamilyLocal */ || famille == 0xFFFF /* Wild */;
-    if (!local || strcmp(champs[2], "MIT-MAGIC-COOKIE-1") || longueurs[3] > 16) continue;
+    // Local, Wild, ou Internet (IPv4/IPv6 : connexions TCP)
+    int utilisable = famille == 256 || famille == 0xFFFF || famille == 0 || famille == 6;
+    if (!utilisable || strcmp(champs[2], "MIT-MAGIC-COOKIE-1") || longueurs[3] > 16) continue;
     if (longueurs[1] && strcmp(champs[1], numero)) continue;
     if (famille == 256 && strcmp(champs[0], hote) && trouve >= 0) continue;
     memcpy(cookie, champs[3], longueurs[3]);
@@ -157,22 +162,49 @@ static void propriete(x11_t *x, uint32_t prop, uint32_t type, int format, const 
   ecrire_tout(x->fd, r.o, r.n);
 }
 
+// Connexion au serveur : socket Unix pour « :n » (ou « unix:n »), TCP vers
+// le port 6000 + n pour « hôte:n » — cas des serveurs X pour Windows
+// (VcXsrv, Xming…), qui n'écoutent qu'en TCP.
+static int connecter(const char *hote, int n) {
+  if (!*hote || !strcmp(hote, "unix")) {
+    struct sockaddr_un adr = {.sun_family = AF_UNIX};
+    snprintf(adr.sun_path, sizeof adr.sun_path, "/tmp/.X11-unix/X%d", n);
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd >= 0 && connect(fd, (struct sockaddr *)&adr, sizeof adr) == 0) return fd;
+    if (fd >= 0) close(fd);
+    if (*hote) return -1;
+    hote = "localhost";  // « :n » sans socket Unix (Windows) : essai en TCP
+  }
+  char port[16];
+  snprintf(port, sizeof port, "%d", 6000 + n);
+  struct addrinfo indice = {.ai_family = AF_UNSPEC, .ai_socktype = SOCK_STREAM}, *res;
+  if (getaddrinfo(hote, port, &indice, &res)) return -1;
+  int fd = -1;
+  for (struct addrinfo *a = res; a; a = a->ai_next) {
+    fd = socket(a->ai_family, a->ai_socktype, a->ai_protocol);
+    if (fd < 0) continue;
+    if (connect(fd, a->ai_addr, a->ai_addrlen) == 0) break;
+    close(fd), fd = -1;
+  }
+  freeaddrinfo(res);
+  if (fd >= 0) setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &(int){1}, sizeof(int));
+  return fd;
+}
+
 x11_t *x11_ouvrir(const char *titre, int largeur, int hauteur) {
   const char *d = getenv("DISPLAY");
-  if (!d || d[0] != ':') return NULL;  // affichage local seulement
+  // Sous Windows, DISPLAY est rarement définie : serveur local par défaut.
+  if ((!d || !*d) && IsWindows()) d = "localhost:0";
+  const char *deux_points = d ? strrchr(d, ':') : NULL;
+  if (!deux_points) return NULL;
+  char hote[256];
+  snprintf(hote, sizeof hote, "%.*s", (int)(deux_points - d), d);
+  int n = atoi(deux_points + 1);  // « :0.0 » : l'écran après le point est ignoré
   char numero[16];
-  int i = 0;
-  for (const char *p = d + 1; *p && *p != '.' && i < 15; ++p) numero[i++] = *p;
-  numero[i] = 0;
+  snprintf(numero, sizeof numero, "%d", n);
 
-  struct sockaddr_un adr = {.sun_family = AF_UNIX};
-  snprintf(adr.sun_path, sizeof adr.sun_path, "/tmp/.X11-unix/X%s", numero);
-  int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  int fd = connecter(hote, n);
   if (fd < 0) return NULL;
-  if (connect(fd, (struct sockaddr *)&adr, sizeof adr)) {
-    close(fd);
-    return NULL;
-  }
   x11_t *x = calloc(1, sizeof *x);
   x->fd = fd;
 
@@ -204,6 +236,10 @@ x11_t *x11_ouvrir(const char *titre, int largeur, int hauteur) {
   x->racine = lu32(ecran);
   x->visuel = lu32(ecran + 32);
   x->profondeur = ecran[38];
+  // Pas plus grande que l'écran (sans gestionnaire de fenêtres, personne ne
+  // la ramènerait à sa taille).
+  if (largeur > lu16(ecran + 20)) largeur = lu16(ecran + 20);
+  if (hauteur > lu16(ecran + 22)) hauteur = lu16(ecran + 22);
   free(s);
   if (x->profondeur != 24) {
     fprintf(stderr, "x11 : profondeur %d non prise en charge\n", x->profondeur);
@@ -251,6 +287,7 @@ echec:
 }
 
 int x11_fd(x11_t *x) { return x->fd; }
+void x11_taille(x11_t *x, int *l, int *h) { *l = x->largeur, *h = x->hauteur; }
 
 int x11_evenement(x11_t *x, fenetre_ev_t *ev, int attente_ms) {
   for (;;) {
