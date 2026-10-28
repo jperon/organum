@@ -10,7 +10,16 @@ organum © 2026 jperon, sous licence AGPL-3.0 (voir `LICENSE.txt`).
 | Jeux (`.ae0`, `*_ae0.json`), orgue par défaut | `moteur/ressources/stops/`, `configs/` | aeolus_plugin | GPL-3.0 ou ultérieure |
 | JUCE 8.0.7 (juce_core, juce_events, juce_data_structures, juce_audio_basics, juce_audio_formats) | téléchargé dans `externe/` | Raw Material Software | AGPLv3 (ou commerciale) |
 | libMTSClient | `moteur/mts/` | © 2021 ODDSound Ltd | permissive (type 0BSD) |
+| Nuklear (et ses moteurs de rendu rawfb, stb_truetype, stb_rect_pack) | `ui/externe/` | © 2017 Micha Mettke et contributeurs ; stb © Sean Barrett | MIT ou domaine public (au choix) |
 | cosmopolitan, redbean | téléchargé dans `externe/` | © Justine Tunney | ISC |
+
+## Police
+
+`ui/polices/LibertinusSerif-Latin1.ttf` : Libertinus Serif 7.051
+(© 2012-2024 The Libertinus Project Authors), réduite aux caractères latins
+(Latin-1, Œ/œ, tirets, guillemets, points de suspension). Licence SIL OFL 1.1
+(`ui/polices/OFL-LibertinusSerif.txt`) ; le nom « Libertinus » n'est pas
+réservé, la version réduite garde donc son nom.
 
 ## Réponses impulsionnelles
 

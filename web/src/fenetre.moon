@@ -25,7 +25,7 @@ nom_jeu = (jeu) -> (jeu.nom\gsub "\n", " ")
 -- la fenêtre, marge et bordure des groupes.
 ESPACE, MARGE, MARGE_GROUPE = 4, 4, 6
 -- Rapport hauteur de ligne / taille de police, et bornes de la police.
-LIGNE_POLICE, POLICE_MIN, POLICE_MAX = 1.5, 10, 64
+LIGNE_POLICE, POLICE_MIN, POLICE_MAX = 1.25, 10, 64
 
 -- Un curseur ne renvoie une commande que si l'utilisateur l'a bougé : la
 -- valeur rendue par Nuklear (flottant 32 bits) diffère sinon à peine de l'état.
@@ -61,10 +61,10 @@ disposer = (e, l, h, rapport) ->
   meilleure
 
 (organum, nk, options = {}) ->
-  -- Police : Alegreya Sans (OFL), réduite au latin, embarquée dans le zip.
+  -- Police : Libertinus Serif (OFL), réduite au latin, embarquée dans le zip.
   -- ORGANUM_POLICE : autre fichier .ttf, pour essayer une police.
   ttf = Slurp and (os.getenv("ORGANUM_POLICE") and Slurp(os.getenv "ORGANUM_POLICE") or
-    Slurp "/zip/.polices/AlegreyaSans-Latin1.ttf")
+    Slurp "/zip/.polices/LibertinusSerif-Latin1.ttf")
   ui, err = nk.ouvrir options.titre or "organum", options.largeur or 1024,
     options.hauteur or 640, 20, ttf
   return nil, err unless ui
