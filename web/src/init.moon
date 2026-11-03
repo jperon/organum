@@ -405,6 +405,7 @@ etat_orgue = ->
   {
     source: "aeolus", instance: INSTANCE, seq: e.seq, step: e.etape, steps: e.netapes
     volume: e.volume, reverb: e.reverb, xruns: e.xruns, midi: e.midi, temps_reel: e.temps_reel
+    taux: e.taux, periode: e.periode, nb_periodes: e.nb_periodes, erreurs_ecriture: e.erreurs_ecriture
     divisions: for d in *e.divisions
       {
         name: d.nom, gain: d.gain

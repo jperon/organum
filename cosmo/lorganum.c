@@ -91,6 +91,8 @@ struct etat {
   int etape, netapes;  // combinaison courante (séquenceur), à partir de 0
   int midi_client, midi_port;
   int taux;
+  int periode, nb_periodes;  // demandés à l'ouverture (diagnostic)
+  unsigned erreurs_ecriture;  // audio_ecrire() a renvoyé une erreur
 };
 
 // L'activité MIDI est hors de struct etat pour que la copie cohérente de
@@ -110,6 +112,7 @@ static audio_t *g_audio;
 static midi_t *g_midi;
 static int g_periode;
 static int g_taux;
+static unsigned g_erreurs_ecriture;  // fil audio uniquement, publié par publier()
 static int g_maitre;  // processus qui fait tourner le moteur
 // Propres au fil audio ; publiées dans g_etat.
 static struct association g_associations[MAX_ASSOCIATIONS];
@@ -151,6 +154,10 @@ static void publier(void) {
   if (v != e->volume) e->volume = v, change = 1;
   if (r != e->reverb) e->reverb = r, change = 1;
   if (x != e->xruns) e->xruns = x, change = 1;
+  if (g_erreurs_ecriture != e->erreurs_ecriture) {
+    e->erreurs_ecriture = g_erreurs_ecriture;
+    change = 1;
+  }
   int etape = aeolus_etape(g_moteur);
   if (etape != e->etape) e->etape = etape, change = 1;
   int cc = aeolus_canaux_controle(g_moteur), ce = aeolus_canaux_expression(g_moteur);
@@ -258,7 +265,17 @@ static void *boucle_audio(void *arg) {
   // interrompre pour livrer le son. Il faut un droit « rtprio » (groupe
   // pipewire ou audio selon les systèmes) ; sinon on reste en temps partagé.
   struct sched_param sp = {.sched_priority = 70};
-  g_etat->temps_reel = pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp) == 0;
+  int err = pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp);
+  g_etat->temps_reel = err == 0;
+  if (err != 0 && IsLinux())
+    // Une seule fois, au démarrage du fil : sans droit rtprio (limite PAM,
+    // ulimit -r), on reste en temps partagé et le son peut hachurer. Ailleurs
+    // (Windows, XNU), cosmocc renvoie ENOSYS et le message n'aurait pas de sens.
+    fprintf(stderr,
+            "organum : priorité temps réel SCHED_FIFO 70 refusée : %s ; "
+            "droit rtprio manquant ? voir /etc/security/limits.d "
+            "(groupe audio/pipewire), ou lancer avec « sudo chrt -f 70 ».\n",
+            strerror(err));
 
   float *g = malloc(g_periode * sizeof(float));
   float *d = malloc(g_periode * sizeof(float));
@@ -291,7 +308,7 @@ static void *boucle_audio(void *arg) {
       entrelace[2 * i] = g[i];
       entrelace[2 * i + 1] = d[i];
     }
-    audio_ecrire(g_audio, entrelace, g_periode);
+    if (audio_ecrire(g_audio, entrelace, g_periode) < 0) ++g_erreurs_ecriture;
     g_echantillons += g_periode;
 
     if (++tours % 4 == 0) publier();  // ~40 ms à 512 trames
@@ -379,6 +396,8 @@ static int l_demarrer(lua_State *L) {
   struct etat *e = g_etat;
   g_taux = taux;
   e->taux = taux;
+  e->periode = g_periode;
+  e->nb_periodes = nb_periodes;
   e->netapes = aeolus_nb_etapes(g_moteur);
   midi_adresse(g_midi, &e->midi_client, &e->midi_port);
   e->ndivisions = aeolus_nb_divisions(g_moteur);
@@ -430,7 +449,8 @@ static void envoyer(lua_State *L, struct commande c) {
     luaL_error(L, "commande perdue : %s", strerror(errno));
 }
 
-// organum.etat() → {seq, volume, reverb, xruns, taux, midi="c:p",
+// organum.etat() → {seq, volume, reverb, xruns, taux, periode, nb_periodes,
+//                   erreurs_ecriture, temps_reel, midi="c:p",
 //                   canaux_controle, canaux_expression, canaux_actifs,
 //                   divisions={{nom, gain, jeux={{nom, actif}, …}}, …}}
 // canaux_actifs est éphémère (activité des 250 dernières ms) et hors de seq.
@@ -453,6 +473,9 @@ static int l_etat(lua_State *L) {
   lua_pushnumber(L, copie.reverb), lua_setfield(L, -2, "reverb");
   lua_pushinteger(L, copie.xruns), lua_setfield(L, -2, "xruns");
   lua_pushboolean(L, copie.temps_reel), lua_setfield(L, -2, "temps_reel");
+  lua_pushinteger(L, copie.periode), lua_setfield(L, -2, "periode");
+  lua_pushinteger(L, copie.nb_periodes), lua_setfield(L, -2, "nb_periodes");
+  lua_pushinteger(L, copie.erreurs_ecriture), lua_setfield(L, -2, "erreurs_ecriture");
   lua_pushinteger(L, copie.etape), lua_setfield(L, -2, "etape");
   lua_pushinteger(L, copie.netapes), lua_setfield(L, -2, "netapes");
   lua_pushinteger(L, copie.taux), lua_setfield(L, -2, "taux");

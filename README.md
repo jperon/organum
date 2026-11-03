@@ -44,11 +44,80 @@ changer de port ou `-l 127.0.0.1` pour n'écouter qu'en local.
 
 ### Craquements et temps réel
 
-Le fil audio demande la priorité temps réel (SCHED_FIFO). Sans ce droit, il
-tourne en priorité normale et peut craquer sous charge. Pour l'accorder
-durablement, ajouter l'utilisateur au groupe qui dispose de `rtprio` (souvent
-`pipewire`, `audio` ou `realtime` selon la distribution), puis se
-reconnecter. L'état courant est visible dans `/api/orgue` (`temps_reel`).
+Le fil audio demande la priorité temps réel `SCHED_FIFO 70`. Sans ce droit,
+il tourne en priorité normale, peut être interrompu par d'autres tâches et
+le son hache. Au démarrage, un refus est signalé une seule fois sur
+`stderr` (visible dans le journal du service ou le terminal) :
+
+```text
+organum : priorité temps réel SCHED_FIFO 70 refusée : Operation not permitted ; droit rtprio manquant ? voir /etc/security/limits.d (groupe audio/pipewire), ou lancer avec « sudo chrt -f 70 ».
+```
+
+`/api/orgue` reflète l'état courant et quelques compteurs utiles :
+
+```bash
+curl -s localhost:8080/api/orgue \
+  | jq '{temps_reel, xruns, taux, periode, nb_periodes, erreurs_ecriture}'
+```
+
+- `temps_reel` : `true` si le fil a obtenu `SCHED_FIFO 70` ;
+- `xruns` : nombre de défauts de la sortie ALSA (périphérique en retard) ;
+- `taux`, `periode`, `nb_periodes` : réglage effectivement demandé ;
+- `erreurs_ecriture` : nombre d'écritures audio en échec depuis le
+  démarrage (hors `xruns`, déjà comptés par ALSA).
+
+Vérifier aussi la classe et la priorité des fils, et le graphe PipeWire :
+
+```bash
+ps -L -o pid,tid,cls,rtprio -C organum.com   # attendu : FF 70 pour le fil audio
+pw-top                                      # quantum et erreurs du graphe
+```
+
+#### Accorder le droit `rtprio`
+
+Le droit vient d'une limite PAM (`RLIMIT_RTPRIO`) et de l'appartenance au
+groupe autorisé. Créer par exemple `/etc/security/limits.d/90-organum.conf` :
+
+```text
+@audio    -  rtprio     95
+@audio    -  memlock    unlimited
+```
+
+puis ajouter l'utilisateur au groupe `audio` (ou `pipewire`/`realtime` selon
+la distribution) :
+
+```bash
+sudo usermod -aG audio "$USER"
+```
+
+**Se reconnecter** (session graphique comprise) : les limites sont lues à
+l'ouverture de session, pas à chaque lancement d'organum. `memlock` est
+utile aux serveurs audio ; organum lui-même ne verrouille pas sa mémoire.
+Si la limite ne peut pas être accordée durablement, lancer le programme avec
+une priorité temps réel explicite, ce qui exige les privilèges correspondants :
+`sudo chrt -f 70 organum.com` (ou la capacité `CAP_SYS_NICE`).
+
+Sans systemd (runit, sway lancé par `startx` ou un script), PAM et
+`limits.d` ne s'appliquent qu'aux sessions ouvertes par `login`, `sshd` ou
+un gestionnaire de connexion. Un service lancé directement par le
+superviseur (runit, s6) n'hérite pas de ces limites : les poser dans le
+script de service (`ulimit -r 95`, ou `chrt -f 70` si le service tourne avec
+les privilèges adéquats) ou dans la configuration du superviseur.
+
+#### Période, quantum et hachures
+
+`ORGANUM_PERIODE` (trames par écriture, 512 par défaut) et `ORGANUM_TAUX`
+(48000 Hz) déterminent la latence et la fréquence des réveils du fil audio.
+Avec PipeWire, la période doit rester cohérente avec le quantum du graphe
+(`pw-top`, souvent 1024, parfois 256) : une période beaucoup plus petite
+multiplie les réveils et les risques de retard, un quantum plus petit que
+la période fragmente les transferts. En cas de hachures persistantes,
+monter `ORGANUM_PERIODE` à 1024 (les `xruns` doivent cesser de croître), ou
+régler le quantum PipeWire à une valeur au moins égale.
+
+La priorité 70 est volontairement **inférieure** à celle du fil de PipeWire
+(environ 88) : le serveur audio doit pouvoir interrompre organum pour
+livrer le son à temps. Ne pas la relever au-dessus de PipeWire.
 
 ### Variables d'environnement
 
