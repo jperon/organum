@@ -258,7 +258,7 @@ static int ui_case(lua_State *L) {
 //   - `selection` est l'état choisi par l'utilisateur (comme ui:choix) ; il
 //     est dessiné avec l'accent bleu du style actif ;
 //   - `allume` est un état éphémère (par exemple l'activité MIDI d'un canal),
-//     dessiné en vert ambre uniquement quand le bouton n'est pas sélectionné.
+//     dessiné en vert uniquement quand le bouton n'est pas sélectionné.
 // Les deux ne se mélangent donc pas : sélectionné reste bleu, même si actif.
 //
 // La valeur renvoyée est la sélection APRÈS interaction, exactement comme
@@ -281,7 +281,7 @@ static int ui_etat(lua_State *L) {
     if (nk_style_push_style_item(u->ctx, &sel->normal,
                                 nk_style_item_color(nk_rgb(22, 120, 60)))) items++;
     if (nk_style_push_style_item(u->ctx, &sel->hover,
-                                nk_style_item_color(nk_rgb(30, 150, 75)))) items++;
+                                nk_style_item_color(nk_rgb(24, 128, 64)))) items++;
     if (nk_style_push_style_item(u->ctx, &sel->pressed,
                                 nk_style_item_color(nk_rgb(18, 100, 50)))) items++;
     if (nk_style_push_color(u->ctx, &sel->text_normal, texte)) couleurs++;

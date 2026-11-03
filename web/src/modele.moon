@@ -78,6 +78,14 @@ cible_midi =
   gain: "Gain"
   aucune: "Aucune"
 
+-- Variante courte pour les colonnes étroites de l'interface native
+-- (Nuklear) : « Réverbération » n'y tient pas.
+cible_midi_court =
+  volume: "Vol."
+  reverb: "Rév."
+  gain: "Gain"
+  aucune: "Aucune"
+
 -- Texte d'un canal : « Tous » quand il est absent, sinon son numéro. Le
 -- préfixe « Canal » est ajouté par les libellés composés.
 canal_texte = (c) ->
@@ -134,6 +142,7 @@ etat_port = (p) ->
   :ETATS
   :etat_puce
   :cible_midi
+  :cible_midi_court
   :canal_texte
   :libelle_association
   :libelle_port

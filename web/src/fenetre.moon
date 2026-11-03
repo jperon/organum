@@ -32,12 +32,6 @@
 -- noms de jeux, canaux et libellés d'associations ont une seule source.
 modele = require "modele"
 
--- Libellés courts des cibles d'association pour la colonne étroite du panneau
--- natif. modele.cible_midi fournit les libellés longs partagés avec la page
--- web (« Réverbération » ne tient pas ici). À terme, modele.moon devrait
--- exposer aussi une variante courte ; d'ici là ces libellés sont locaux.
-CIBLES_COURTES = {volume: "Vol.", reverb: "Rév.", gain: "Gain", aucune: "Aucune"}
-
 -- Marges de Nuklear (style par défaut) : intervalle entre lignes, marge de
 -- la fenêtre, marge et bordure des groupes.
 ESPACE, MARGE, MARGE_GROUPE = 4, 4, 6
@@ -267,6 +261,30 @@ disposer_connexions = (nports, l, h) ->
     for k in *{"controle", "expression", "associations"}
       cfg[k] = {} unless type(cfg[k]) == "table"
     cfg
+  -- Configuration vide de secours quand midi.etat échoue : le panneau reste
+  -- utilisable au lieu de faire tomber la fenêtre.
+  etat_midi_vide = ->
+    cfg = {divisions: {}, controle: {}, expression: {}, associations: {}}
+    for k in *{"divisions", "controle", "expression", "associations"}
+      cfg[k] = modele.liste_json cfg[k]
+    cfg
+  -- Avant enregistrement, toutes les listes doivent rester des tableaux JSON,
+  -- même vides : sans la marque [0] = false de modele.liste_json, redbean
+  -- encode {} et midi.json ne recharge plus une liste.
+  preparer_json = (cfg) ->
+    cfg.divisions = modele.liste_json cfg.divisions
+    for d in *cfg.divisions
+      d.canaux = modele.liste_json d.canaux if type(d) == "table"
+    for k in *{"controle", "expression", "associations"}
+      cfg[k] = modele.liste_json cfg[k]
+    cfg
+  -- Lecture protégée de midi.etat : renvoie la configuration normalisée et,
+  -- en cas d'échec, le message à afficher.
+  lire_etat_midi = (e) ->
+    ok, brut = pcall midi.etat
+    if ok
+      return normaliser_midi(brut, e), nil
+    etat_midi_vide!, "État MIDI illisible"
   -- Armer l'apprentissage : on note le contrôle déjà reçu, le prochain
   -- changement de dernier_controle (publié par le fil audio, qui incrémente
   -- seq) déclenche la capture.
@@ -277,11 +295,12 @@ disposer_connexions = (nports, l, h) ->
   -- Chaque changement part au moteur puis dans midi.json (callbacks
   -- d'init.moon) ; on force un redessin sans attendre le fil audio.
   envoyer_midi = (cfg) ->
+    cfg = preparer_json cfg
     ok, err = pcall ->
       applique, raison = midi.appliquer cfg
       error raison unless applique
       midi.enregistrer cfg
-    Log kLogWarn, "fenêtre : MIDI : #{err}" unless ok
+    Log kLogWarn, "fenêtre : MIDI : #{err}" if not ok and Log
     if ok
       attente_midi = true
       tour_envoi = tour
@@ -377,8 +396,12 @@ disposer_connexions = (nports, l, h) ->
       -- fil audio : une relecture retardataire annulerait le clic local.
       -- Au-delà de ~2 s (40 × 50 ms), on accepte l'état frais.
       if not apprentissage and e.seq != seq_midi
-        frais = normaliser_midi midi.etat!, e
-        en_attente = attente_midi and not memes_reglages(frais, mc) and tour - tour_envoi <= 40
+        frais, erreur_midi = lire_etat_midi e
+        if erreur_midi
+          message_midi = erreur_midi
+        elseif message_midi == "État MIDI illisible"
+          message_midi = nil
+        en_attente = not erreur_midi and attente_midi and not memes_reglages(frais, mc) and tour - tour_envoi <= 40
         unless en_attente
           -- Soit notre envoi est publié, soit le délai d'attente est dépassé.
           mc = frais
@@ -484,8 +507,9 @@ disposer_connexions = (nports, l, h) ->
         for i = 1, visibles
           a = mc.associations[i]
           ui\ligne ligne, 5
-          ui\texte "c#{a.canal and modele.canal_texte(a.canal) or '*'} CC#{a.cc}"
-          if ui\bouton "Cible #{CIBLES_COURTES[a.cible] or modele.cible_midi[a.cible] or a.cible}"
+          canal = a.canal and "c#{modele.canal_texte a.canal}" or modele.canal_texte(nil)
+          ui\texte "#{canal} CC#{a.cc}"
+          if ui\bouton "Cible #{modele.cible_midi_court[a.cible] or modele.cible_midi[a.cible] or a.cible}"
             a.cible = cible_suivante a.cible
             if a.cible == "gain"
               a.division or= 1
@@ -530,7 +554,7 @@ disposer_connexions = (nports, l, h) ->
               message_midi = "Limite : #{MAX_ASSOCIATIONS} associations"
             else
               armer {nouveau: true}, e.dernier_controle
-        if ui\bouton "Cible #{CIBLES_COURTES[cible_apprentissage] or modele.cible_midi[cible_apprentissage] or cible_apprentissage}"
+        if ui\bouton "Cible #{modele.cible_midi_court[cible_apprentissage] or modele.cible_midi[cible_apprentissage] or cible_apprentissage}"
           cible_apprentissage = cible_suivante cible_apprentissage
         if message_midi
           ui\texte message_midi
@@ -642,9 +666,14 @@ disposer_connexions = (nports, l, h) ->
       organum.panique! if ui\bouton "Panique"
       if midi and ui\bouton "MIDI"
         mode = "midi"
-        mc = normaliser_midi midi.etat!, e
+        appel_ok = true
+        mc, erreur_midi = lire_etat_midi e
+        if erreur_midi
+          message_midi = erreur_midi
+          appel_ok = false
         seq_midi = e.seq
-        apprentissage, message_midi, attente_midi = nil, nil, false
+        apprentissage, attente_midi = nil, false
+        message_midi = nil if appel_ok
         seq = nil
 
       -- Combinaisons : l'étape courante est enfoncée.

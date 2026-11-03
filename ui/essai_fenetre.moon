@@ -37,7 +37,16 @@ for ci = 1, #noms_claviers
   etat.divisions[#etat.divisions + 1] = div
 
 organum = {}
-organum.etat = -> etat
+-- L'activité simulée s'éteint après quelques secondes pour exercer le
+-- redessin d'extinction (condition actifs != seq_actifs) ; ACTIVITE_SECONDES
+-- règle le délai, une valeur <= 0 la garde indéfiniment.
+debut_activite = os.time!
+duree_activite = tonumber(os.getenv "ACTIVITE_SECONDES") or 5
+organum.etat = ->
+  if duree_activite > 0 and etat.canaux_actifs != 0 and os.time! - debut_activite >= duree_activite
+    etat.canaux_actifs = 0
+    print "activité éteinte"
+  etat
 
 bump = ->
   etat.seq = etat.seq + 1
