@@ -115,6 +115,16 @@ la période fragmente les transferts. En cas de hachures persistantes,
 monter `ORGANUM_PERIODE` à 1024 (les `xruns` doivent cesser de croître), ou
 régler le quantum PipeWire à une valeur au moins égale.
 
+Pour le périphérique `default`, Organum définit lui-même
+`PIPEWIRE_LATENCY=<période>/<taux>` avant d'ouvrir le PCM, si l'utilisateur
+ne l'a pas déjà fournie. Le plugin ALSA de PipeWire lit cette variable à
+l'ouverture : elle aligne sa période interne sur celle d'Organum et évite
+un flux à 600/48000 alors que le programme écrit par blocs de 512 ou 1024
+trames. Le réglage est sans effet sur `hw:C,D` (accès direct ALSA) ; une
+valeur explicite de `PIPEWIRE_LATENCY` reste prioritaire. La latence du
+tampon libasound demandée à ALSA est par ailleurs `période × nb_periodes`
+(au lieu d'une valeur fixe de 50 ms).
+
 La priorité 70 est volontairement **inférieure** à celle du fil de PipeWire
 (environ 88) : le serveur audio doit pouvoir interrompre organum pour
 livrer le son à temps. Ne pas la relever au-dessus de PipeWire.
@@ -126,12 +136,22 @@ livrer le son à temps. Ne pas la relever au-dessus de PipeWire.
 | `ORGANUM_FENETRE` | auto | `non` : pas de fenêtre native ; `x11` ou `wayland` : impose le protocole |
 | `ORGANUM_PERIODE` | `512` | Taille de période audio (trames) |
 | `ORGANUM_TAUX` | `48000` | Fréquence d'échantillonnage |
+| `PIPEWIRE_LATENCY` | `ORGANUM_PERIODE/ORGANUM_TAUX` | Latence du plugin PipeWire, définie automatiquement pour `default` si absente ; une valeur fournie n'est jamais remplacée |
 | `ORGANUM_PERIPHERIQUE` | `default` | Périphérique ALSA |
+| `ORGANUM_LIMITEUR` | `oui` | `non` : désactive le limiteur de sortie (diagnostic seulement) |
 | `ORGANUM_LIBASOUND` | auto | Bibliothèque libasound à charger : fichier `.so` ou répertoire le contenant |
 | `ORGANUM_VOLUME` | auto | Outil de volume : `wpctl`, `pactl` ou `amixer` ; `aucun` désactive la recherche |
 | `ORGANUM_AMIXER_CONTROLE` | `Master` | Contrôle ALSA utilisé avec `amixer` |
 | `ORGANUM_ETAT` | `~/.config/organum/etat.json` | Registration et combinaisons |
 | `ORGANUM_CONFIG_MIDI` | `~/.config/organum/midi.json` | Associations MIDI |
+
+Le limiteur de sortie est actif par défaut. Les pilotes audio convertissent
+les échantillons flottants en entiers et **écrêtent dur** au-delà de 1.0 :
+sans limiteur, un accord dense dont la somme des jeux dépasse cette valeur
+sature et « craque ». Le limiteur, de seuil 0.8, ne réduit le gain que dans
+ce cas et reste transparent pour une note seule. `ORGANUM_LIMITEUR=non` le
+désactive, ce qui n'est utile que pour mesurer la sortie brute ou comparer
+un enregistrement ; ne pas l'utiliser en jeu normal.
 
 Sur NixOS et Guix, libasound se trouve souvent uniquement dans le magasin
 (`/nix/store`) et le chargeur dynamique ne sait pas le trouver sans cache

@@ -125,3 +125,12 @@ o/$(MODE)/tool/organum/injection_alsa.dbg:				\
 		$(CRT)							\
 		$(APE_NO_MODIFY_SELF)
 	@$(APELINK)
+
+# Vérifie la boucle d'écriture libasound et l'alignement PIPEWIRE_LATENCY.
+o/$(MODE)/tool/organum/ecriture_alsa.o: private CFLAGS += -Wno-error
+o/$(MODE)/tool/organum/ecriture_alsa.dbg:				\
+		$(TOOL_ORGANUM_TEST_DEPS)				\
+		o/$(MODE)/tool/organum/ecriture_alsa.o			\
+		$(CRT)							\
+		$(APE_NO_MODIFY_SELF)
+	@$(APELINK)

@@ -7,6 +7,8 @@
 
 #include <stddef.h>
 
+#include "../audio.h"
+
 /* Construit « répertoire/nom » sans slash final redoublé. Renvoie 0 si le
    chemin ne tient pas dans le tampon (troncature). */
 int alsa_chemin_dans_repertoire(char *chemin, size_t taille,
@@ -28,5 +30,25 @@ struct alsa_systeme {
 };
 
 void alsa_audio_injecter_systeme(const struct alsa_systeme *systeme);
+
+/* Fonctions libasound utilisées par la boucle d'écriture, remplaçables par
+   les tests. En production, l'injection vaut NULL et les symboles réellement
+   chargés servent. Les signatures évitent les types ALSA internes. */
+struct alsa_libasound {
+	long (*pcm_writei)(void *, const void *, unsigned long);
+	int (*pcm_wait)(void *, int);
+	int (*pcm_recover)(void *, int, int);
+};
+
+void alsa_audio_injecter_libasound(const struct alsa_libasound *systeme);
+
+/* Contexte factice du chemin libasound pour les tests d'écriture (aucun PCM
+   ouvert). fmt : 0 = S16_LE, 1 = S32_LE, 2 = FLOAT_LE. */
+audio_t *alsa_audio_creer_pour_test(int canaux, int periode, int fmt);
+
+/* Aligne PIPEWIRE_LATENCY sur « periode/taux » pour le PCM « default ».
+   Renvoie 1 si la variable a été définie, 0 sinon (déjà définie, autre PCM,
+   paramètres invalides). */
+int alsa_configurer_latence_pipewire(const char *nom, int periode, int taux);
 
 #endif

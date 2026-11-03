@@ -32,6 +32,10 @@ echo "== test injection open/fcntl du chemin ioctl"
 make -C "$COSMO" -j"$JOBS" m= o//tool/organum/injection_alsa
 "$COSMO/o//tool/organum/injection_alsa"
 
+echo "== test boucle d'écriture ALSA et latence PipeWire"
+make -C "$COSMO" -j"$JOBS" m= o//tool/organum/ecriture_alsa
+"$COSMO/o//tool/organum/ecriture_alsa"
+
 echo "== test énumération et abonnements des ports MIDI"
 make -C "$COSMO" -j"$JOBS" m= o//tool/organum/ports_midi
 "$COSMO/o//tool/organum/ports_midi"
