@@ -108,6 +108,15 @@ o/$(MODE)/tool/organum/chemins_alsa.dbg:					\
 		$(APE_NO_MODIFY_SELF)
 	@$(APELINK)
 
+# Vérifie l'énumération des ports MIDI et les abonnements, sans séquenceur.
+o/$(MODE)/tool/organum/ports_midi.o: private CFLAGS += -Wno-error
+o/$(MODE)/tool/organum/ports_midi.dbg:					\
+		$(TOOL_ORGANUM_TEST_DEPS)				\
+		o/$(MODE)/tool/organum/ports_midi.o			\
+		$(CRT)							\
+		$(APE_NO_MODIFY_SELF)
+	@$(APELINK)
+
 # Vérifie les échecs open/fcntl du chemin ioctl, sans matériel.
 o/$(MODE)/tool/organum/injection_alsa.o: private CFLAGS += -Wno-error
 o/$(MODE)/tool/organum/injection_alsa.dbg:				\

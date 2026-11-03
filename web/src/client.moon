@@ -16,11 +16,23 @@ JS = [[
 
   var etatReseau = false;
   var etatAeolus = false;
-  var LIBELLES_ETAT = {
-    vert: 'Connecté et synchronisé',
-    orange: 'Connecté, non synchronisé',
-    rouge: 'Déconnecté'
+  // Libellés injectés par page.moon depuis modele.ETATS ; repli sur les
+  // chaînes historiques si les attributs manquent.
+  var ETATS_DEFAUT = {
+    vert: { libelle: 'Connecté et synchronisé', title: 'Connecté et synchronisé' },
+    orange: { libelle: 'Connecté, non synchronisé', title: 'Connecté, non synchronisé' },
+    rouge: { libelle: 'Déconnecté', title: 'Déconnecté' }
   };
+  var LIBELLES_ETAT = {};
+  ['vert', 'orange', 'rouge'].forEach(function (etat) {
+    var defaut = ETATS_DEFAUT[etat];
+    var libelle = statusDisplay && statusDisplay.getAttribute('data-libelle-' + etat);
+    var titre = statusDisplay && statusDisplay.getAttribute('data-title-' + etat);
+    LIBELLES_ETAT[etat] = {
+      libelle: libelle || defaut.libelle,
+      title: titre || libelle || defaut.title
+    };
+  });
 
   var state = { volume: 50, muted: false };
   var revision = 0;
@@ -74,13 +86,13 @@ JS = [[
   function majPuceEtat() {
     var etat = !etatReseau ? 'rouge' : (etatAeolus ? 'vert' : 'orange');
     var classe = 'etat-' + etat;
-    var libelle = LIBELLES_ETAT[etat] || LIBELLES_ETAT.rouge;
+    var info = LIBELLES_ETAT[etat] || LIBELLES_ETAT.rouge;
     statusDisplay.classList.remove('etat-vert', 'etat-orange', 'etat-rouge');
     statusDisplay.classList.add(classe);
-    statusDisplay.title = libelle;
+    statusDisplay.title = info.title;
     var texte = statusDisplay.querySelector('.sr-only');
-    if (texte && texte.textContent !== libelle) {
-      texte.textContent = libelle;
+    if (texte && texte.textContent !== info.libelle) {
+      texte.textContent = info.libelle;
     }
   }
 

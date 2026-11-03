@@ -5,27 +5,48 @@
 --
 --   lancer = require "fenetre"
 --   lancer organum, nk, {titre:, largeur:, hauteur:, continuer: -> bool,
---     volume: {lire: -> v, regler: (v) ->}}
+--     volume: {lire: -> v, regler: (v) ->},
+--     midi: {etat: -> cfg, appliquer: (cfg) ->, enregistrer: (cfg) ->}}
 --
 -- volume (facultatif) : volume du système, 0 à 100, comme le curseur de la
 -- page web ; à défaut, le curseur règle le volume interne du moteur.
+--
+-- midi (facultatif) : active le panneau MIDI (bouton « MIDI » dans la barre
+-- de réglages). etat renvoie la configuration au format d'etat_midi
+-- (divisions[].canaux, controle, expression, associations), appliquer
+-- l'envoie au moteur et enregistrer l'écrit dans midi.json ; sans
+-- cette option, le bouton et le panneau sont absents. Le panneau remplace
+-- la console et tient dans la fenêtre, sans défilement : si la place manque
+-- à la police plancher, seule une partie des associations est affichée (le
+-- nombre de celles qui restent cachées est indiqué). Chaque bouton de canal
+-- s'allume sur l'activité MIDI récente (ui\etat : vert pour l'activité, bleu
+-- pour la sélection). « Connexions » ouvre la liste des ports du séquenceur
+-- (organum.midi_ports) et permet de connecter/déconnecter une source.
 --
 -- Disposition en console : un clavier par colonne. Tout est calculé pour
 -- tenir dans la fenêtre, sans défilement : hauteur des lignes et taille de
 -- police suivent la taille de la fenêtre (agrandie ou maximisée, l'interface
 -- grossit au lieu de seulement s'étirer).
 
--- Abréviation d'un clavier pour les accouplements (P+I, I+II…), comme la page web.
-abrege = (nom) ->
-  nom\match("^[Mm]anual%s+(%S+)$") or (nom\match("^[Pp]ed") and "P") or nom
+-- Présentation partagée avec la page web (modele.moon) : abréviations,
+-- noms de jeux, canaux et libellés d'associations ont une seule source.
+modele = require "modele"
 
-nom_jeu = (jeu) -> (jeu.nom\gsub "\n", " ")
+-- Libellés courts des cibles d'association pour la colonne étroite du panneau
+-- natif. modele.cible_midi fournit les libellés longs partagés avec la page
+-- web (« Réverbération » ne tient pas ici). À terme, modele.moon devrait
+-- exposer aussi une variante courte ; d'ici là ces libellés sont locaux.
+CIBLES_COURTES = {volume: "Vol.", reverb: "Rév.", gain: "Gain", aucune: "Aucune"}
 
 -- Marges de Nuklear (style par défaut) : intervalle entre lignes, marge de
 -- la fenêtre, marge et bordure des groupes.
 ESPACE, MARGE, MARGE_GROUPE = 4, 4, 6
 -- Rapport hauteur de ligne / taille de police, et bornes de la police.
 LIGNE_POLICE, POLICE_MIN, POLICE_MAX = 1.25, 10, 64
+-- Identique à MAX_ASSOCIATIONS de cosmo/lorganum.c (#define, 16) : au-delà,
+-- le moteur refuse la liste. init.moon n'expose pas cette valeur dans l'état
+-- partagé ; garder les deux constantes synchronisées.
+MAX_ASSOCIATIONS = 16
 
 -- Un curseur ne renvoie une commande que si l'utilisateur l'a bougé : la
 -- valeur rendue par Nuklear (flottant 32 bits) diffère sinon à peine de l'état.
@@ -60,6 +81,91 @@ disposer = (e, l, h, rapport) ->
         meilleure = {police: math.max(taille, POLICE_MIN), :ligne, :sous, :lignes_combi, rangs: math.ceil(maxjeux / sous)}
   meilleure
 
+-- Disposition du panneau MIDI : en-tête sur deux lignes (navigation, puis
+-- compteurs), une ligne par clavier, contrôle, expression, actions, puis une
+-- ligne par association. assoc_max indique combien d'associations afficher ;
+-- compte dit si la ligne « … n non affichée(s) » a une place ; trop_petit
+-- signale que même les lignes de base ne tiennent pas (on n'affiche alors
+-- qu'une ligne d'avertissement).
+disposer_midi = (e, cfg, l, h) ->
+  ndiv = math.max 1, #e.divisions
+  nassoc = #cfg.associations
+  base = ndiv + 5
+  rows = base + nassoc
+  fixe = 2 * MARGE + ESPACE * (rows + 1)
+  ligne = math.floor (h - fixe) / rows
+  par_hauteur = ligne / LIGNE_POLICE
+  -- 17 colonnes : nom du clavier, puis les canaux 1 à 16.
+  case = (l - 2 * MARGE) / 17 - ESPACE
+  par_largeur = case / 1.2
+  -- Lignes d'association et d'actions : 5 colonnes de boutons. Sans cette
+  -- borne, « Apprendre », « Cible Gain » ou « Tout effacer » déborderaient
+  -- de leur case quand la fenêtre est agrandie.
+  case_action = (l - 2 * MARGE) / 5 - ESPACE
+  par_bouton = case_action / 5.5
+  police = math.floor math.min(par_hauteur, par_largeur, par_bouton, POLICE_MAX)
+  assoc_max, compte, trop_petit = nassoc, false, false
+  if police < POLICE_MIN
+    police = POLICE_MIN
+    ligne = math.ceil(police * LIGNE_POLICE)
+    dispo = h - 2 * MARGE - ESPACE
+    -- Hauteur d'une ligne : ligne pixels plus ESPACE, la première marge
+    -- (ESPACE) étant déjà retirée de dispo.
+    rows_fit = math.floor dispo / (ligne + ESPACE)
+    if rows_fit < base
+      -- Même les lignes de base débordent : une seule ligne, avec Retour.
+      trop_petit = true
+      assoc_max = 0
+    else
+      place = rows_fit - base
+      if nassoc > 0 and place < nassoc and place >= 1
+        -- Réserver une ligne au compte des associations masquées.
+        assoc_max = place - 1
+        compte = true
+      else
+        assoc_max = math.min nassoc, place
+  else
+    ligne = math.max 1, ligne
+  {police: police, :ligne, :assoc_max, :compte, :trop_petit}
+
+-- Disposition de l'écran Connexions : en-tête, titres de colonnes, une ligne
+-- par port, puis un pied (message d'erreur ou compteur de ports masqués).
+-- Même logique que disposer_midi : tout doit tenir sans défilement.
+disposer_connexions = (nports, l, h) ->
+  base = 3
+  rows = base + nports
+  fixe = 2 * MARGE + ESPACE * (rows + 1)
+  ligne = math.floor (h - fixe) / rows
+  par_hauteur = ligne / LIGNE_POLICE
+  -- Trois colonnes : libellé du port, état, action. Le libellé (« 24:0 —
+  -- Clavier USB ») est long ; l'en-tête a quatre colonnes plus étroites et
+  -- porte « Connexions MIDI ». Borner la police sur les deux largeurs, sinon
+  -- le titre et le libellé déborderaient, surtout dans le harnais agrandi.
+  case = (l - 2 * MARGE) / 3 - ESPACE
+  case_entete = (l - 2 * MARGE) / 4 - ESPACE
+  par_largeur = math.min case / 10, case_entete / 8
+  police = math.floor math.min(par_hauteur, par_largeur, POLICE_MAX)
+  visibles, compte, trop_petit = nports, false, false
+  if police < POLICE_MIN
+    police = POLICE_MIN
+    ligne = math.ceil(police * LIGNE_POLICE)
+    dispo = h - 2 * MARGE - ESPACE
+    rows_fit = math.floor dispo / (ligne + ESPACE)
+    if rows_fit < base
+      trop_petit = true
+      visibles = 0
+    else
+      place = rows_fit - base
+      if nports > place
+        -- Réserver une ligne au compte des ports masqués.
+        visibles = place > 0 and place - 1 or 0
+        compte = true
+      else
+        visibles = nports
+  else
+    ligne = math.max 1, ligne
+  {police: police, :ligne, :visibles, :compte, :trop_petit, colonne: case}
+
 (organum, nk, options = {}) ->
   -- Police : Libertinus Serif (OFL), réduite au latin, embarquée dans le zip.
   -- ORGANUM_POLICE : autre fichier .ttf, pour essayer une police.
@@ -70,12 +176,168 @@ disposer = (e, l, h, rapport) ->
   return nil, err unless ui
   continuer = options.continuer or -> true
   police, seq = 20, nil
+  midi = options.midi
+  mode = "console"  -- "console", "midi" ou "connexions" ; les deux panneaux remplacent la console
+  mc = nil           -- configuration MIDI locale, même forme qu'etat_midi
+  cible_apprentissage = "volume"
+  -- Apprentissage : {i: n} refait l'association n, {nouveau: true} attend un
+  -- contrôle pour en créer une. dernier_vu est le dernier contrôle publié au
+  -- moment où l'on arme, afin d'attendre le suivant (comme la page web).
+  apprentissage, dernier_vu, message_midi = nil, nil, nil
+  seq_midi, attente_midi, tour_envoi = nil, false, 0
+  -- Activité MIDI : canaux_actifs est hors seq (éphémère, 250 ms). On garde le
+  -- dernier masque dessiné pour réveiller la boucle quand il change, sans
+  -- relire la configuration ni réinitialiser la saisie.
+  seq_actifs = nil
+  -- Écran Connexions : liste relue à l'entrée, après une action, par le bouton
+  -- « Rafraîchir » et périodiquement (voir rafraichir_ports).
+  ports, message_ports, tour_ports = {}, nil, -100
+  tour = 0
+
+  cibles = {"volume", "reverb", "gain"}
+  cible_suivante = (c) ->
+    for i, v in ipairs cibles
+      return cibles[i % #cibles + 1] if v == c
+    "volume"
+  dedans = (liste, c) ->
+    for v in *liste
+      return true if v == c
+    false
+  -- Tronque un libellé à la largeur d'une colonne, avec des points de
+  -- suspension : Nuklear ne coupe pas le texte au bord du widget, il
+  -- déborderait sur la colonne suivante.
+  tronquer = (texte, largeur) ->
+    return texte if ui\largeur_texte(texte) <= largeur
+    n = utf8.len(texte) or #texte
+    for i = n - 1, 0, -1
+      fin = utf8.offset texte, i + 1
+      essai = if fin then texte\sub(1, fin - 1) .. "…" else "…"
+      return essai if ui\largeur_texte(essai) <= largeur
+    "…"
+  basculer = (liste, c) ->
+    for i, v in ipairs liste
+      if v == c
+        table.remove liste, i
+        return
+    table.insert liste, c
+  copie_controle = (d) ->
+    d and {canal: d.canal, cc: d.cc, valeur: d.valeur}
+  meme_controle = (a, b) ->
+    return true if not a and not b
+    return false unless a and b
+    a.canal == b.canal and a.cc == b.cc and a.valeur == b.valeur
+  canaux_egaux = (a, b) ->
+    a or= {}
+    b or= {}
+    return false if #a != #b
+    for i = 1, #a
+      return false if a[i] != b[i]
+    true
+  associations_egales = (a, b) ->
+    a or= {}
+    b or= {}
+    return false if #a != #b
+    for i = 1, #a
+      x, y = a[i], b[i]
+      return false unless type(x) == "table" and type(y) == "table"
+      return false unless x.cc == y.cc
+      return false unless (x.canal or 0) == (y.canal or 0)
+      return false unless (x.cible or "aucune") == (y.cible or "aucune")
+      return false unless (x.division or 1) == (y.division or 1)
+    true
+  memes_reglages = (a, b) ->
+    return false unless type(a) == "table" and type(b) == "table"
+    ad, bd = a.divisions or {}, b.divisions or {}
+    return false if #ad != #bd
+    for i = 1, #ad
+      return false unless canaux_egaux ad[i].canaux, bd[i].canaux
+    return false unless canaux_egaux a.controle, b.controle
+    return false unless canaux_egaux a.expression, b.expression
+    associations_egales a.associations, b.associations
+  normaliser_midi = (cfg, e) ->
+    cfg or= {}
+    cfg.divisions = {} unless type(cfg.divisions) == "table"
+    for d = 1, #e.divisions
+      cd = cfg.divisions[d]
+      unless type(cd) == "table"
+        cd = {nom: e.divisions[d].nom, canaux: {}}
+        cfg.divisions[d] = cd
+      cd.nom = e.divisions[d].nom unless cd.nom
+      cd.canaux = {} unless type(cd.canaux) == "table"
+    for k in *{"controle", "expression", "associations"}
+      cfg[k] = {} unless type(cfg[k]) == "table"
+    cfg
+  -- Armer l'apprentissage : on note le contrôle déjà reçu, le prochain
+  -- changement de dernier_controle (publié par le fil audio, qui incrémente
+  -- seq) déclenche la capture.
+  armer = (quoi, dernier) ->
+    apprentissage = quoi
+    dernier_vu = copie_controle dernier
+    message_midi = nil
+  -- Chaque changement part au moteur puis dans midi.json (callbacks
+  -- d'init.moon) ; on force un redessin sans attendre le fil audio.
+  envoyer_midi = (cfg) ->
+    ok, err = pcall ->
+      applique, raison = midi.appliquer cfg
+      error raison unless applique
+      midi.enregistrer cfg
+    Log kLogWarn, "fenêtre : MIDI : #{err}" unless ok
+    if ok
+      attente_midi = true
+      tour_envoi = tour
+    seq = nil
+  -- Libellés d'état de l'écran Connexions (modele.etat_port renvoie la clé).
+  ETATS_PORTS =
+    organum: "Organum"
+    connecte: "Connecté"
+    destination: "Destination"
+    disponible: "Disponible"
+
+  -- Ports du séquenceur. midi_ports() énumère les ports ALSA : on ne l'appelle
+  -- pas à chaque image. La liste est relue à l'entrée de l'écran, après chaque
+  -- connexion, au clic sur « Rafraîchir » et toutes les ~2 s (40 × 50 ms), ce
+  -- qui suffit à voir apparaître un port sans coût perceptible. En cas
+  -- d'échec la liste est vide et un message court reste affiché.
+  rafraichir_ports = ->
+    ok, liste = pcall organum.midi_ports
+    if ok and type(liste) == "table"
+      ports = liste
+      message_ports = nil
+    else
+      ports = {}
+      message_ports = "Ports MIDI indisponibles"
+      Log kLogWarn, "fenêtre : ports MIDI : #{liste}" if Log
+
+  -- Abonne ou désabonne une source, puis relit la liste. Les erreurs du
+  -- moteur (port disparu, 0:1 refusé…) deviennent un message, pas une
+  -- exception : la fenêtre reste utilisable.
+  agir_port = (p) ->
+    action = p.connecte and organum.midi_deconnecter or organum.midi_connecter
+    ok, err = pcall action, p.client, p.port
+    rafraichir_ports!
+    unless ok
+      detail = tostring(err)\match(": ([^:]+)$") or tostring(err)
+      message_ports = "Échec : #{detail}"
+    seq = nil
+
+  afficher_canaux = (titre, liste, ligne, actifs) ->
+    ui\ligne ligne, 17
+    ui\texte titre
+    for c = 1, 16
+      selection = dedans liste, c
+      allume = ((actifs or 0) >> (c - 1)) & 1 == 1
+      -- ui\etat distingue la sélection (bleu) de l'activité (vert) ; seule
+      -- une interaction utilisateur modifie la sélection.
+      nouvelle = ui\etat tostring(c), selection, allume
+      if nouvelle != selection
+        basculer liste, c
+        envoyer_midi mc
 
   -- Volume du système : lu par un outil externe, donc relu toutes les
   -- 20 itérations (environ une seconde) ; pendant un glissement, envoyé au
   -- plus une itération sur trois, puis à sa valeur finale.
   systeme = options.volume
-  vol_sys, a_envoyer, tour, envoye_au = nil, nil, 0, -10
+  vol_sys, a_envoyer, envoye_au = nil, nil, -10
   lire_sys = ->
     v = systeme.lire!
     v and v / 100
@@ -94,15 +356,269 @@ disposer = (e, l, h, rapport) ->
         vol_sys = v or vol_sys
       vol_sys or= lire_sys!
     e = organum.etat!
-    continue unless sale or e.seq != seq
+    -- Les ports MIDI peuvent apparaître ou disparaître sans incrémenter seq :
+    -- en Connexions, relire la liste toutes les ~2 s (40 × 50 ms) suffit et
+    -- évite un appel à midi_ports() par image.
+    if mode == "connexions" and tour - tour_ports >= 40
+      rafraichir_ports!
+      tour_ports = tour
+      sale = true
+    -- canaux_actifs est éphémère et hors seq : c'est la seule comparaison qui
+    -- réveille le rendu pour éteindre un canal après 250 ms d'inactivité.
+    actifs = e.canaux_actifs or 0
+    continue unless sale or e.seq != seq or actifs != seq_actifs
     seq = e.seq
+    seq_actifs = actifs
+
+    if mode == "midi" and midi and mc
+      -- Relecture de l'état frais quand il a changé (page web, autre client),
+      -- sauf pendant un apprentissage — pour ne pas écraser la saisie en
+      -- cours — et tant que notre propre envoi n'est pas encore publié par le
+      -- fil audio : une relecture retardataire annulerait le clic local.
+      -- Au-delà de ~2 s (40 × 50 ms), on accepte l'état frais.
+      if not apprentissage and e.seq != seq_midi
+        frais = normaliser_midi midi.etat!, e
+        en_attente = attente_midi and not memes_reglages(frais, mc) and tour - tour_envoi <= 40
+        unless en_attente
+          -- Soit notre envoi est publié, soit le délai d'attente est dépassé.
+          mc = frais
+          seq_midi = e.seq
+          attente_midi = false
+
+      -- Capture du prochain contrôle. On compare à dernier_vu (contrôle déjà
+      -- reçu à l'armement) ; tout changement de dernier_controle incrémente
+      -- seq dans cosmo/lorganum.c, donc la boucle se réveille bien.
+      if apprentissage and not meme_controle(e.dernier_controle, dernier_vu)
+        der = e.dernier_controle
+        dernier_vu = copie_controle der
+        if der
+          quoi = apprentissage
+          if quoi.nouveau and #mc.associations >= MAX_ASSOCIATIONS
+            message_midi = "Limite : #{MAX_ASSOCIATIONS} associations"
+            apprentissage = nil
+          else
+            doublon = false
+            for j, x in ipairs mc.associations
+              if quoi.i != j and x.cc == der.cc and (x.canal == der.canal or not x.canal)
+                doublon = true
+                break
+            if doublon
+              message_midi = "CC#{der.cc} déjà associé (c#{der.canal})"
+            elseif quoi.nouveau
+              a = {canal: der.canal, cc: der.cc, cible: cible_apprentissage}
+              a.division = 1 if a.cible == "gain"
+              table.insert mc.associations, a
+              apprentissage, message_midi = nil, nil
+              envoyer_midi mc
+            else
+              a = mc.associations[quoi.i]
+              if a
+                a.canal, a.cc = der.canal, der.cc
+                a.division or= 1 if a.cible == "gain"
+                apprentissage, message_midi = nil, nil
+                envoyer_midi mc
+      l, h = ui\taille!
+      p = disposer_midi e, mc, l, h
+      if p.police != police
+        ui\police p.police
+        police = p.police
+      ligne = p.ligne
+      if p.trop_petit
+        -- Même les lignes de base ne tiennent pas : une ligne suffit, sans
+        -- débordement, et le compte des associations n'est pas affiché.
+        if ui\debut "", 0, 0, l, h
+          ui\ligne ligne, 2
+          if ui\bouton "Retour"
+            mode = "console"
+            apprentissage, message_midi = nil, nil
+            seq = nil
+          ui\texte "Fenêtre trop petite pour le panneau MIDI"
+          ui\fin!
+          ui\dessiner 30, 30, 30
+        continue
+      if ui\debut "", 0, 0, l, h
+        -- En-tête sur deux lignes : la première porte les boutons assez
+        -- larges pour ne pas tronquer « Connexions », la seconde les
+        -- compteurs et le dernier contrôle reçu.
+        ui\ligne ligne, 4
+        if ui\bouton "Retour"
+          mode = "console"
+          apprentissage, message_midi = nil, nil
+          seq = nil
+        if ui\bouton "Connexions"
+          mode = "connexions"
+          rafraichir_ports!
+          tour_ports = tour
+          seq = nil
+        ui\texte "MIDI #{e.midi or '?'}"
+        ui\texte ""
+        ui\ligne ligne, 2
+        ui\texte "#{#mc.associations} assoc."
+        if der = e.dernier_controle
+          ui\texte "c#{der.canal} CC#{der.cc}=#{der.valeur}", "droite"
+        else
+          ui\texte "aucun CC", "droite"
+
+        -- Canaux 1-16 de chaque clavier, puis contrôle et expression. Les
+        -- boutons s'allument sur l'activité MIDI (canaux_actifs) sans changer
+        -- la sélection : ui\etat sépare les deux notions.
+        mc.divisions or= {}
+        for d = 1, #e.divisions
+          cd = mc.divisions[d]
+          unless cd
+            cd = {nom: e.divisions[d].nom, canaux: {}}
+            mc.divisions[d] = cd
+          cd.canaux = {} unless type(cd.canaux) == "table"
+          -- Noms abrégés (P, I, II…) : la colonne du nom est étroite.
+          afficher_canaux modele.abrege(e.divisions[d].nom), cd.canaux, ligne, actifs
+        mc.controle = {} unless type(mc.controle) == "table"
+        mc.expression = {} unless type(mc.expression) == "table"
+        mc.associations = {} unless type(mc.associations) == "table"
+        afficher_canaux "Ctrl", mc.controle, ligne, actifs
+        afficher_canaux "Expr", mc.expression, ligne, actifs
+
+        -- Associations CC : cible et division se changent par clic ; chaque
+        -- ligne peut réapprendre son CC/canal (attente du prochain contrôle).
+        visibles = math.min #mc.associations, p.assoc_max
+        suppression = nil
+        for i = 1, visibles
+          a = mc.associations[i]
+          ui\ligne ligne, 5
+          ui\texte "c#{a.canal and modele.canal_texte(a.canal) or '*'} CC#{a.cc}"
+          if ui\bouton "Cible #{CIBLES_COURTES[a.cible] or modele.cible_midi[a.cible] or a.cible}"
+            a.cible = cible_suivante a.cible
+            if a.cible == "gain"
+              a.division or= 1
+            else
+              a.division = nil
+            envoyer_midi mc
+          if a.cible == "gain"
+            if ui\bouton "Clav. #{a.division or 1}"
+              a.division = ((a.division or 1) % #e.divisions) + 1
+              envoyer_midi mc
+          else
+            ui\texte ""
+          if apprentissage and apprentissage.i == i
+            if ui\bouton "Annuler"
+              apprentissage, message_midi = nil, nil
+          else
+            if ui\bouton "Apprendre"
+              armer {i: i}, e.dernier_controle
+          if ui\bouton "Retirer"
+            suppression = i
+        if suppression
+          table.remove mc.associations, suppression
+          apprentissage, message_midi = nil, nil
+          envoyer_midi mc
+        cachees = #mc.associations - visibles
+        if p.compte and cachees > 0
+          ui\ligne ligne, 1
+          ui\texte "… #{cachees} association(s) non affichée(s) : agrandir la fenêtre"
+
+        -- Apprentissage du prochain contrôle. « Ajouter » arme la création
+        -- d'une association (elle n'est créée qu'à l'arrivée d'un contrôle,
+        -- jamais un CC 7 figé) ; « Apprendre » sur une ligne la réapprend.
+        -- Les deux partagent l'état d'attente, le refus des doublons et le
+        -- bouton d'annulation ; il n'y a donc pas deux chemins concurrents.
+        ui\ligne ligne, 4
+        if apprentissage and apprentissage.nouveau
+          if ui\bouton "Annuler"
+            apprentissage, message_midi = nil, nil
+        else
+          if ui\bouton "Ajouter"
+            if #mc.associations >= MAX_ASSOCIATIONS
+              message_midi = "Limite : #{MAX_ASSOCIATIONS} associations"
+            else
+              armer {nouveau: true}, e.dernier_controle
+        if ui\bouton "Cible #{CIBLES_COURTES[cible_apprentissage] or modele.cible_midi[cible_apprentissage] or cible_apprentissage}"
+          cible_apprentissage = cible_suivante cible_apprentissage
+        if message_midi
+          ui\texte message_midi
+        elseif apprentissage
+          ui\texte "En attente…"
+        else
+          ui\texte ""
+        if ui\bouton "Tout effacer"
+          if #mc.associations > 0
+            mc.associations = {}
+            apprentissage, message_midi = nil, nil
+            envoyer_midi mc
+        ui\fin!
+        ui\dessiner 30, 30, 30
+      continue
+
+    if mode == "connexions" and midi
+      l, h = ui\taille!
+      p = disposer_connexions #ports, l, h
+      if p.police != police
+        ui\police p.police
+        police = p.police
+      ligne = p.ligne
+      if p.trop_petit
+        -- Même l'en-tête ne tient pas : une seule ligne, avec Retour.
+        if ui\debut "", 0, 0, l, h
+          ui\ligne ligne, 2
+          if ui\bouton "Retour"
+            mode = "midi"
+            seq = nil
+          ui\texte "Fenêtre trop petite pour les connexions"
+          ui\fin!
+          ui\dessiner 30, 30, 30
+        continue
+      if ui\debut "", 0, 0, l, h
+        -- En-tête : retour, rafraîchissement manuel, titre, nombre de ports.
+        ui\ligne ligne, 4
+        if ui\bouton "Retour"
+          mode = "midi"
+          seq = nil
+        if ui\bouton "Rafraîchir"
+          rafraichir_ports!
+          tour_ports = tour
+          seq = nil
+        ui\texte "Connexions MIDI", "droite"
+        ui\texte "#{#ports} port(s)", "droite"
+        ui\ligne ligne, 3
+        ui\texte "Port"
+        ui\texte "État"
+        ui\texte "Action", "droite"
+
+        -- Une action seulement pour les sources réelles : ni Organum, ni les
+        -- destinations, ni 0:1 (port d'annonces du système, non déconnectable).
+        action = nil
+        for i = 1, math.min #ports, p.visibles
+          port = ports[i]
+          etat = modele.etat_port port
+          ui\ligne ligne, 3
+          ui\texte tronquer(modele.libelle_port(port), p.colonne - 3 * ESPACE)
+          ui\texte tronquer((ETATS_PORTS[etat] or etat), p.colonne - 3 * ESPACE)
+          peut = port.source and not port.organum and not (port.client == 0 and port.port == 1)
+          if peut
+            if ui\bouton (port.connecte and "Déconnecter" or "Connecter")
+              action = port
+          else
+            ui\texte "—", "droite"
+        -- Hors de la boucle : la liste peut être remplacée par le
+        -- rafraîchissement sans perturber l'itération en cours.
+        if action
+          agir_port action
+        cachees = #ports - math.min #ports, p.visibles
+        ui\ligne ligne, 1
+        if message_ports
+          ui\texte message_ports
+        elseif p.compte and cachees > 0
+          ui\texte "… #{cachees} port(s) non affiché(s) : agrandir la fenêtre"
+        else
+          ui\texte ""
+        ui\fin!
+        ui\dessiner 30, 30, 30
+      continue
 
     l, h = ui\taille!
     -- Rapport largeur/taille du plus long nom de jeu, à la police courante.
     plus_long = 0
     for d in *e.divisions
       for j in *d.jeux
-        plus_long = math.max plus_long, ui\largeur_texte nom_jeu j
+        plus_long = math.max plus_long, ui\largeur_texte modele.nom_jeu j
     p = disposer e, l, h, plus_long / police
     if p.police != police
       ui\police p.police
@@ -111,7 +627,7 @@ disposer = (e, l, h, rapport) ->
 
     if ui\debut "", 0, 0, l, h
       -- Réglages généraux
-      ui\ligne ligne, 6
+      ui\ligne ligne, (midi and 7 or 6)
       ui\texte "Volume", "droite"
       if systeme and vol_sys
         v = ui\curseur vol_sys, 0, 1, 0.01
@@ -124,6 +640,12 @@ disposer = (e, l, h, rapport) ->
       organum.reverb r if bouge e.reverb, r
       ui\texte ""
       organum.panique! if ui\bouton "Panique"
+      if midi and ui\bouton "MIDI"
+        mode = "midi"
+        mc = normaliser_midi midi.etat!, e
+        seq_midi = e.seq
+        apprentissage, message_midi, attente_midi = nil, nil, false
+        seq = nil
 
       -- Combinaisons : l'étape courante est enfoncée.
       ui\ligne ligne, math.ceil(e.netapes / p.lignes_combi)
@@ -145,7 +667,7 @@ disposer = (e, l, h, rapport) ->
             organum.jeu d, j, false for j = 1, #div.jeux
           ui\ligne ligne, p.sous
           for j, jeu in ipairs div.jeux
-            organum.jeu d, j, not jeu.actif if ui\choix(nom_jeu(jeu), jeu.actif) != jeu.actif
+            organum.jeu d, j, not jeu.actif if ui\choix(modele.nom_jeu(jeu), jeu.actif) != jeu.actif
           -- Lignes vides : les accouplements s'alignent en bas des colonnes.
           vides = p.rangs * p.sous - #div.jeux
           ui\texte "" for _ = 1, vides
@@ -153,7 +675,7 @@ disposer = (e, l, h, rapport) ->
             ui\ligne ligne, #div.liens
             for i, lien in ipairs div.liens
               cible = e.divisions[lien.division]
-              etiquette = "#{abrege div.nom}+#{abrege cible and cible.nom or '?'}"
+              etiquette = "#{modele.abrege div.nom}+#{modele.abrege cible and cible.nom or '?'}"
               organum.lien d, i, not lien.actif if ui\choix(etiquette, lien.actif) != lien.actif
           ui\groupe_fin!
     ui\fin!

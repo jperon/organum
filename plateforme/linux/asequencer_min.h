@@ -172,6 +172,10 @@ struct snd_seq_port_subscribe {
 #define SNDRV_SEQ_IOCTL_CREATE_PORT     _IOWR('S', 0x20, struct snd_seq_port_info)
 #define SNDRV_SEQ_IOCTL_GET_PORT_INFO   _IOWR('S', 0x22, struct snd_seq_port_info)
 #define SNDRV_SEQ_IOCTL_SUBSCRIBE_PORT  _IOW ('S', 0x30, struct snd_seq_port_subscribe)
+#define SNDRV_SEQ_IOCTL_UNSUBSCRIBE_PORT _IOW ('S', 0x31, struct snd_seq_port_subscribe)
+/* Valeur du noyau (include/uapi/sound/asequencer.h, Linux 5.17) : état
+   d'un abonnement précis, sans parcourir toute la table. */
+#define SNDRV_SEQ_IOCTL_GET_SUBSCRIPTION _IOWR('S', 0x50, struct snd_seq_port_subscribe)
 #define SNDRV_SEQ_IOCTL_QUERY_NEXT_CLIENT _IOWR('S', 0x51, struct snd_seq_client_info)
 #define SNDRV_SEQ_IOCTL_QUERY_NEXT_PORT _IOWR('S', 0x52, struct snd_seq_port_info)
 #define SNDRV_SEQ_PORT_CAP_NO_EXPORT    (1<<7)

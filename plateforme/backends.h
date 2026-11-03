@@ -21,6 +21,9 @@
   int p##_midi_connecter_depuis(midi_t *, int, int);                          \
   int p##_midi_adresse(midi_t *, int *, int *);                               \
   int p##_midi_connecter_tout(midi_t *);                                      \
+  int p##_midi_ports(midi_t *, struct midi_port *, int);                      \
+  int p##_midi_connecter(midi_t *, int, int);                                 \
+  int p##_midi_deconnecter(midi_t *, int, int);                               \
   void p##_midi_fermer(midi_t *);
 
 DECLARER_BACKEND(alsa)

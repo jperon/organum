@@ -252,6 +252,51 @@ static int ui_case(lua_State *L) {
   return 1;
 }
 
+// ui:etat(texte, selection, allume) → nouvelle sélection.
+//
+// Affiche un bouton-bascule qui porte deux notions distinctes :
+//   - `selection` est l'état choisi par l'utilisateur (comme ui:choix) ; il
+//     est dessiné avec l'accent bleu du style actif ;
+//   - `allume` est un état éphémère (par exemple l'activité MIDI d'un canal),
+//     dessiné en vert ambre uniquement quand le bouton n'est pas sélectionné.
+// Les deux ne se mélangent donc pas : sélectionné reste bleu, même si actif.
+//
+// La valeur renvoyée est la sélection APRÈS interaction, exactement comme
+// ui:choix : `allume` ne la modifie jamais. L'appelant compare le retour à
+// l'ancienne sélection pour détecter un clic (la primitive ne renvoie pas un
+// booléen « changé », afin de rester compatible avec le motif de ui:choix).
+static int ui_etat(lua_State *L) {
+  ui_t *u = luaL_checkudata(L, 1, "nk.ui");
+  const char *s = luaL_checkstring(L, 2);
+  int selection = lua_toboolean(L, 3);
+  int allume = lua_toboolean(L, 4);
+  struct nk_style_selectable *sel = &u->ctx->style.selectable;
+  int items = 0, couleurs = 0;
+
+  if (allume && !selection) {
+    // Vert : activité sans sélection utilisateur. Les trois états de la
+    // souris sont teintés pour que le survol ne fasse pas disparaître
+    // l'indication d'activité.
+    struct nk_color texte = nk_rgb(255, 255, 255);
+    if (nk_style_push_style_item(u->ctx, &sel->normal,
+                                nk_style_item_color(nk_rgb(22, 120, 60)))) items++;
+    if (nk_style_push_style_item(u->ctx, &sel->hover,
+                                nk_style_item_color(nk_rgb(30, 150, 75)))) items++;
+    if (nk_style_push_style_item(u->ctx, &sel->pressed,
+                                nk_style_item_color(nk_rgb(18, 100, 50)))) items++;
+    if (nk_style_push_color(u->ctx, &sel->text_normal, texte)) couleurs++;
+    if (nk_style_push_color(u->ctx, &sel->text_hover, texte)) couleurs++;
+    if (nk_style_push_color(u->ctx, &sel->text_pressed, texte)) couleurs++;
+  }
+
+  nk_selectable_label(u->ctx, s, NK_TEXT_CENTERED, &selection);
+
+  while (couleurs--) nk_style_pop_color(u->ctx);
+  while (items--) nk_style_pop_style_item(u->ctx);
+  lua_pushboolean(L, selection);
+  return 1;
+}
+
 static int ui_curseur(lua_State *L) {
   ui_t *u = luaL_checkudata(L, 1, "nk.ui");
   float v = (float)luaL_checknumber(L, 2);
@@ -304,6 +349,7 @@ static const struct luaL_Reg uifuncs[] = {
   {"texte", ui_texte},
   {"bouton", ui_bouton},
   {"choix", ui_choix},
+  {"etat", ui_etat},
   {"case", ui_case},
   {"curseur", ui_curseur},
   {"groupe_debut", ui_groupe_debut},

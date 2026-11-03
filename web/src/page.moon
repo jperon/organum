@@ -5,6 +5,7 @@
 h = require "html"
 style = require "style"
 client = require "client"
+modele = require "modele"
 
 escape = (s) ->
   s = tostring s
@@ -24,17 +25,14 @@ etat_jeu = (jeu) ->
   return "unknown" if jeu.on == nil
   jeu.on and "on" or "off"
 
--- Abréviation d'un clavier pour les accouplements : « Manual II » → II,
--- « Pedal » → P ; sinon le nom tel quel.
-abrege = (nom) ->
-  nom\match("^[Mm]anual%s+(%S+)$") or (nom\match("^[Pp]ed") and "P") or nom
+-- Abréviation d'un clavier pour les accouplements : voir modele.abrege.
 
 division_html = (di, div, divisions) ->
   d = tostring di
   liens = for i, l in ipairs div.links or {}
     cible = divisions[l.division + 1]
     continue unless cible
-    h.button class: "link", ["data-division"]: d, ["data-index"]: tostring(i - 1), ["data-state"]: (l.on and "on" or "off"), type: "button", title: "Accoupler #{escape cible.name} à #{escape div.name}", "#{abrege div.name}+#{abrege cible.name}"
+    h.button class: "link", ["data-division"]: d, ["data-index"]: tostring(i - 1), ["data-state"]: (l.on and "on" or "off"), type: "button", title: "Accoupler #{escape cible.name} à #{escape div.name}", "#{modele.abrege div.name}+#{modele.abrege cible.name}"
   btns = for i, jeu in ipairs div.stops
     h.button class: "stop", ["data-division"]: d, ["data-index"]: tostring(i - 1), ["data-state"]: etat_jeu(jeu), type: "button", display jeu.name
   gain = math.floor((tonumber(div.gain) or 0.5) * 100 + 0.5)
@@ -61,8 +59,8 @@ division_html = (di, div, divisions) ->
               h.label class: "volume-etiquette", ["for"]: "volume", "Volume",
               h.input type: "range", id: "volume", min: "0", max: "100", step: "1", value: "50", ["aria-valuetext"]: "50\u{00A0}%",
               h.span class: "value", id: "value", ["aria-hidden"]: "true", "50\u{00A0}%",
-              h.span class: "status etat-rouge", id: "status", role: "status", ["aria-live"]: "polite", ["aria-atomic"]: "true", title: "Déconnecté",
-                h.span class: "sr-only", "Déconnecté",
+              h.span class: "status #{modele.ETATS.rouge.classe}", id: "status", role: "status", ["aria-live"]: "polite", ["aria-atomic"]: "true", title: escape(modele.ETATS.rouge.title), ["data-libelle-vert"]: escape(modele.ETATS.vert.libelle), ["data-libelle-orange"]: escape(modele.ETATS.orange.libelle), ["data-libelle-rouge"]: escape(modele.ETATS.rouge.libelle), ["data-title-vert"]: escape(modele.ETATS.vert.title), ["data-title-orange"]: escape(modele.ETATS.orange.title), ["data-title-rouge"]: escape(modele.ETATS.rouge.title),
+                h.span class: "sr-only", escape(modele.ETATS.rouge.libelle),
               h.noscript h.span class: "etat-fallback", "Hors ligne",
             h.button type: "button", class: "btn mute", id: "mute", ["aria-pressed"]: "false", ["aria-label"]: "Couper le son", "Muet",
             h.div class: "combo", ["aria-label"]: "Combinaison",

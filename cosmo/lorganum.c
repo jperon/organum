@@ -93,17 +93,32 @@ struct etat {
   int taux;
 };
 
-static struct etat *g_etat;  // partagée avec les fils de requêtes
+// L'activité MIDI est hors de struct etat pour que la copie cohérente de
+// l_etat (memcpy sous seq) ne copie jamais d'objet atomique : atomics ne se
+// prêtent pas à memcpy, et ce champ évolue sans incrémenter seq. Les deux
+// structures vivent dans le même mmap partagé.
+struct etat_partage {
+  struct etat etat;
+  atomic_uint canaux_actifs;  // bit n = canal n+1, éphémère
+};
+
+static struct etat_partage *g_partage;
+static struct etat *g_etat;  // &g_partage->etat, partagée avec les fils
 static int g_tube[2] = {-1, -1};
 static void *g_moteur;
 static audio_t *g_audio;
 static midi_t *g_midi;
 static int g_periode;
+static int g_taux;
 static int g_maitre;  // processus qui fait tourner le moteur
 // Propres au fil audio ; publiées dans g_etat.
 static struct association g_associations[MAX_ASSOCIATIONS];
 static int g_nassociations;
 static int g_dernier[3] = {-1, -1, -1};
+// Horloge du fil audio : échantillons écoulés et échéance d'activité par
+// canal (aucun appel à clock_gettime dans la boucle).
+static unsigned long long g_echantillons;
+static unsigned long long g_echeances[16];
 
 static void copier_nom(char *dst, const char *src) {
   if (!src) src = "";
@@ -141,6 +156,13 @@ static void publier(void) {
   int cc = aeolus_canaux_controle(g_moteur), ce = aeolus_canaux_expression(g_moteur);
   if (cc != e->canaux_controle) e->canaux_controle = cc, change = 1;
   if (ce != e->canaux_expression) e->canaux_expression = ce, change = 1;
+  // Activité éphémère : publiée à part, sans toucher à seq.
+  unsigned actifs = 0;
+  for (int c = 0; c < 16; ++c)
+    if (g_echeances[c] > g_echantillons) actifs |= 1u << c;
+  atomic_uint *canaux_actifs = &g_partage->canaux_actifs;
+  if (actifs != atomic_load_explicit(canaux_actifs, memory_order_relaxed))
+    atomic_store_explicit(canaux_actifs, actifs, memory_order_relaxed);
   if (g_nassociations != e->nassociations ||
       memcmp(g_associations, e->associations, sizeof(g_associations))) {
     memcpy(e->associations, g_associations, sizeof(g_associations));
@@ -250,6 +272,12 @@ static void *boucle_audio(void *arg) {
     while ((n = midi_lire(g_midi, msgs, 64)) > 0)
       for (int i = 0; i < n; ++i) {
         unsigned char m[3] = {msgs[i].statut, msgs[i].d1, msgs[i].d2};
+        // Message de canal : marque le canal actif 250 ms, avant les
+        // associations pour qu'un CC consommé compte aussi.
+        if ((m[0] & 0xF0) < 0xF0) {
+          int canal = m[0] & 0x0F;
+          g_echeances[canal] = g_echantillons + (unsigned long long)(g_taux * 250 + 999) / 1000;
+        }
         if ((m[0] & 0xF0) == 0xB0 && associer(m[0], m[1], m[2])) continue;
         aeolus_midi(g_moteur, m, 3);
       }
@@ -264,6 +292,7 @@ static void *boucle_audio(void *arg) {
       entrelace[2 * i + 1] = d[i];
     }
     audio_ecrire(g_audio, entrelace, g_periode);
+    g_echantillons += g_periode;
 
     if (++tours % 4 == 0) publier();  // ~40 ms à 512 trames
   }
@@ -278,6 +307,7 @@ static int l_demarrer(lua_State *L) {
   int taux = 48000, nb_periodes = 3;
   const char *peripherique = NULL;
   g_periode = 512;
+  g_taux = 48000;
   if (lua_istable(L, 1)) {
     lua_getfield(L, 1, "taux");
     if (lua_isinteger(L, -1)) taux = lua_tointeger(L, -1);
@@ -288,15 +318,17 @@ static int l_demarrer(lua_State *L) {
     lua_pop(L, 3);
   }
 
-  g_etat = mmap(NULL, sizeof(struct etat), PROT_READ | PROT_WRITE,
-                MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-  if (g_etat == MAP_FAILED) {
+  g_partage = mmap(NULL, sizeof(struct etat_partage), PROT_READ | PROT_WRITE,
+                   MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+  if (g_partage == MAP_FAILED) {
+    g_partage = NULL;
     g_etat = NULL;
     lua_pushnil(L);
     lua_pushstring(L, "mémoire partagée indisponible");
     return 2;
   }
-  memset(g_etat, 0, sizeof(*g_etat));
+  memset(g_partage, 0, sizeof(*g_partage));
+  g_etat = &g_partage->etat;
   if (pipe(g_tube) < 0) {
     lua_pushnil(L);
     lua_pushstring(L, strerror(errno));
@@ -305,6 +337,10 @@ static int l_demarrer(lua_State *L) {
   fcntl(g_tube[0], F_SETFL, O_NONBLOCK);
 
   g_moteur = aeolus_creer(taux);
+  // Ne pas tenter de borner audio_ouvrir() par SIGALRM : cosmo_dlopen fait
+  // passer les appels dans libasound par un trampoline qui bloque tous les
+  // signaux, y compris SIGALRM. Un serveur audio figé peut donc encore
+  // bloquer cette ouverture ; le chemin hw:C,D, lui, ouvre en O_NONBLOCK.
   if (!(g_audio = audio_ouvrir(peripherique, taux, 2, g_periode, nb_periodes))) {
     const char *detail = audio_derniere_erreur();
     char message[1200];
@@ -341,6 +377,7 @@ static int l_demarrer(lua_State *L) {
   }
 
   struct etat *e = g_etat;
+  g_taux = taux;
   e->taux = taux;
   e->netapes = aeolus_nb_etapes(g_moteur);
   midi_adresse(g_midi, &e->midi_client, &e->midi_port);
@@ -394,7 +431,9 @@ static void envoyer(lua_State *L, struct commande c) {
 }
 
 // organum.etat() → {seq, volume, reverb, xruns, taux, midi="c:p",
+//                   canaux_controle, canaux_expression, canaux_actifs,
 //                   divisions={{nom, gain, jeux={{nom, actif}, …}}, …}}
+// canaux_actifs est éphémère (activité des 250 dernières ms) et hors de seq.
 static int l_etat(lua_State *L) {
   struct etat *e = etat_ou_erreur(L);
   struct etat copie;
@@ -404,6 +443,9 @@ static int l_etat(lua_State *L) {
     seq = atomic_load_explicit(&e->seq, memory_order_acquire);
     memcpy(&copie, e, sizeof(copie));
   } while (seq != atomic_load_explicit(&e->seq, memory_order_acquire));
+  // Activité MIDI : chargée à part, elle ne participe pas à seq.
+  unsigned canaux_actifs =
+      atomic_load_explicit(&g_partage->canaux_actifs, memory_order_relaxed);
 
   lua_createtable(L, 0, 7);
   lua_pushinteger(L, seq), lua_setfield(L, -2, "seq");
@@ -418,6 +460,7 @@ static int l_etat(lua_State *L) {
   lua_setfield(L, -2, "midi");
   lua_pushinteger(L, copie.canaux_controle), lua_setfield(L, -2, "canaux_controle");
   lua_pushinteger(L, copie.canaux_expression), lua_setfield(L, -2, "canaux_expression");
+  lua_pushinteger(L, canaux_actifs), lua_setfield(L, -2, "canaux_actifs");
   lua_createtable(L, copie.nassociations, 0);
   for (int i = 0; i < copie.nassociations; ++i) {
     struct association *a = &copie.associations[i];
@@ -586,6 +629,85 @@ static int l_associations(lua_State *L) {
   return 0;
 }
 
+// organum.midi_ports() → liste des ports du séquenceur du système. Chaque
+// entrée : {client, port, nom_client, nom_port, source, destination,
+// connecte, organum, lecture, ecriture, abonnement, generique, capacites,
+// type}. Les
+// fonctions MIDI n'utilisent ni le tube ni struct etat : elles parlent
+// directement au descripteur ALSA hérité, y compris dans le processus fils
+// de la fenêtre native. La liste des adresses déconnectées, elle, est bien
+// en mémoire partagée entre ces processus.
+static int l_midi_ports(lua_State *L) {
+  if (!g_midi) return luaL_error(L, "organum non démarré (organum.demarrer dans .init.lua)");
+  struct midi_port *ports = malloc(MIDI_MAX_PORTS * sizeof(*ports));
+  if (!ports) return luaL_error(L, "mémoire insuffisante");
+  int n = midi_ports(g_midi, ports, MIDI_MAX_PORTS);
+  if (n < 0) {
+    int err = errno;
+    free(ports);
+    return luaL_error(L, "ports MIDI indisponibles : %s", strerror(err));
+  }
+  lua_createtable(L, n, 0);
+  for (int i = 0; i < n; ++i) {
+    struct midi_port *p = &ports[i];
+    lua_createtable(L, 0, 13);
+    lua_pushinteger(L, p->client), lua_setfield(L, -2, "client");
+    lua_pushinteger(L, p->port), lua_setfield(L, -2, "port");
+    lua_pushstring(L, p->nom_client), lua_setfield(L, -2, "nom_client");
+    lua_pushstring(L, p->nom_port), lua_setfield(L, -2, "nom_port");
+    lua_pushboolean(L, p->source), lua_setfield(L, -2, "source");
+    lua_pushboolean(L, p->destination), lua_setfield(L, -2, "destination");
+    lua_pushboolean(L, p->connecte), lua_setfield(L, -2, "connecte");
+    lua_pushboolean(L, p->organum), lua_setfield(L, -2, "organum");
+    lua_pushboolean(L, p->lecture), lua_setfield(L, -2, "lecture");
+    lua_pushboolean(L, p->ecriture), lua_setfield(L, -2, "ecriture");
+    lua_pushboolean(L, p->abonnement), lua_setfield(L, -2, "abonnement");
+    lua_pushboolean(L, p->generique), lua_setfield(L, -2, "generique");
+    lua_pushinteger(L, p->capacites), lua_setfield(L, -2, "capacites");
+    lua_pushinteger(L, p->type), lua_setfield(L, -2, "type");
+    lua_pushfstring(L, "%d:%d", p->client, p->port), lua_setfield(L, -2, "adresse");
+    lua_rawseti(L, -2, i + 1);
+  }
+  free(ports);
+  return 1;
+}
+
+// Les adresses ALSA tiennent sur un octet : sans borne, 256:0 serait
+// tronqué en 0:0 dans le noyau et abonnerait un autre port.
+static void verifier_adresse_midi(lua_State *L, lua_Integer client, lua_Integer port) {
+  if (client < 0 || client > 255 || port < 0 || port > 255)
+    luaL_error(L, "adresse MIDI %I:%I hors bornes (client et port entre 0 et 255)",
+               client, port);
+}
+
+// organum.midi_connecter(client, port) : abonne une source à notre port.
+static int l_midi_connecter(lua_State *L) {
+  if (!g_midi) return luaL_error(L, "organum non démarré (organum.demarrer dans .init.lua)");
+  lua_Integer client = luaL_checkinteger(L, 1), port = luaL_checkinteger(L, 2);
+  verifier_adresse_midi(L, client, port);
+  if (midi_connecter(g_midi, (int)client, (int)port) < 0)
+    return luaL_error(L, "connexion MIDI %d:%d impossible : %s",
+                      (int)client, (int)port, strerror(errno));
+  lua_pushboolean(L, 1);
+  return 1;
+}
+
+// organum.midi_deconnecter(client, port) : désabonne et empêche la
+// reconnexion automatique jusqu'au prochain organum.midi_connecter_tout().
+static int l_midi_deconnecter(lua_State *L) {
+  if (!g_midi) return luaL_error(L, "organum non démarré (organum.demarrer dans .init.lua)");
+  lua_Integer client = luaL_checkinteger(L, 1), port = luaL_checkinteger(L, 2);
+  verifier_adresse_midi(L, client, port);
+  if (client == 0 && port == 1)
+    return luaL_error(L, "déconnexion MIDI 0:1 refusée : c'est le port d'annonces "
+                         "du système, qui détecte les nouveaux ports");
+  if (midi_deconnecter(g_midi, (int)client, (int)port) < 0)
+    return luaL_error(L, "déconnexion MIDI %d:%d impossible : %s",
+                      (int)client, (int)port, strerror(errno));
+  lua_pushboolean(L, 1);
+  return 1;
+}
+
 static const luaL_Reg kFonctions[] = {
     {"demarrer", l_demarrer}, {"etat", l_etat},     {"attendre", l_attendre},
     {"jeu", l_jeu},           {"gain", l_gain},     {"volume", l_volume},
@@ -595,6 +717,9 @@ static const luaL_Reg kFonctions[] = {
     {"canaux_expression", l_canaux_expression},
     {"associations", l_associations},
     {"lien", l_lien},
+    {"midi_ports", l_midi_ports},
+    {"midi_connecter", l_midi_connecter},
+    {"midi_deconnecter", l_midi_deconnecter},
     {"sauvegarder", l_sauvegarder},
     {NULL, NULL},
 };

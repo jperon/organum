@@ -7,6 +7,7 @@
  * dans une file circulaire sans verrou, que midi_lire() vide. */
 #include <cosmo.h>
 #include <dlfcn.h>
+#include <errno.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -76,15 +77,51 @@ int winmm_midi_adresse(midi_t *m, int *client, int *port) {
   return 0;
 }
 
+// Les adresses ALSA tiennent sur un octet ; le backend Windows applique les
+// mêmes bornes pour que le binding Lua se comporte pareil partout.
+static int adresse_valide(int client, int port) {
+  return client >= 0 && client <= 255 && port >= 0 && port <= 255;
+}
+
 // « client » : numéro du périphérique d'entrée WinMM ; « port » ignoré.
 int winmm_midi_connecter_depuis(midi_t *m, int client, int port) {
-  (void)port;
-  if (!m || m->nentrees >= MAX_ENTREES) return -1;
+  if (!m || !adresse_valide(client, port)) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (m->nentrees >= MAX_ENTREES) return -1;
   void *h;
   if (pOpen(&h, client, (uintptr_t)rappel, (uintptr_t)m, CALLBACK_FUNCTION)) return -1;
   pStart(h);
   m->entrees[m->nentrees++] = h;
   return 0;
+}
+
+int winmm_midi_ports(midi_t *m, struct midi_port *ports, int max) {
+  if (!m || max < 0 || (!ports && max > 0)) {
+    errno = EINVAL;
+    return -1;
+  }
+  // WinMM n'expose pas de ports de séquenceur : la liste est vide.
+  return 0;
+}
+
+int winmm_midi_connecter(midi_t *m, int client, int port) {
+  if (!m || !adresse_valide(client, port)) {
+    errno = EINVAL;
+    return -1;
+  }
+  return winmm_midi_connecter_depuis(m, client, port);
+}
+
+int winmm_midi_deconnecter(midi_t *m, int client, int port) {
+  if (!m || !adresse_valide(client, port)) {
+    errno = EINVAL;
+    return -1;
+  }
+  // Un périphérique WinMM reste ouvert jusqu'à la fermeture du client.
+  errno = ENOSYS;
+  return -1;
 }
 
 static void fermer_entrees(midi_t *m) {
@@ -103,7 +140,10 @@ static int ouvrir_tout(midi_t *m) {
 }
 
 int winmm_midi_connecter_tout(midi_t *m) {
-  if (!m) return -1;
+  if (!m) {
+    errno = EINVAL;
+    return -1;
+  }
   m->automatique = 1;
   return ouvrir_tout(m);
 }

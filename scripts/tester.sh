@@ -31,3 +31,7 @@ make -C "$COSMO" -j"$JOBS" m= o//tool/organum/chemins_alsa
 echo "== test injection open/fcntl du chemin ioctl"
 make -C "$COSMO" -j"$JOBS" m= o//tool/organum/injection_alsa
 "$COSMO/o//tool/organum/injection_alsa"
+
+echo "== test énumération et abonnements des ports MIDI"
+make -C "$COSMO" -j"$JOBS" m= o//tool/organum/ports_midi
+"$COSMO/o//tool/organum/ports_midi"

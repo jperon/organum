@@ -10,4 +10,7 @@ int midi_lire(midi_t *m, midi_msg_t *msgs, int max) { return AIGUILLER(midi_lire
 int midi_connecter_depuis(midi_t *m, int c, int p) { return AIGUILLER(midi_connecter_depuis, m, c, p); }
 int midi_adresse(midi_t *m, int *c, int *p) { return AIGUILLER(midi_adresse, m, c, p); }
 int midi_connecter_tout(midi_t *m) { return AIGUILLER(midi_connecter_tout, m); }
+int midi_ports(midi_t *m, struct midi_port *ports, int max) { return AIGUILLER(midi_ports, m, ports, max); }
+int midi_connecter(midi_t *m, int c, int p) { return AIGUILLER(midi_connecter, m, c, p); }
+int midi_deconnecter(midi_t *m, int c, int p) { return AIGUILLER(midi_deconnecter, m, c, p); }
 void midi_fermer(midi_t *m) { IsWindows() ? winmm_midi_fermer(m) : alsa_midi_fermer(m); }

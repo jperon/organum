@@ -3,8 +3,35 @@
 -- Lua 5.4 (redbean). Aucun shell n'est utilisé pour lancer les binaires.
 
 
+-- Horloge monotone, en secondes (pour les délais de run).
+maintenant = ->
+  secondes, nanos = unix.clock_gettime unix.CLOCK_MONOTONIC
+  return nil unless secondes
+  secondes + nanos / 1e9
+
+-- Les erreurs de redbean sont des objets unix.Errno, mais un appel peut
+-- aussi renvoyer un simple numéro : reconnaître EINTR dans les deux cas.
+est_eintr = (err) ->
+  return false unless err
+  if type(err) == "number"
+    err == unix.EINTR
+  else
+    type(err) == "userdata" and err\errno! == unix.EINTR
+
+-- Récolte un fils même si wait est interrompu par un signal : sans cela
+-- un dépassement de délai pourrait laisser un zombie.
+attendre = (pid) ->
+  while true
+    fils, statut = unix.wait pid
+    return statut if fils
+    return nil unless est_eintr statut
+
 -- Exécute un binaire sans shell : pipe + fork + execve, puis lit la sortie.
-run = (bin, args, env) ->
+-- « delai_max » (en secondes) est facultatif : sans lui, la lecture attend
+-- la fin du fils ; avec lui, le fils est tué et récolté si la sortie n'est
+-- pas terminée à l'échéance. Renvoie la sortie lue, le code de sortie et,
+-- en cas de dépassement, un message d'erreur.
+run = (bin, args, env, delai_max) ->
   r, w = unix.pipe!
   unless r and w
     return nil, "unix.pipe a échoué"
@@ -31,14 +58,53 @@ run = (bin, args, env) ->
 
   unix.close w
   chunks = {}
+  echeance = nil
+  if delai_max
+    debut = maintenant!
+    echeance = debut + delai_max if debut
+  depasse = false
   while true
-    chunk = unix.read r, 4096
-    break unless chunk
+    if echeance
+      restant = echeance - maintenant!
+      if restant <= 0
+        depasse = true
+        break
+      -- Attente bornée : un outil figé ne bloque pas le démarrage.
+      attente = math.max 1, math.min 100, math.floor(restant * 1000)
+      prets, err = unix.poll {[r]: unix.POLLIN}, attente
+      unless prets
+        -- Un signal (EINTR) interrompt poll : réessayer sans conclure.
+        continue if est_eintr err
+        depasse = true
+        break
+      -- Rien à lire dans le délai : boucler pour vérifier l'échéance.
+      continue unless prets[r]
+    chunk, err = unix.read r, 4096
+    unless chunk
+      continue if est_eintr err
+      break
     break if #chunk == 0
     chunks[#chunks + 1] = chunk
-  unix.close r
 
-  _, status = unix.wait pid
+  if depasse
+    pcall unix.kill, pid, unix.SIGKILL
+    attendre pid
+    -- Le fils a pu écrire juste avant l'échéance : vider le tube avant de
+    -- rendre la main, sinon une sortie légitime serait tronquée.
+    while true
+      prets = unix.poll {[r]: unix.POLLIN}, 0
+      break unless prets and prets[r] and (prets[r] & unix.POLLIN) != 0
+      chunk, err = unix.read r, 4096
+      unless chunk
+        continue if est_eintr err
+        break
+      break if #chunk == 0
+      chunks[#chunks + 1] = chunk
+    unix.close r
+    return table.concat(chunks), -1, "délai de #{delai_max} s dépassé"
+
+  unix.close r
+  status = attendre pid
   output = table.concat chunks
   code = -1
   if status
@@ -57,9 +123,17 @@ ENV_C = do
   env[#env + 1] = "LC_ALL=C"
   env
 
--- Lance un outil ; nil, erreur s'il échoue.
+-- Délai maximal d'un outil de volume : un serveur audio figé ne doit pas
+-- empêcher Organum de démarrer (le contrôle du volume est alors désactivé).
+DELAI_OUTIL = 2
+
+-- Lance un outil ; nil, erreur s'il échoue ou dépasse DELAI_OUTIL.
 outil = (bin, args) ->
-  sortie, code = run bin, args, ENV_C
+  sortie, code, delai = run bin, args, ENV_C, DELAI_OUTIL
+  if delai
+    message = "#{bin} #{table.concat args, ' '} : #{delai}, processus tué"
+    Log kLogWarn, "organum : #{message}#{sortie != '' and " : #{sortie}" or ''}"
+    return nil, message
   return sortie if code == 0
   nil, "#{bin} #{table.concat args, ' '} a échoué (code #{code}) : #{sortie}"
 
@@ -194,30 +268,6 @@ if organum.demarrer
     for i, g in ipairs etat_sauve.gains
       organum.gain i, g if type(g) == "number" and i <= #organum.etat!.divisions
 
--- Interface native (Nuklear, voir fenetre.moon) dans un processus fils, à
--- côté de l'interface web, si un serveur d'affichage local est joignable.
--- ORGANUM_FENETRE=non la désactive (x11 ou wayland imposent le protocole).
--- La fenêtre fermée, organum continue ; organum arrêté, elle se ferme.
-lancer_fenetre = ->
-  return if os.getenv("ORGANUM_FENETRE") == "non" or not nk or not organum.demarrer
-  -- Sous Windows, un serveur X local (VcXsrv, Xming…) est essayé par défaut.
-  return unless os.getenv("WAYLAND_DISPLAY") or os.getenv("DISPLAY") or GetHostOs! == "WINDOWS"
-  return unless unix.fork! == 0
-  maitre = unix.getppid!
-  ok, err = pcall ->
-    lancer = require "fenetre"
-    volume = if VOLUME
-      {
-        lire: -> (get_state! or {}).volume
-        regler: apply_volume
-      }
-    ouvert, raison = lancer organum, nk, :volume, continuer: -> unix.getppid! == maitre
-    Log kLogWarn, "fenêtre : #{raison}" unless ouvert
-  Log kLogWarn, "fenêtre : #{err}" unless ok
-  unix.exit 0
-
-lancer_fenetre!
-
 -- Sauvegarde, dans le processus principal (seul à accéder au moteur), dès
 -- que l'état a changé ; redbean appelle ce crochet régulièrement.
 seq_sauve = nil
@@ -252,21 +302,18 @@ NB_ETAPES = 32
 -- canaux 1-16. La configuration est enregistrée et réappliquée au démarrage.
 CONFIG_MIDI = os.getenv("ORGANUM_CONFIG_MIDI") or "#{os.getenv 'HOME'}/.config/organum/midi.json"
 
-canaux_liste = (masque) -> [c for c = 1, 16 when (masque >> (c - 1)) & 1 == 1]
-
-canaux_masque = (liste) ->
-  m = 0
-  for c in *liste
-    m |= 1 << (c - 1) if math.type(c) == "integer" and c >= 1 and c <= 16
-  m
+-- Présentation partagée avec l'interface native (modele.moon).
+modele = require "modele"
 
 etat_midi = ->
   e = organum.etat!
   {
     midi: e.midi
-    divisions: [{nom: d.nom, canaux: canaux_liste d.canaux} for d in *e.divisions]
-    controle: canaux_liste e.canaux_controle
-    expression: canaux_liste e.canaux_expression
+    divisions: [{nom: d.nom, canaux: modele.liste_json modele.canaux_liste d.canaux} for d in *e.divisions]
+    controle: modele.liste_json modele.canaux_liste e.canaux_controle
+    expression: modele.liste_json modele.canaux_liste e.canaux_expression
+    -- Activité récente, éphémère : jamais enregistrée dans midi.json.
+    canaux_actifs: modele.liste_json modele.canaux_liste e.canaux_actifs
     associations: e.associations
     dernier_controle: e.dernier_controle
   }
@@ -279,9 +326,9 @@ appliquer_midi = (cfg) ->
   if type(cfg.divisions) == "table"
     for i, d in ipairs cfg.divisions
       break if i > nb
-      organum.canaux_division i, canaux_masque d.canaux if type(d) == "table" and type(d.canaux) == "table"
-  organum.canaux_controle canaux_masque cfg.controle if type(cfg.controle) == "table"
-  organum.canaux_expression canaux_masque cfg.expression if type(cfg.expression) == "table"
+      organum.canaux_division i, modele.canaux_masque d.canaux if type(d) == "table" and type(d.canaux) == "table"
+  organum.canaux_controle modele.canaux_masque cfg.controle if type(cfg.controle) == "table"
+  organum.canaux_expression modele.canaux_masque cfg.expression if type(cfg.expression) == "table"
   if type(cfg.associations) == "table"
     ok, err = pcall organum.associations, cfg.associations
     return nil, tostring err unless ok
@@ -290,7 +337,25 @@ appliquer_midi = (cfg) ->
 enregistrer_midi = (cfg) ->
   dossier = CONFIG_MIDI\match "^(.*)/[^/]*$"
   unix.makedirs dossier, tonumber("755", 8) if dossier
-  Barf CONFIG_MIDI, EncodeJson(cfg), tonumber("644", 8)
+  -- Même forme qu'etat_midi : le port et le dernier contrôle (diagnostic)
+  -- ne sont pas enregistrés. Une entrée divisions malformée est ignorée.
+  propre = {
+    divisions: [{nom: d.nom, canaux: d.canaux} for d in *(cfg.divisions or {}) when type(d) == "table"]
+    controle: cfg.controle
+    expression: cfg.expression
+    associations: cfg.associations
+  }
+  -- Fichier temporaire propre à ce processus puis renommage : le processus
+  -- principal et les fils de requête peuvent enregistrer en même temps, et
+  -- un lecteur ne voit jamais un midi.json à moitié écrit. Le suffixe par
+  -- pid évite que deux écrivains se partagent le même temporaire.
+  tmp = "#{CONFIG_MIDI}.tmp.#{unix.getpid!}"
+  if Barf tmp, EncodeJson(propre), tonumber("644", 8)
+    ok = pcall unix.rename, tmp, CONFIG_MIDI
+    pcall unix.unlink, tmp unless ok
+  else
+    pcall unix.unlink, tmp
+    Log kLogWarn, "organum : écriture impossible de #{tmp}"
 
 do
   contenu = Slurp CONFIG_MIDI
@@ -301,6 +366,37 @@ do
       Log kLogWarn, "organum : #{CONFIG_MIDI} : #{err}" unless ok2
     else
       Log kLogWarn, "organum : #{CONFIG_MIDI} illisible"
+
+-- Interface native (Nuklear, voir fenetre.moon) dans un processus fils, à
+-- côté de l'interface web, si un serveur d'affichage local est joignable.
+-- ORGANUM_FENETRE=non la désactive (x11 ou wayland imposent le protocole).
+-- La fenêtre fermée, organum continue ; organum arrêté, elle se ferme.
+-- Lancée après les fonctions MIDI : le processus fils doit les connaître
+-- pour que le panneau MIDI enregistre la configuration (midi.json).
+lancer_fenetre = ->
+  return if os.getenv("ORGANUM_FENETRE") == "non" or not nk or not organum.demarrer
+  -- Sous Windows, un serveur X local (VcXsrv, Xming…) est essayé par défaut.
+  return unless os.getenv("WAYLAND_DISPLAY") or os.getenv("DISPLAY") or GetHostOs! == "WINDOWS"
+  return unless unix.fork! == 0
+  maitre = unix.getppid!
+  ok, err = pcall ->
+    lancer = require "fenetre"
+    volume = if VOLUME
+      {
+        lire: -> (get_state! or {}).volume
+        regler: apply_volume
+      }
+    midi = {
+      etat: etat_midi
+      appliquer: appliquer_midi
+      enregistrer: enregistrer_midi
+    }
+    ouvert, raison = lancer organum, nk, {titre: "organum", :volume, :midi, continuer: -> unix.getppid! == maitre}
+    Log kLogWarn, "fenêtre : #{raison}" unless ouvert
+  Log kLogWarn, "fenêtre : #{err}" unless ok
+  unix.exit 0
+
+lancer_fenetre!
 
 -- État au format du socket d'Aeolus (PROTOCOLE-SOCKET.md), que le client
 -- connaît déjà ; les divisions et jeux y sont indexés à partir de 0.
@@ -328,6 +424,14 @@ send_json = (status, payload) ->
   SetHeader "Content-Type", "application/json"
   Write EncodeJson payload
 
+-- 405 avec en-tête Allow : SetStatus remet le tampon d'en-têtes à zéro,
+-- il doit donc être appelé avant SetHeader (voir la documentation redbean).
+send_json_405 = (allow) ->
+  SetStatus 405
+  SetHeader "Allow", allow
+  SetHeader "Content-Type", "application/json"
+  Write EncodeJson {error: "méthode non autorisée"}
+
 handle_volume = ->
   method = GetMethod!
 
@@ -340,8 +444,7 @@ handle_volume = ->
     return
 
   unless method == "POST"
-    SetHeader "Allow", "GET, POST"
-    send_json 405, {error: "méthode non autorisée"}
+    send_json_405 "GET, POST"
     return
 
   body = GetBody!
@@ -411,8 +514,7 @@ handle_volume = ->
 
 handle_orgue_attendre = ->
   unless GetMethod! == "GET"
-    SetHeader "Allow", "GET"
-    send_json 405, {error: "méthode non autorisée"}
+    send_json_405 "GET"
     return
   seq = math.tointeger tonumber GetParam "seq"
   if GetParam("instance") == INSTANCE and seq
@@ -429,8 +531,7 @@ handle_orgue = ->
     return
 
   unless method == "POST"
-    SetHeader "Allow", "GET, POST"
-    send_json 405, {error: "méthode non autorisée"}
+    send_json_405 "GET, POST"
     return
 
   ok, data = pcall DecodeJson, GetBody!
@@ -504,6 +605,72 @@ handle_orgue = ->
 
   send_json 200, {ok: true}
 
+-- Ports du séquenceur, dans la forme commune aux deux interfaces :
+-- champs bruts du moteur, plus « libelle » et « etat » calculés par
+-- modele.moon. Séquenceur indisponible : 200 avec ports = [] (les
+-- interfaces affichent simplement une liste vide) et un message journalisé.
+etat_midi_ports = ->
+  adresse = ""
+  ok_etat, e = pcall organum.etat
+  adresse = e.midi if ok_etat and type(e) == "table"
+  ok, ports = pcall organum.midi_ports
+  unless ok
+    Log kLogWarn, "organum : ports MIDI indisponibles : #{ports}"
+    return {adresse: adresse, ports: modele.liste_json {}}
+  liste = for p in *ports
+    p.libelle = modele.libelle_port p
+    p.etat = modele.etat_port p
+    p
+  {adresse: adresse, ports: modele.liste_json liste}
+
+handle_midi_ports = ->
+  if GetMethod! == "GET"
+    send_json 200, etat_midi_ports!
+  else
+    send_json_405 "GET"
+
+-- POST /api/midi/connexion {client, port, connecte} : abonne ou désabonne
+-- explicitement un port. Les bornes 0..255 sont celles d'ALSA ; 0:1 (port
+-- d'annonces du système) est refusé à la déconnexion par le moteur.
+handle_midi_connexion = ->
+  unless GetMethod! == "POST"
+    send_json_405 "POST"
+    return
+  ok, data = pcall DecodeJson, GetBody!
+  unless ok and type(data) == "table"
+    send_json 400, {error: "corps JSON invalide"}
+    return
+  unless is_integer(data.client) and data.client >= 0 and data.client <= 255 and
+         is_integer(data.port) and data.port >= 0 and data.port <= 255
+    send_json 400, {error: "client et port doivent être des entiers entre 0 et 255"}
+    return
+  unless type(data.connecte) == "boolean"
+    send_json 400, {error: "connecte doit être un booléen"}
+    return
+  action = data.connecte and organum.midi_connecter or organum.midi_deconnecter
+  ok, err = pcall action, data.client, data.port
+  unless ok
+    -- Détail dans le journal seulement : le client reçoit un message stable.
+    detail = tostring err
+    Log kLogWarn, "organum : #{data.connecte and 'connexion' or 'déconnexion'} MIDI #{data.client}:#{data.port} : #{detail}"
+    if detail\find "non démarré", 1, true
+      send_json 503, {error: "moteur indisponible"}
+    else
+      send_json 400, {error: "connexion MIDI impossible : adresse refusée"}
+    return
+  etat = etat_midi_ports!
+  cible = nil
+  for p in *etat.ports
+    cible = p if p.client == data.client and p.port == data.port
+  connecte = if cible then cible.connecte else data.connecte
+  send_json 200, {
+    ok: true
+    connecte: connecte
+    adresse: "#{data.client}:#{data.port}"
+    port: cible
+    ports: etat.ports
+  }
+
 handle_midi = ->
   method = GetMethod!
   if method == "POST"
@@ -528,8 +695,7 @@ handle_midi = ->
   elseif method == "GET"
     send_json 200, etat_midi!
   else
-    SetHeader "Allow", "GET, POST"
-    send_json 405, {error: "méthode non autorisée"}
+    send_json_405 "GET, POST"
 
 page_midi = require "page_midi"
 
@@ -550,7 +716,11 @@ _G.OnHttpRequest = ->
     handle_orgue_attendre!
   elseif path == "/api/orgue"
     handle_orgue!
-  elseif path == "/api/midi"
+  elseif path == "/api/midi/ports"
+    handle_midi_ports!
+  elseif path == "/api/midi/connexion"
+    handle_midi_connexion!
+  elseif path == "/api/midi" or path == "/api/midi/"
     handle_midi!
   elseif path == "/midi"
     SetStatus 200
