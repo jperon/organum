@@ -49,7 +49,12 @@ rendu: libaeolus.a tests/rendu.cpp
 	@mkdir -p tests
 	$(CXX) $(CXXFLAGS) tests/rendu.cpp $(JUCE)/juce_core/juce_core_CompilationTime.cpp -L. -laeolus -lpthread -ldl -lrt -lm -o tests/rendu
 
+# Mesure hors ligne de l'écrêtage d'un accord dense (hors build de production).
+ecretage: libaeolus.a tests/ecretage.cpp
+	@mkdir -p tests
+	$(CXX) $(CXXFLAGS) tests/ecretage.cpp $(JUCE)/juce_core/juce_core_CompilationTime.cpp -L. -laeolus -lpthread -ldl -lrt -lm -o tests/ecretage
+
 clean:
 	rm -rf o libaeolus.a
 
-.PHONY: all clean
+.PHONY: all clean rendu ecretage

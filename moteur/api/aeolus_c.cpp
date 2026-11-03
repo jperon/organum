@@ -52,6 +52,12 @@ extern "C" void* aeolus_creer(int taux)
     // Prepare the engine (loads stops, IR, etc.).
     h->engine->prepareToPlay((float)taux, 512);
 
+    // Limiteur actif dès la création : la sortie est ensuite convertie en
+    // entier par le pilote audio, qui écrête dur. Sans limiteur, un accord
+    // dont la somme dépasse 1.0 sature et « craque » ; le limiteur (seuil
+    // 0.8) n'intervient que dans ce cas et reste transparent autrement.
+    h->engine->enableLimiter(true);
+
     // Provide a gain parameter for each division (the plugin does this via
     // Parameters). Without it Division::modulate() would dereference null.
     for (int i = 0; i < h->engine->getDivisionCount(); ++i) {
@@ -142,10 +148,22 @@ extern "C" void aeolus_volume(void* moteur, float v)
     static_cast<Handle*>(moteur)->engine->setVolume(v);
 }
 
+extern "C" void aeolus_limiteur(void* moteur, int actif)
+{
+    if (!moteur) return;
+    static_cast<Handle*>(moteur)->engine->enableLimiter(actif != 0);
+}
+
 extern "C" void aeolus_reverb(void* moteur, float v)
 {
     if (!moteur) return;
     static_cast<Handle*>(moteur)->engine->setReverbWet(v);
+}
+
+extern "C" void aeolus_reverb_tete(void* moteur, int actif)
+{
+    if (!moteur) return;
+    static_cast<Handle*>(moteur)->engine->setReverbZeroDelay(actif != 0);
 }
 
 extern "C" void aeolus_gain(void* moteur, int div, float v)
@@ -161,7 +179,10 @@ extern "C" void aeolus_gain(void* moteur, int div, float v)
 extern "C" void aeolus_rendre(void* moteur, float* g, float* d, int n)
 {
     if (!moteur || !g || !d || n <= 0) return;
-    static_cast<Handle*>(moteur)->engine->process(g, d, n, true);
+    // false = temps réel : la convolution partitionnée est déléguée au
+    // Worker (thread séparé) au lieu de tourner de façon synchrone dans le
+    // thread audio (ce qui saturait le CPU et produisait des xruns).
+    static_cast<Handle*>(moteur)->engine->process(g, d, n, false);
 }
 extern "C" int aeolus_jeu_actif(void* moteur, int div, int j)
 {

@@ -243,6 +243,13 @@ public:
     void setReverbIR(int num);
 
     /**
+     * Active ou coupe la tête de convolution zéro latence de la réverbération.
+     * @note Réservé au démarrage, avant que le fil audio ne tourne : cela
+     * reconstruit le convolveur.
+     */
+    void setReverbZeroDelay(bool actif);
+
+    /**
      * Set the reverb IR by its number asynchronously.
      * This to be called on the main (UI) thread.
      */
@@ -420,6 +427,7 @@ private:
     std::atomic<float> _reverbWet{0.25f};
 
     dsp::Convolver _convolver;
+    bool _reverbZeroDelay{true};
     std::atomic<int> _selectedIR;
     RingBuffer<IRSwithEvent, 1024> _irSwitchEvents;
     int _reverbTailCounter;

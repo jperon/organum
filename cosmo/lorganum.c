@@ -317,11 +317,12 @@ static void *boucle_audio(void *arg) {
 }
 
 // organum.demarrer{taux=48000, periode=512, peripherique="default",
-//                  jeux={{division, jeu}, …}} → true | nil, erreur
+//                  limiteur=true, jeux={{division, jeu}, …}}
+//                  → true | nil, erreur
 static int l_demarrer(lua_State *L) {
   if (g_etat) return luaL_error(L, "organum déjà démarré");
   g_maitre = getpid();
-  int taux = 48000, nb_periodes = 3;
+  int taux = 48000, nb_periodes = 3, limiteur = 1;
   const char *peripherique = NULL;
   g_periode = 512;
   g_taux = 48000;
@@ -332,7 +333,9 @@ static int l_demarrer(lua_State *L) {
     if (lua_isinteger(L, -1)) g_periode = lua_tointeger(L, -1);
     lua_getfield(L, 1, "peripherique");
     if (lua_isstring(L, -1)) peripherique = lua_tostring(L, -1);
-    lua_pop(L, 3);
+    lua_getfield(L, 1, "limiteur");
+    if (!lua_isnil(L, -1)) limiteur = lua_toboolean(L, -1);
+    lua_pop(L, 4);
   }
 
   g_partage = mmap(NULL, sizeof(struct etat_partage), PROT_READ | PROT_WRITE,
@@ -354,6 +357,17 @@ static int l_demarrer(lua_State *L) {
   fcntl(g_tube[0], F_SETFL, O_NONBLOCK);
 
   g_moteur = aeolus_creer(taux);
+  // Le limiteur est actif par défaut dans aeolus_creer ; l'option ne sert
+  // qu'à le couper (mesure, diagnostic).
+  aeolus_limiteur(g_moteur, limiteur);
+  // Tête de convolution zéro latence de la réverbération : active par
+  // défaut ; ORGANUM_REVERB_TETE=non (ou 0) la coupe pour alléger le fil
+  // audio, au prix d'un pré-délai de 4096 échantillons sur la réverbération.
+  {
+    const char *tete = getenv("ORGANUM_REVERB_TETE");
+    if (tete && (!strcmp(tete, "non") || !strcmp(tete, "0")))
+      aeolus_reverb_tete(g_moteur, 0);
+  }
   // Ne pas tenter de borner audio_ouvrir() par SIGALRM : cosmo_dlopen fait
   // passer les appels dans libasound par un trampoline qui bloque tous les
   // signaux, y compris SIGALRM. Un serveur audio figé peut donc encore

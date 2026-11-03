@@ -24,6 +24,8 @@
 #include <atomic>
 #include <mutex>
 #include <thread>
+#include <sched.h>
+#include <pthread.h>
 #include <vector>
 
 using namespace juce;
@@ -82,6 +84,10 @@ struct Worker::Impl
         if (thread == nullptr) {
             running = true;
             thread = std::make_unique<std::thread> (&Impl::run, this);
+            // Tenter de passer le Worker en SCHED_FIFO 60 (strictement inférieur
+            // au SCHED_FIFO 70 du fil audio) ; échec silencieux si pas de droit.
+            struct sched_param param = {.sched_priority = 60};
+            pthread_setschedparam(thread->native_handle(), SCHED_FIFO, &param);
         }
     }
 

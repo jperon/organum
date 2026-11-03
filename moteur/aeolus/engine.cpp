@@ -488,7 +488,11 @@ void Engine::prepareToPlay(float sampleRate, int frameSize)
     g->updateStops(SAMPLE_RATE_F);
 
     _limiterSpec.threshold = 0.8f;
-    _limiterSpec.attack = 1000.0f / sampleRate;
+    // Attaque instantanée : un accord peut dépasser le seuil dès son premier
+    // échantillon. Une attaque lissée laisserait passer un pic > 1.0 pendant
+    // quelques millisecondes, que le pilote écrêterait durement. Le
+    // relâchement lent et le maintien évitent le pompage.
+    _limiterSpec.attack = 1.0f;
     _limiterSpec.release = 1.0f / sampleRate;
     _limiterSpec.sustain = std::max(0, int(sampleRate * 0.5f));
 
@@ -514,13 +518,21 @@ void Engine::setReverbIR(int num)
         const auto& ir = irs[num];
         _convolver.setLength(int(ir.waveform.getNumSamples() / dsp::Convolver::BlockSize + 1) * dsp::Convolver::BlockSize);
         _convolver.prepareToPlay(SAMPLE_RATE_F, SUB_FRAME_LENGTH); // these parameters are irrelevant
-        _convolver.setZeroDelay(ir.zeroDelay);
+        _convolver.setZeroDelay(ir.zeroDelay && _reverbZeroDelay);
         _convolver.setIR(ir.waveform);
 
         _reverbTailCounter = _convolver.length();
 
         _selectedIR = num;
     }
+}
+
+void Engine::setReverbZeroDelay(bool actif)
+{
+    // Réservé au démarrage, avant que le fil audio ne tourne : la
+    // ré-application de l'IR reconstruit le convolveur.
+    _reverbZeroDelay = actif;
+    setReverbIR(_selectedIR);
 }
 
 void Engine::postReverbIR(int num)

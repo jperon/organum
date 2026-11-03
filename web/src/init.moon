@@ -257,6 +257,7 @@ if organum.demarrer
     taux: entier_env "ORGANUM_TAUX", 48000
     periode: entier_env "ORGANUM_PERIODE", 512
     peripherique: os.getenv "ORGANUM_PERIPHERIQUE"
+    limiteur: os.getenv("ORGANUM_LIMITEUR") != "non"
     etat: type(etat_sauve.moteur) == "string" and etat_sauve.moteur or nil
   }
   unless ok

@@ -16,6 +16,11 @@ void aeolus_jeu(void* moteur, int div, int j, int actif);
 void aeolus_midi(void* moteur, const unsigned char* octets, int n);
 void aeolus_volume(void* moteur, float v);
 void aeolus_reverb(void* moteur, float v);
+/* Tête de convolution zéro latence de la réverbération (défaut : active).
+   À n'appeler qu'au démarrage, avant le fil audio. */
+void aeolus_reverb_tete(void* moteur, int actif);
+/* Limiteur de sortie : actif par défaut (voir aeolus_creer). */
+void aeolus_limiteur(void* moteur, int actif);
 void aeolus_gain(void* moteur, int div, float v);
 
 void aeolus_rendre(void* moteur, float* g, float* d, int n);
