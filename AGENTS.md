@@ -49,6 +49,12 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
 - `web/src/init.moon` : démarrage, API HTTP (`/api/orgue`, `/api/midi`,
   `/api/volume`), persistance. `page.moon`, `page_midi.moon`, `client.moon`,
   `style.moon` : interface. `web/src/.lua/html.moon` : générateur HTML.
+- Réglages de qualité : champs du moteur dans `cosmo/lorganum.c`
+  (`CMD_QUALITE`, fonction Lua `organum.qualite`, `organum.demarrer{qualite,
+  tete_reverb}`) ; présélections, validation de `POST /api/orgue {qualite}`,
+  `ORGANUM_QUALITE` et persistance (clé `qualite` d'`etat.json`) dans
+  `web/src/init.moon`. Les interfaces (web, native) et la calibration auto
+  viendront séparément.
 
 - `ui/fenetre.h` : fenêtre sans bibliothèque ; `ui/wayland.c` et `ui/x11.c`
   parlent les protocoles directement sur la socket du serveur (aucun

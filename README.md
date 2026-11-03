@@ -66,6 +66,48 @@ curl -s localhost:8080/api/orgue \
 - `erreurs_ecriture` : nombre d'écritures audio en échec depuis le
   démarrage (hors `xruns`, déjà comptés par ALSA).
 
+#### Réglages de qualité
+
+`/api/orgue` expose aussi un objet `qualite` :
+
+| Champ | Type | Défaut | Valeurs |
+|---|---|---|---|
+| `bruit_attaque` | booléen | `true` | bruit d'attaque et résonateur du tuyau |
+| `instabilite` | booléen | `true` | instabilité aléatoire de hauteur |
+| `spatialisation` | entier | `2` | 0 = coupée, 1 = simplifiée, 2 = complète |
+| `polyphonie_max` | entier | `0` | 0 = illimitée, sinon 1 à 512 voix |
+| `tete_reverb` | booléen | `true` | tête zéro latence (au prochain démarrage) |
+| `niveau` | entier | présélection correspondante, sinon `-1` | 0 à 3 |
+| `auto` | booléen | `false` | mode automatique (pas encore exploité) |
+
+Les quatre premiers champs s'appliquent à chaud, aux notes déclenchées
+ensuite. `tete_reverb`, lui, ne change qu'au démarrage suivant.
+
+`POST /api/orgue` accepte un unique champ `qualite`, objet contenant un ou
+plusieurs réglages :
+
+```bash
+curl -s -X POST localhost:8080/api/orgue \
+  -d '{"qualite":{"spatialisation":1,"bruit_attaque":false}}'
+curl -s -X POST localhost:8080/api/orgue -d '{"qualite":{"niveau":1}}'
+```
+
+Toute modification d'un champ individuel passe `niveau` à `-1` («
+personnalisé ») et `auto` à `false`. `niveau` applique d'un coup une
+présélection :
+
+| niveau | spatialisation | bruit_attaque | instabilite | polyphonie_max | tete_reverb |
+|---|---|---|---|---|---|
+| 0 | 0 | non | non | 96 | non |
+| 1 | 1 | non | non | 160 | non |
+| 2 | 1 | oui | oui | 256 | oui |
+| 3 | 2 | oui | oui | 0 (illimité) | oui |
+
+Une valeur invalide (champ inconnu, type incorrect, valeur hors bornes,
+objet vide) renvoie `400` avec un message en français. La réponse indique
+`redemarrage_requis: true` quand `tete_reverb` change. Les réglages sont
+enregistrés dans `etat.json` (clé `qualite`) et restaurés au démarrage.
+
 Vérifier aussi la classe et la priorité des fils, et le graphe PipeWire :
 
 ```bash
@@ -144,6 +186,8 @@ livrer le son à temps. Ne pas la relever au-dessus de PipeWire.
 | `ORGANUM_AMIXER_CONTROLE` | `Master` | Contrôle ALSA utilisé avec `amixer` |
 | `ORGANUM_ETAT` | `~/.config/organum/etat.json` | Registration et combinaisons |
 | `ORGANUM_CONFIG_MIDI` | `~/.config/organum/midi.json` | Associations MIDI |
+| `ORGANUM_QUALITE` | auto | `auto` ou `0`..`3` : force la qualité au démarrage, prioritaire sur `etat.json` |
+| `ORGANUM_REVERB_TETE` | oui | `non` (ou `0`) coupe la tête zéro latence de la réverbération, prioritaire sur `tete_reverb` |
 
 Le limiteur de sortie est actif par défaut. Les pilotes audio convertissent
 les échantillons flottants en entiers et **écrêtent dur** au-delà de 1.0 :

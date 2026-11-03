@@ -42,7 +42,7 @@
 enum {
   CMD_JEU, CMD_GAIN, CMD_VOLUME, CMD_REVERB, CMD_MIDI, CMD_PANIQUE,
   CMD_CANAUX_DIVISION, CMD_CANAUX_CONTROLE, CMD_CANAUX_EXPRESSION,
-  CMD_ASSOCIATION, CMD_NB_ASSOCIATIONS, CMD_LIEN,
+  CMD_ASSOCIATION, CMD_NB_ASSOCIATIONS, CMD_LIEN, CMD_QUALITE,
 };
 
 struct commande {
@@ -81,6 +81,8 @@ struct etat {
     } jeux[MAX_JEUX];
   } divisions[MAX_DIVISIONS];
   float volume, reverb;
+  // Réglages de qualité publiés par le moteur (voir aeolus_qualite).
+  int bruit_attaque, instabilite, spatialisation, polyphonie_max;
   int canaux_controle, canaux_expression;
   int nassociations;
   struct association associations[MAX_ASSOCIATIONS];
@@ -154,6 +156,15 @@ static void publier(void) {
   if (v != e->volume) e->volume = v, change = 1;
   if (r != e->reverb) e->reverb = r, change = 1;
   if (x != e->xruns) e->xruns = x, change = 1;
+  {
+    int qualite[4] = {
+        aeolus_lire_qualite(g_moteur, 0), aeolus_lire_qualite(g_moteur, 1),
+        aeolus_lire_qualite(g_moteur, 2), aeolus_lire_qualite(g_moteur, 3)};
+    if (qualite[0] != e->bruit_attaque) e->bruit_attaque = qualite[0], change = 1;
+    if (qualite[1] != e->instabilite) e->instabilite = qualite[1], change = 1;
+    if (qualite[2] != e->spatialisation) e->spatialisation = qualite[2], change = 1;
+    if (qualite[3] != e->polyphonie_max) e->polyphonie_max = qualite[3], change = 1;
+  }
   if (g_erreurs_ecriture != e->erreurs_ecriture) {
     e->erreurs_ecriture = g_erreurs_ecriture;
     change = 1;
@@ -239,6 +250,11 @@ static void appliquer(const struct commande *c) {
       memset(g_associations + g_nassociations, 0,
              (MAX_ASSOCIATIONS - g_nassociations) * sizeof(*g_associations));
       break;
+    case CMD_QUALITE:
+      // La valeur passe par masque (16 bits) : polyphonie_max va jusqu'à 512,
+      // que le champ b (8 bits) tronquerait.
+      aeolus_qualite(g_moteur, c->a, c->masque);
+      break;
   }
 }
 
@@ -316,8 +332,61 @@ static void *boucle_audio(void *arg) {
   return arg;
 }
 
+static void envoyer(lua_State *L, struct commande c);
+
+// Noms des réglages de qualité, dans l'ordre des champs de l'API C.
+static const char *const kNomsQualite[4] = {
+    "bruit_attaque", "instabilite", "spatialisation", "polyphonie_max"};
+
+static int champ_qualite(const char *nom) {
+  for (int i = 0; i < 4; ++i)
+    if (!strcmp(nom, kNomsQualite[i])) return i;
+  return -1;
+}
+
+// Applique les champs présents de la table de qualité au sommet de la pile.
+static void appliquer_qualite_table(lua_State *L, int index) {
+  for (int i = 0; i < 4; ++i) {
+    lua_getfield(L, index, kNomsQualite[i]);
+    if (!lua_isnil(L, -1)) {
+      int v;
+      if (i < 2)
+        v = lua_isboolean(L, -1) ? lua_toboolean(L, -1) : (int)lua_tointeger(L, -1);
+      else
+        v = (int)lua_tointeger(L, -1);
+      aeolus_qualite(g_moteur, i, v);
+    }
+    lua_pop(L, 1);
+  }
+}
+
+// organum.qualite(champ, valeur) : champ = nom (voir kNomsQualite) ou entier
+// 0..3 ; valeur entière, ou booléen pour les deux premiers champs.
+static int l_qualite(lua_State *L) {
+  int champ;
+  if (lua_type(L, 1) == LUA_TNUMBER) {
+    champ = (int)luaL_checkinteger(L, 1);
+    if (champ < 0 || champ > 3)
+      return luaL_error(L, "champ de qualité hors bornes (0..3)");
+  } else {
+    const char *nom = luaL_checkstring(L, 1);
+    champ = champ_qualite(nom);
+    if (champ < 0)
+      return luaL_error(L, "champ de qualité inconnu : %s", nom);
+  }
+  int valeur;
+  if (champ < 2 && lua_isboolean(L, 2))
+    valeur = lua_toboolean(L, 2);
+  else
+    valeur = (int)luaL_checkinteger(L, 2);
+  envoyer(L, (struct commande){CMD_QUALITE, .a = champ,
+                               .masque = (unsigned short)valeur});
+  return 0;
+}
+
 // organum.demarrer{taux=48000, periode=512, peripherique="default",
-//                  limiteur=true, jeux={{division, jeu}, …}}
+//                  limiteur=true, jeux={{division, jeu}, …},
+//                  qualite={bruit_attaque=…, …}, tete_reverb=true}
 //                  → true | nil, erreur
 static int l_demarrer(lua_State *L) {
   if (g_etat) return luaL_error(L, "organum déjà démarré");
@@ -360,13 +429,29 @@ static int l_demarrer(lua_State *L) {
   // Le limiteur est actif par défaut dans aeolus_creer ; l'option ne sert
   // qu'à le couper (mesure, diagnostic).
   aeolus_limiteur(g_moteur, limiteur);
+  // Réglages de qualité appliqués avant l'ouverture audio, donc actifs dès
+  // la première voix.
+  if (lua_istable(L, 1)) {
+    lua_getfield(L, 1, "qualite");
+    if (lua_istable(L, -1)) appliquer_qualite_table(L, lua_gettop(L));
+    lua_pop(L, 1);
+  }
   // Tête de convolution zéro latence de la réverbération : active par
-  // défaut ; ORGANUM_REVERB_TETE=non (ou 0) la coupe pour alléger le fil
-  // audio, au prix d'un pré-délai de 4096 échantillons sur la réverbération.
+  // défaut ; l'option tete_reverb=false la coupe, et ORGANUM_REVERB_TETE
+  // reste prioritaire (=non ou 0 coupe, sinon comportement par défaut).
   {
-    const char *tete = getenv("ORGANUM_REVERB_TETE");
-    if (tete && (!strcmp(tete, "non") || !strcmp(tete, "0")))
-      aeolus_reverb_tete(g_moteur, 0);
+    int tete = 1;
+    if (lua_istable(L, 1)) {
+      lua_getfield(L, 1, "tete_reverb");
+      if (!lua_isnil(L, -1)) tete = lua_toboolean(L, -1);
+      lua_pop(L, 1);
+    }
+    const char *env = getenv("ORGANUM_REVERB_TETE");
+    if (env && (!strcmp(env, "non") || !strcmp(env, "0")))
+      tete = 0;
+    else if (env && (!strcmp(env, "oui") || !strcmp(env, "1")))
+      tete = 1;
+    aeolus_reverb_tete(g_moteur, tete);
   }
   // Ne pas tenter de borner audio_ouvrir() par SIGALRM : cosmo_dlopen fait
   // passer les appels dans libasound par un trampoline qui bloque tous les
@@ -466,6 +551,8 @@ static void envoyer(lua_State *L, struct commande c) {
 // organum.etat() → {seq, volume, reverb, xruns, taux, periode, nb_periodes,
 //                   erreurs_ecriture, temps_reel, midi="c:p",
 //                   canaux_controle, canaux_expression, canaux_actifs,
+//                   qualite={bruit_attaque, instabilite, spatialisation,
+//                            polyphonie_max},
 //                   divisions={{nom, gain, jeux={{nom, actif}, …}}, …}}
 // canaux_actifs est éphémère (activité des 250 dernières ms) et hors de seq.
 static int l_etat(lua_State *L) {
@@ -498,6 +585,12 @@ static int l_etat(lua_State *L) {
   lua_pushinteger(L, copie.canaux_controle), lua_setfield(L, -2, "canaux_controle");
   lua_pushinteger(L, copie.canaux_expression), lua_setfield(L, -2, "canaux_expression");
   lua_pushinteger(L, canaux_actifs), lua_setfield(L, -2, "canaux_actifs");
+  lua_createtable(L, 0, 4);
+  lua_pushboolean(L, copie.bruit_attaque), lua_setfield(L, -2, "bruit_attaque");
+  lua_pushboolean(L, copie.instabilite), lua_setfield(L, -2, "instabilite");
+  lua_pushinteger(L, copie.spatialisation), lua_setfield(L, -2, "spatialisation");
+  lua_pushinteger(L, copie.polyphonie_max), lua_setfield(L, -2, "polyphonie_max");
+  lua_setfield(L, -2, "qualite");
   lua_createtable(L, copie.nassociations, 0);
   for (int i = 0; i < copie.nassociations; ++i) {
     struct association *a = &copie.associations[i];
@@ -749,6 +842,7 @@ static const luaL_Reg kFonctions[] = {
     {"demarrer", l_demarrer}, {"etat", l_etat},     {"attendre", l_attendre},
     {"jeu", l_jeu},           {"gain", l_gain},     {"volume", l_volume},
     {"reverb", l_reverb},     {"midi", l_midi},     {"panique", l_panique},
+    {"qualite", l_qualite},
     {"canaux_division", l_canaux_division},
     {"canaux_controle", l_canaux_controle},
     {"canaux_expression", l_canaux_expression},

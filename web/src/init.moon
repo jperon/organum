@@ -225,6 +225,68 @@ entier_env = (nom, defaut) -> math.tointeger(tonumber os.getenv nom) or defaut
 -- des claviers, qui n'en font pas partie.
 ETAT_FICHIER = os.getenv("ORGANUM_ETAT") or "#{os.getenv 'HOME'}/.config/organum/etat.json"
 
+-- Réglages de qualité (spécification §1 et §3). Le moteur publie les quatre
+-- champs à chaud ; niveau (présélection), auto et tete_reverb (démarrage
+-- seulement) sont tenus à part dans un petit fichier voisin, car les
+-- processus de requête sont des fils séparés : c'est ce fichier qui les
+-- rend visibles à tous, et le processus principal le recopie dans etat.json.
+QUALITE_FICHIER = "#{ETAT_FICHIER}.qualite.json"
+
+PRESELECTIONS = {
+  {spatialisation: 0, bruit_attaque: false, instabilite: false, polyphonie_max: 96, tete_reverb: false}
+  {spatialisation: 1, bruit_attaque: false, instabilite: false, polyphonie_max: 160, tete_reverb: false}
+  {spatialisation: 1, bruit_attaque: true, instabilite: true, polyphonie_max: 256, tete_reverb: true}
+  {spatialisation: 2, bruit_attaque: true, instabilite: true, polyphonie_max: 0, tete_reverb: true}
+}
+
+-- Valeurs par défaut du comportement d'avant : niveau illimité (3), mode
+-- automatique désactivé (le défaut passera à vrai avec Q3), tête active.
+qualite_locale = {niveau: -1, auto: false, tete_reverb: true}
+
+entier_borne = (v, min, max) ->
+  type(v) == "number" and v == math.floor(v) and v >= min and v <= max
+
+niveau_correspondant = (q, tete) ->
+  for i, p in ipairs PRESELECTIONS
+    meme_spatialisation = p.spatialisation == q.spatialisation
+    meme_bruit = p.bruit_attaque == (q.bruit_attaque and true)
+    meme_instabilite = p.instabilite == (q.instabilite and true)
+    meme_polyphonie = p.polyphonie_max == q.polyphonie_max
+    meme_tete = p.tete_reverb == tete
+    if meme_spatialisation and meme_bruit and meme_instabilite and meme_polyphonie and meme_tete
+      return i - 1
+  -1
+
+qualite_fichier = (chemin) ->
+  contenu = Slurp chemin
+  return nil unless contenu
+  ok, q = pcall DecodeJson, contenu
+  ok and type(q) == "table" and q or nil
+
+ecrire_qualite_locale = (q) ->
+  dossier = QUALITE_FICHIER\match "^(.*)/[^/]*$"
+  unix.makedirs dossier, tonumber("755", 8) if dossier
+  tmp = "#{QUALITE_FICHIER}.tmp.#{unix.getpid!}"
+  if Barf tmp, EncodeJson(q), tonumber("644", 8)
+    ok = pcall unix.rename, tmp, QUALITE_FICHIER
+    pcall unix.unlink, tmp unless ok
+  else
+    pcall unix.unlink, tmp
+
+-- Valeur courante côté Lua : le fichier d'abord (écrit par les processus de
+-- requête), à défaut la copie du processus principal.
+qualite_locale_actuelle = ->
+  q = qualite_fichier QUALITE_FICHIER
+  if q
+    niveau = q.niveau
+    niveau = qualite_locale.niveau unless type(niveau) == "number"
+    auto = q.auto
+    auto = qualite_locale.auto unless type(auto) == "boolean"
+    tete = q.tete_reverb
+    tete = qualite_locale.tete_reverb unless type(tete) == "boolean"
+    return {niveau: niveau, auto: auto, tete_reverb: tete}
+  {niveau: qualite_locale.niveau, auto: qualite_locale.auto, tete_reverb: qualite_locale.tete_reverb}
+
 -- cosmo_dlopen (pour libasound) a besoin d'un petit programme d'aide lié à
 -- la libc du système ; faute de l'y trouver, il le compile avec cc. On
 -- installe celui qu'embarque organum, sans compilateur : pour la glibc, lié
@@ -252,6 +314,44 @@ etat_sauve = do
   ok, e = pcall DecodeJson, contenu if contenu
   ok and type(e) == "table" and e or {}
 
+-- Qualité au démarrage : etat.json d'abord, puis ORGANUM_QUALITE
+-- (auto|0|1|2|3), prioritaire sur le fichier.
+qualite_demarrage = {}
+niveau_impose = false
+do
+  q = etat_sauve.qualite
+  if type(q) == "table"
+    qualite_demarrage.bruit_attaque = q.bruit_attaque if type(q.bruit_attaque) == "boolean"
+    qualite_demarrage.instabilite = q.instabilite if type(q.instabilite) == "boolean"
+    qualite_demarrage.spatialisation = q.spatialisation if entier_borne q.spatialisation, 0, 2
+    qualite_demarrage.polyphonie_max = q.polyphonie_max if entier_borne q.polyphonie_max, 0, 512
+    if entier_borne q.niveau, 0, 3
+      qualite_locale.niveau = q.niveau
+      niveau_impose = true
+    qualite_locale.auto = q.auto if type(q.auto) == "boolean"
+    qualite_locale.tete_reverb = q.tete_reverb if type(q.tete_reverb) == "boolean"
+  impose = os.getenv "ORGANUM_QUALITE"
+  if impose and impose != ""
+    if impose == "auto"
+      qualite_locale.auto = true
+    else
+      valeur = tonumber impose
+      n = valeur and math.tointeger(valeur)
+      if n and n >= 0 and n <= 3
+        p = PRESELECTIONS[n + 1]
+        qualite_demarrage = {
+          spatialisation: p.spatialisation
+          bruit_attaque: p.bruit_attaque
+          instabilite: p.instabilite
+          polyphonie_max: p.polyphonie_max
+        }
+        qualite_locale.tete_reverb = p.tete_reverb
+        qualite_locale.niveau = n
+        qualite_locale.auto = false
+        niveau_impose = true
+      else
+        Log kLogWarn, "organum : ORGANUM_QUALITE invalide (#{impose}), ignoré"
+
 if organum.demarrer
   ok, err = organum.demarrer {
     taux: entier_env "ORGANUM_TAUX", 48000
@@ -259,10 +359,15 @@ if organum.demarrer
     peripherique: os.getenv "ORGANUM_PERIPHERIQUE"
     limiteur: os.getenv("ORGANUM_LIMITEUR") != "non"
     etat: type(etat_sauve.moteur) == "string" and etat_sauve.moteur or nil
+    qualite: qualite_demarrage
+    tete_reverb: qualite_locale.tete_reverb
   }
   unless ok
     Log kLogFatal, "organum : #{err}"
     unix.exit 1
+  unless niveau_impose
+    qualite_locale.niveau = niveau_correspondant organum.etat!.qualite, qualite_locale.tete_reverb
+  ecrire_qualite_locale qualite_locale
   organum.volume etat_sauve.volume if type(etat_sauve.volume) == "number"
   organum.reverb etat_sauve.reverb if type(etat_sauve.reverb) == "number"
   if type(etat_sauve.gains) == "table"
@@ -274,14 +379,25 @@ if organum.demarrer
 seq_sauve = nil
 sauvegarder_etat = ->
   e = organum.etat!
-  return if e.seq == seq_sauve
-  seq_sauve = e.seq
+  q = qualite_locale_actuelle!
+  signature = "#{e.seq}|#{q.niveau}|#{q.auto}|#{q.tete_reverb}"
+  return if signature == seq_sauve
+  seq_sauve = signature
   dossier = ETAT_FICHIER\match "^(.*)/[^/]*$"
   unix.makedirs dossier, tonumber("755", 8) if dossier
   contenu = EncodeJson {
     moteur: organum.sauvegarder!
     volume: e.volume, reverb: e.reverb
     gains: [d.gain for d in *e.divisions]
+    qualite: {
+      bruit_attaque: e.qualite.bruit_attaque
+      instabilite: e.qualite.instabilite
+      spatialisation: e.qualite.spatialisation
+      polyphonie_max: e.qualite.polyphonie_max
+      tete_reverb: q.tete_reverb
+      niveau: q.niveau
+      auto: q.auto
+    }
   }
   -- Fichier temporaire puis renommage : jamais de sauvegarde à moitié écrite.
   if Barf "#{ETAT_FICHIER}.tmp", contenu, tonumber("644", 8)
@@ -399,6 +515,22 @@ lancer_fenetre = ->
 
 lancer_fenetre!
 
+-- Qualité exposée : les quatre champs du moteur (valeur réelle), plus les
+-- réglages tenus côté Lua. niveau vaut la présélection correspondante, ou -1
+-- si l'utilisateur a modifié un champ à la main.
+qualite_etat = ->
+  e = organum.etat!
+  q = qualite_locale_actuelle!
+  {
+    bruit_attaque: e.qualite.bruit_attaque == true
+    instabilite: e.qualite.instabilite == true
+    spatialisation: e.qualite.spatialisation
+    polyphonie_max: e.qualite.polyphonie_max
+    tete_reverb: q.tete_reverb
+    niveau: q.niveau
+    auto: q.auto
+  }
+
 -- État au format du socket d'Aeolus (PROTOCOLE-SOCKET.md), que le client
 -- connaît déjà ; les divisions et jeux y sont indexés à partir de 0.
 etat_orgue = ->
@@ -407,6 +539,7 @@ etat_orgue = ->
     source: "aeolus", instance: INSTANCE, seq: e.seq, step: e.etape, steps: e.netapes
     volume: e.volume, reverb: e.reverb, xruns: e.xruns, midi: e.midi, temps_reel: e.temps_reel
     taux: e.taux, periode: e.periode, nb_periodes: e.nb_periodes, erreurs_ecriture: e.erreurs_ecriture
+    qualite: qualite_etat!
     divisions: for d in *e.divisions
       {
         name: d.nom, gain: d.gain
@@ -541,7 +674,7 @@ handle_orgue = ->
     send_json 400, {error: "corps JSON invalide"}
     return
 
-  actions = {stop: true, cancel: true, step: true, reverb: true, panic: true, gain: true, link: true}
+  actions = {stop: true, cancel: true, step: true, reverb: true, panic: true, gain: true, link: true, qualite: true}
   n = 0
   for k in pairs data
     unless actions[k]
@@ -597,6 +730,84 @@ handle_orgue = ->
       send_json 400, {error: "gain invalide"}
       return
     organum.gain g.division + 1, g.value
+
+  elseif data.qualite != nil
+    q = data.qualite
+    unless type(q) == "table"
+      send_json 400, {error: "qualite doit être un objet"}
+      return
+    connus = {bruit_attaque: true, instabilite: true, spatialisation: true, polyphonie_max: true, tete_reverb: true, niveau: true, auto: true}
+    nq = 0
+    for k in pairs q
+      unless connus[k]
+        send_json 400, {error: "qualite : champ inconnu : #{k}"}
+        return
+      nq += 1
+    unless nq > 0
+      send_json 400, {error: "qualite : aucun champ"}
+      return
+    if q.bruit_attaque != nil and type(q.bruit_attaque) != "boolean"
+      send_json 400, {error: "qualite.bruit_attaque doit être un booléen"}
+      return
+    if q.instabilite != nil and type(q.instabilite) != "boolean"
+      send_json 400, {error: "qualite.instabilite doit être un booléen"}
+      return
+    if q.spatialisation != nil and not entier_borne q.spatialisation, 0, 2
+      send_json 400, {error: "qualite.spatialisation doit être un entier entre 0 et 2"}
+      return
+    if q.polyphonie_max != nil and not entier_borne q.polyphonie_max, 0, 512
+      send_json 400, {error: "qualite.polyphonie_max doit être un entier entre 0 et 512"}
+      return
+    if q.tete_reverb != nil and type(q.tete_reverb) != "boolean"
+      send_json 400, {error: "qualite.tete_reverb doit être un booléen"}
+      return
+    if q.niveau != nil and not entier_borne q.niveau, 0, 3
+      send_json 400, {error: "qualite.niveau doit être un entier entre 0 et 3"}
+      return
+    if q.auto != nil and type(q.auto) != "boolean"
+      send_json 400, {error: "qualite.auto doit être un booléen"}
+      return
+
+    loc = qualite_locale_actuelle!
+    loc.auto = q.auto if q.auto != nil
+    modifie = false
+    redemarrage = false
+    if q.bruit_attaque != nil
+      organum.qualite "bruit_attaque", q.bruit_attaque
+      modifie = true
+    if q.instabilite != nil
+      organum.qualite "instabilite", q.instabilite
+      modifie = true
+    if q.spatialisation != nil
+      organum.qualite "spatialisation", q.spatialisation
+      modifie = true
+    if q.polyphonie_max != nil
+      organum.qualite "polyphonie_max", q.polyphonie_max
+      modifie = true
+    if q.tete_reverb != nil
+      redemarrage = true if q.tete_reverb != loc.tete_reverb
+      loc.tete_reverb = q.tete_reverb
+      modifie = true
+    if q.niveau != nil
+      p = PRESELECTIONS[q.niveau + 1]
+      organum.qualite "spatialisation", p.spatialisation
+      organum.qualite "bruit_attaque", p.bruit_attaque
+      organum.qualite "instabilite", p.instabilite
+      organum.qualite "polyphonie_max", p.polyphonie_max
+      redemarrage = true if p.tete_reverb != loc.tete_reverb
+      loc.tete_reverb = p.tete_reverb
+      loc.niveau = q.niveau
+      loc.auto = false
+    elseif modifie
+      loc.niveau = -1
+      loc.auto = false
+    ecrire_qualite_locale loc
+
+    reponse = qualite_etat!
+    reponse.ok = true
+    reponse.redemarrage_requis = redemarrage
+    send_json 200, reponse
+    return
 
   elseif data.panic == true
     organum.panique!
