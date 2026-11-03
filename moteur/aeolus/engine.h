@@ -231,6 +231,32 @@ public:
      */
     int getVoiceCount() const noexcept { return _voicePool.getNumberOfActiveVoices(); }
 
+    /// Champs du réglage de qualité (identifiants de la spécification §1).
+    enum QualiteChamp
+    {
+        QUALITE_BRUIT_ATTAQUE = 0,  ///< 0/1, défaut 1.
+        QUALITE_INSTABILITE   = 1,  ///< 0/1, défaut 1.
+        QUALITE_SPATIALISATION = 2, ///< 0/1/2, défaut 2.
+        QUALITE_POLYPHONIE_MAX = 3  ///< 0..512, défaut 0 (illimité).
+    };
+
+    /**
+     * Modifie un réglage de qualité. Les valeurs hors bornes sont bornées
+     * (0/1 pour bruit et instabilité, 0..2 pour la spatialisation, 0..512
+     * pour la polyphonie) ; un identifiant de champ inconnu est ignoré.
+     * Les champs sont lus au déclenchement de chaque voix (R1).
+     */
+    void setQualite(int champ, int valeur) noexcept;
+
+    /// Lit un réglage de qualité ; renvoie -1 pour un champ inconnu.
+    int getQualite(int champ) const noexcept;
+
+    /// Nombre de voix tenues (enveloppe Attack), pour le diagnostic.
+    int getHeldVoiceCount() const noexcept { return _voicePool.getNumberOfHeldVoices(); }
+
+    /// Vrai si une voix tenue joue cette note (diagnostic).
+    bool hasHeldVoiceForNote(int note) const noexcept { return _voicePool.hasHeldVoiceForNote(note); }
+
     /**
      * Called by the host pefore starting requesting the audio blocks.
      */
@@ -395,6 +421,12 @@ private:
     RingBuffer<NoteEvent, 1024> _pendingNoteEvents;
 
     VoicePool _voicePool;           ///< All the voices.
+
+    /// Réglages de qualité (spec §1), lus au déclenchement des voix.
+    std::atomic<int> _qualiteBruitAttaque{1};
+    std::atomic<int> _qualiteInstabilite{1};
+    std::atomic<int> _qualiteSpatialisation{2};
+    std::atomic<int> _qualitePolyphonieMax{0};
 
     AudioParameterPool _params;     ///< Internal parameters.
 

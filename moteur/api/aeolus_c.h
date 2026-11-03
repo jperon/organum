@@ -23,6 +23,18 @@ void aeolus_reverb_tete(void* moteur, int actif);
 void aeolus_limiteur(void* moteur, int actif);
 void aeolus_gain(void* moteur, int div, float v);
 
+/* Réglages de qualité (voir spécification) :
+   champ 0 bruit_attaque (0/1), 1 instabilite (0/1), 2 spatialisation (0/1/2),
+   3 polyphonie_max (0..512). Les valeurs hors bornes sont bornées ; un champ
+   inconnu est ignoré (aeolus_lire_qualite renvoie -1). */
+void aeolus_qualite(void* moteur, int champ, int valeur);
+int aeolus_lire_qualite(void* moteur, int champ);
+
+/* Diagnostic : voix prises au pool, et voix tenues (hors release). */
+int aeolus_nb_voix(void* moteur);
+int aeolus_nb_voix_actives(void* moteur);
+int aeolus_note_active(void* moteur, int note);
+
 void aeolus_rendre(void* moteur, float* g, float* d, int n);
 
 /* Lecture de l'état (les jeux et gains changent aussi par le MIDI). */

@@ -86,6 +86,11 @@ public:
 
     size_t getPostFxSamplesCount() const { return _delayLine.size(); }
 
+    /// Atténuations gauche/droite calculées par recalculate() (accès ajouté
+    /// pour le chemin de spatialisation simplifié).
+    float leftAttenuation() const noexcept { return _leftAttenuation; }
+    float rightAttenuation() const noexcept { return _rightAttenuation; }
+
 private:
 
     float _sampleRate;

@@ -561,6 +561,38 @@ void Engine::setVolume(float v)
     _volume.store(v);
 }
 
+void Engine::setQualite(int champ, int valeur) noexcept
+{
+    switch (champ) {
+    case QUALITE_BRUIT_ATTAQUE:
+        _qualiteBruitAttaque.store(jlimit(0, 1, valeur));
+        break;
+    case QUALITE_INSTABILITE:
+        _qualiteInstabilite.store(jlimit(0, 1, valeur));
+        break;
+    case QUALITE_SPATIALISATION:
+        _qualiteSpatialisation.store(jlimit(0, 2, valeur));
+        break;
+    case QUALITE_POLYPHONIE_MAX:
+        _qualitePolyphonieMax.store(jlimit(0, VoicePool::DefaultMaxVoices, valeur));
+        break;
+    default:
+        // Champ inconnu : ignoré.
+        break;
+    }
+}
+
+int Engine::getQualite(int champ) const noexcept
+{
+    switch (champ) {
+    case QUALITE_BRUIT_ATTAQUE:   return _qualiteBruitAttaque.load();
+    case QUALITE_INSTABILITE:     return _qualiteInstabilite.load();
+    case QUALITE_SPATIALISATION:  return _qualiteSpatialisation.load();
+    case QUALITE_POLYPHONIE_MAX:  return _qualitePolyphonieMax.load();
+    default:                      return -1;
+    }
+}
+
 void Engine::enableLimiter(bool shouldBeEnabled)
 {
     _limiterEnabled = shouldBeEnabled;

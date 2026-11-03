@@ -63,6 +63,10 @@ public:
         float gain = 1.0f;
         float chiffGain = 0.0f;
 
+        /// Instabilité de hauteur autorisée pour cette voix (réglage de
+        /// qualité copié au déclenchement ; défaut = comportement d'origine).
+        bool instabilite = true;
+
         void release() { if (pipewave != nullptr) pipewave->release(*this); }
         bool isTriggered() const noexcept { return pipewave != nullptr && env == Attack; }
         bool isIdle() const noexcept { return env == Idle; }

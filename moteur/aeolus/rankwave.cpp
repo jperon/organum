@@ -204,7 +204,14 @@ void Pipewave::play(Pipewave::State& state, float* out)
             }
         } else {
             float y = state.playInterpolation;
-            state.playInterpolationSpeed += _instability * 0.0005f * (0.05f * _instability * (rnd.nextFloat() - 0.5f) - state.playInterpolationSpeed);
+            // L'instabilité (dérive aléatoire de hauteur) est verrouillée par
+            // voix au déclenchement (Voice::trigger). Si elle est coupée, le
+            // tirage aléatoire et l'accumulation sont sautés.
+            if (_instability != 0.0f && state.instabilite) {
+                state.playInterpolationSpeed += _instability * 0.0005f * (0.05f * _instability * (rnd.nextFloat() - 0.5f) - state.playInterpolationSpeed);
+            } else if (!state.instabilite) {
+                state.playInterpolationSpeed = 0.0f;
+            }
             float dy = state.playInterpolationSpeed * _sampleStep;
 
             while (k--) {

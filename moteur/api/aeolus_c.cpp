@@ -176,6 +176,32 @@ extern "C" void aeolus_gain(void* moteur, int div, float v)
         *d->getParamGain() = v;
 }
 
+extern "C" void aeolus_qualite(void* moteur, int champ, int valeur)
+{
+    if (!moteur) return;
+    static_cast<Handle*>(moteur)->engine->setQualite(champ, valeur);
+}
+
+extern "C" int aeolus_lire_qualite(void* moteur, int champ)
+{
+    return moteur ? static_cast<Handle*>(moteur)->engine->getQualite(champ) : -1;
+}
+
+extern "C" int aeolus_nb_voix(void* moteur)
+{
+    return moteur ? static_cast<Handle*>(moteur)->engine->getVoiceCount() : 0;
+}
+
+extern "C" int aeolus_nb_voix_actives(void* moteur)
+{
+    return moteur ? static_cast<Handle*>(moteur)->engine->getHeldVoiceCount() : 0;
+}
+
+extern "C" int aeolus_note_active(void* moteur, int note)
+{
+    return moteur && static_cast<Handle*>(moteur)->engine->hasHeldVoiceForNote(note) ? 1 : 0;
+}
+
 extern "C" void aeolus_rendre(void* moteur, float* g, float* d, int n)
 {
     if (!moteur || !g || !d || n <= 0) return;

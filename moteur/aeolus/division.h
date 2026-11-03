@@ -154,6 +154,10 @@ public:
 
     List<Voice>& getActiveVoices() noexcept { return _activeVoices; }
 
+    /// Détache une voix de la liste active sans la recycler (utilisé quand le
+    /// pool physique est saturé et réutilise d'autorité cette voix).
+    bool detacherVoix(Voice* voice);
+
     /**
      * Tells the division has been alreayd triggered by a linked division,
      * so that it should not be receiving the same note on/off event.
@@ -207,6 +211,13 @@ private:
     dsp::BiquadFilter::Spec _swellFilterSpec;
     dsp::BiquadFilter::State _swellFilterStateL;
     dsp::BiquadFilter::State _swellFilterStateR;
+
+    /// Tampon séparé et filtre passe-bas commun aux voix en spatialisation
+    /// simplifiée (niveau 1). Les voix de niveau 2 ne passent pas par là.
+    juce::AudioBuffer<float> _niveau1Buffer;
+    dsp::BiquadFilter::Spec _niveau1FilterSpec;
+    dsp::BiquadFilter::State _niveau1FilterStateL;
+    dsp::BiquadFilter::State _niveau1FilterStateR;
 
     /// Delay lines used for tremulant frequency modulation.
     dsp::DelayLine _tremulantDelayL;

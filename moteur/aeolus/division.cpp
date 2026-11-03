@@ -43,6 +43,10 @@ Division::Division(Engine& engine, const String& name)
     , _swellFilterSpec{}
     , _swellFilterStateL{}
     , _swellFilterStateR{}
+    , _niveau1Buffer{2, SUB_FRAME_LENGTH}
+    , _niveau1FilterSpec{}
+    , _niveau1FilterStateL{}
+    , _niveau1FilterStateR{}
     , _tremulantDelayL(TREMULANT_DELAY_LENGTH)
     , _tremulantDelayR(TREMULANT_DELAY_LENGTH)
     , _stops{}
@@ -60,6 +64,18 @@ Division::Division(Engine& engine, const String& name)
     dsp::BiquadFilter::updateSpec(_swellFilterSpec);
     dsp::BiquadFilter::resetState(_swellFilterSpec, _swellFilterStateL);
     dsp::BiquadFilter::resetState(_swellFilterSpec, _swellFilterStateR);
+
+    // Filtre passe-bas commun du niveau de spatialisation simplifié. Une
+    // coupure fixe (~14 kHz, valeur du filtre de distance de SpatialSource
+    // pour une source à 5 m) remplace les deux biquads par voix du niveau 2.
+    _niveau1FilterSpec.type = dsp::BiquadFilter::LowPass;
+    _niveau1FilterSpec.sampleRate = SAMPLE_RATE_F;
+    _niveau1FilterSpec.dbGain = 0.0f;
+    _niveau1FilterSpec.q = 0.7071f;
+    _niveau1FilterSpec.freq = 14000.0f;
+    dsp::BiquadFilter::updateSpec(_niveau1FilterSpec);
+    dsp::BiquadFilter::resetState(_niveau1FilterSpec, _niveau1FilterStateL);
+    dsp::BiquadFilter::resetState(_niveau1FilterSpec, _niveau1FilterStateR);
 }
 
 void Division::initFromVar(const var& v)
@@ -420,6 +436,16 @@ void Division::allNotesOff()
     }
 }
 
+bool Division::detacherVoix(Voice* voice)
+{
+    if (voice == nullptr || !_activeVoices.contains(voice))
+        return false;
+
+    _activeVoices.remove(voice);
+    voice->setProprietaire(nullptr);
+    return true;
+}
+
 void Division::handleControlMessage(const juce::MidiMessage& msg)
 {
     const int cc{ msg.getControllerNumber() };
@@ -461,21 +487,40 @@ bool Division::process(AudioBuffer<float>& targetBuffer, AudioBuffer<float>& voi
     if (voice == nullptr)
         return false;
 
+    // Contributions des voix en spatialisation simplifiée (niveau 1),
+    // accumulées à part pour subir un seul filtre passe-bas commun.
+    _niveau1Buffer.clear();
+    bool niveau1Utilise = false;
+
     while (voice != nullptr) {
-        voiceBuffer.clear();
-        float* outL = voiceBuffer.getWritePointer(0);
-        float* outR = voiceBuffer.getNumChannels() > 1 ? voiceBuffer.getWritePointer(1) : outL;
+        float* outL = nullptr;
+        float* outR = nullptr;
+        const bool niveau1 = N_VOICE_CHANNELS > 1 && voice->spatialisation() == 1;
+
+        if (niveau1) {
+            outL = _niveau1Buffer.getWritePointer(0);
+            outR = _niveau1Buffer.getWritePointer(1);
+            niveau1Utilise = true;
+        } else {
+            voiceBuffer.clear();
+            outL = voiceBuffer.getWritePointer(0);
+            outR = voiceBuffer.getNumChannels() > 1 ? voiceBuffer.getWritePointer(1) : outL;
+        }
 
         voice->process(outL, outR);
 
+        if (niveau1) {
+            // Ajout après filtrage, une fois par sous-trame (plus bas).
+        } else {
 #if AEOLUS_MULTIBUS_OUTPUT
-        // Mix voice to the corresponding output channel depending on the pan-position
-        int ch = jlimit(0, targetBuffer.getNumChannels() - 1, int(voice->getPanPosition() * targetBuffer.getNumChannels()));
-        targetBuffer.addFrom(ch, 0, voiceBuffer, 0, 0, SUB_FRAME_LENGTH);
+            // Mix voice to the corresponding output channel depending on the pan-position
+            int ch = jlimit(0, targetBuffer.getNumChannels() - 1, int(voice->getPanPosition() * targetBuffer.getNumChannels()));
+            targetBuffer.addFrom(ch, 0, voiceBuffer, 0, 0, SUB_FRAME_LENGTH);
 #else
-        targetBuffer.addFrom(0, 0, voiceBuffer, 0, 0, SUB_FRAME_LENGTH);
-        targetBuffer.addFrom(1, 0, voiceBuffer, 1, 0, SUB_FRAME_LENGTH);
+            targetBuffer.addFrom(0, 0, voiceBuffer, 0, 0, SUB_FRAME_LENGTH);
+            targetBuffer.addFrom(1, 0, voiceBuffer, 1, 0, SUB_FRAME_LENGTH);
 #endif
+        }
         if (voice->isOver()) {
             auto* nextVoice = _activeVoices.removeAndReturnNext(voice);
             voice->resetAndReturnToPool();
@@ -483,6 +528,20 @@ bool Division::process(AudioBuffer<float>& targetBuffer, AudioBuffer<float>& voi
         } else {
             voice = voice->next();
         }
+    }
+
+    // Un seul passe-bas par division et par sous-trame, uniquement sur la
+    // contribution des voix de niveau 1, puis ajout au tampon de division.
+    if (niveau1Utilise && N_VOICE_CHANNELS > 1) {
+        dsp::BiquadFilter::process(_niveau1FilterSpec, _niveau1FilterStateL,
+                                   _niveau1Buffer.getReadPointer(0),
+                                   _niveau1Buffer.getWritePointer(0), SUB_FRAME_LENGTH);
+        dsp::BiquadFilter::process(_niveau1FilterSpec, _niveau1FilterStateR,
+                                   _niveau1Buffer.getReadPointer(1),
+                                   _niveau1Buffer.getWritePointer(1), SUB_FRAME_LENGTH);
+
+        targetBuffer.addFrom(0, 0, _niveau1Buffer, 0, 0, SUB_FRAME_LENGTH);
+        targetBuffer.addFrom(1, 0, _niveau1Buffer, 1, 0, SUB_FRAME_LENGTH);
     }
 
     return true;
@@ -599,6 +658,14 @@ void Division::triggerVoicesOfEnabledStops()
         return;
     }
 
+    // Plafond de polyphonie atteint : ne pas re-déclencher en boucle les
+    // notes tenues dont les voix ont été volées (cela provoquerait un
+    // brassage permanent et coûteux). Les nouvelles notes passent par
+    // Division::noteOn, qui vole la voix la plus ancienne.
+    const int maxVoix = _engine.getQualite(Engine::QUALITE_POLYPHONIE_MAX);
+    if (maxVoix > 0 && _engine.getHeldVoiceCount() >= maxVoix)
+        return;
+
     std::bitset<TOTAL_NOTES> missingNotes{ _aggregatedKeysState };
 
     for (int stopIndex = 0; stopIndex < _stops.size(); ++stopIndex) {
@@ -674,6 +741,7 @@ bool Division::triggerVoicesForStop(int stopIndex, int note)
 
                     if (auto* voice = _engine.getVoicePool().trigger(state)) {
                         voice->setStopIndex(stopIndex);
+                        voice->setProprietaire(this);
                         _activeVoices.append(voice);
                         voiceTriggered = true;
                     }
