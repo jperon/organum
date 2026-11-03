@@ -5,11 +5,13 @@
 #include <fcntl.h>
 #include <math.h>
 #include <poll.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #if defined(__COSMOPOLITAN__)
@@ -19,6 +21,7 @@
 #include <dlfcn.h>
 
 #include "asound_min.h"
+#include "audio_alsa_interne.h"
 
 #define SND_PCM_STREAM_PLAYBACK 0
 #define SND_PCM_ACCESS_RW_INTERLEAVED 3
@@ -64,37 +67,222 @@ static int libasound_tried = 0;
 static int libasound_ok = 0;
 static void *libasound_handle = NULL;
 
+/* Diagnostic séparé en deux tampons : le chargement de libasound dure toute
+   la vie du processus, l'ouverture du PCM est propre à chaque tentative.
+   alsa_audio_derniere_erreur() renvoie l'erreur d'ouverture si elle est
+   renseignée, sinon celle de chargement : un échec d'ouverture est plus
+   proche de l'appelant qu'un échec de chargement, et ne doit jamais être
+   masqué par un message de chargement périmé. */
+static char erreur_chargement[1024];
+static char erreur_ouverture[1024];
+
+static void erreur_effacer(char *tampon)
+{
+	tampon[0] = '\0';
+}
+
+static void erreur_ajouter(char *tampon, size_t taille, const char *format, ...)
+{
+	size_t deja = strlen(tampon);
+	if (deja) {
+		if (deja + 3 >= taille)
+			return;
+		memcpy(tampon + deja, " ; ", 3);
+		deja += 3;
+	}
+	va_list ap;
+	va_start(ap, format);
+	vsnprintf(tampon + deja, taille - deja, format, ap);
+	va_end(ap);
+}
+
+/* Mémorise l'échec de chargement pour le diagnostic. Le message reste dans
+   erreur_chargement : libasound_tried interdit toute nouvelle tentative, donc
+   aucun chemin ne l'efface après un échec. */
+static int chargement_echouer(void)
+{
+	libasound_ok = 0;
+	return 0;
+}
+
+static void *essayer_dlopen(const char *chemin)
+{
+	void *handle = cosmo_dlopen(chemin, RTLD_NOW);
+	if (!handle) {
+		const char *detail = cosmo_dlerror();
+		erreur_ajouter(erreur_chargement, sizeof(erreur_chargement),
+		               "%s : %s", chemin,
+		               (detail && detail[0]) ? detail : "échec de cosmo_dlopen");
+	}
+	return handle;
+}
+
+static void *charger_symbole(void *handle, const char *nom)
+{
+	/* cosmo_dltramp(NULL) renvoie un trampoline non nul : vérifier le
+	   symbole avant de le transformer. */
+	void *symbole = cosmo_dlsym(handle, nom);
+	if (!symbole)
+		return NULL;
+	return cosmo_dltramp(symbole);
+}
+
+/* Construit « répertoire/nom » sans slash final redoublé. Renvoie 0 si le
+   chemin ne tient pas dans le tampon (troncature). Un répertoire racine
+   (« / ») est ramené à un préfixe vide, ce qui donne « /libasound.so.2 ». */
+int alsa_chemin_dans_repertoire(char *chemin, size_t taille,
+				const char *repertoire, const char *nom)
+{
+	size_t longueur = strlen(repertoire);
+	while (longueur > 1 && repertoire[longueur - 1] == '/')
+		longueur--;
+	if (longueur == 1 && repertoire[0] == '/')
+		longueur = 0;
+
+	int n = snprintf(chemin, taille, "%.*s/%s", (int)longueur, repertoire, nom);
+	return n >= 0 && (size_t)n < taille;
+}
+
+int alsa_construire_chemin_hw(const char *nom, char *chemin, size_t taille)
+{
+	int carte = -1, dev = -1;
+	int n;
+	if (sscanf(nom, "hw:%d,%d", &carte, &dev) == 2 && carte >= 0 && dev >= 0)
+		n = snprintf(chemin, taille, "/dev/snd/pcmC%dD%dp", carte, dev);
+	else
+		n = snprintf(chemin, taille, "/dev/snd/pcmC0D0p");
+	return n >= 0 && (size_t)n < taille;
+}
+
+/* Appels système du chemin ioctl : directs par défaut, remplaçables par les
+   tests. Le chemin libasound n'y touche pas. */
+static struct alsa_systeme systeme = { open, fcntl, close, ioctl };
+
+void alsa_audio_injecter_systeme(const struct alsa_systeme *s)
+{
+	if (s) {
+		systeme = *s;
+	} else {
+		systeme.sys_open = open;
+		systeme.sys_fcntl = fcntl;
+		systeme.sys_close = close;
+		systeme.sys_ioctl = ioctl;
+	}
+}
+
 static int libasound_load(void)
 {
-	if (libasound_tried) {
+	if (libasound_tried)
 		return libasound_ok;
-	}
 	libasound_tried = 1;
+	erreur_effacer(erreur_chargement);
 
-	libasound_handle = cosmo_dlopen("libasound.so.2", RTLD_NOW);
-	if (!libasound_handle) {
-		libasound_handle = cosmo_dlopen("libasound.so", RTLD_NOW);
+	/* ORGANUM_LIBASOUND : fichier .so ou répertoire (NixOS, Guix, …).
+	   Essayé avant les noms génériques, que le chargeur peut ne pas savoir
+	   résoudre sans cache ld.so. 4096 octets : taille usuelle de PATH_MAX
+	   sous Linux, largement suffisante pour un chemin du magasin Nix. */
+	const char *force = getenv("ORGANUM_LIBASOUND");
+	int force_utilisee = 0;
+	if (force && force[0]) {
+		force_utilisee = 1;
+		struct stat st;
+		if (stat(force, &st) == 0 && S_ISDIR(st.st_mode)) {
+			char chemin[4096];
+			if (!alsa_chemin_dans_repertoire(chemin, sizeof(chemin), force, "libasound.so.2")) {
+				erreur_ajouter(erreur_chargement, sizeof(erreur_chargement),
+				               "ORGANUM_LIBASOUND trop long : %s", force);
+				return chargement_echouer();
+			}
+			libasound_handle = essayer_dlopen(chemin);
+			if (!libasound_handle) {
+				if (!alsa_chemin_dans_repertoire(chemin, sizeof(chemin), force, "libasound.so")) {
+					erreur_ajouter(erreur_chargement, sizeof(erreur_chargement),
+					               "ORGANUM_LIBASOUND trop long : %s", force);
+					return chargement_echouer();
+				}
+				libasound_handle = essayer_dlopen(chemin);
+			}
+		} else {
+			libasound_handle = essayer_dlopen(force);
+		}
+	}
+
+	/* ORGANUM_LIBASOUND_STRICT=1 (réservé aux tests) : ne jamais se replier
+	   sur les noms génériques quand un chemin explicite a échoué. Cela rend
+	   le diagnostic déterministe même sur une machine où libasound est
+	   installée ailleurs. */
+	const char *strict_env = getenv("ORGANUM_LIBASOUND_STRICT");
+	int strict = strict_env && strcmp(strict_env, "1") == 0;
+
+	if (!libasound_handle && !(strict && force_utilisee)) {
+		libasound_handle = essayer_dlopen("libasound.so.2");
+	}
+	if (!libasound_handle && !(strict && force_utilisee)) {
+		libasound_handle = essayer_dlopen("libasound.so");
 	}
 	if (!libasound_handle) {
-		libasound_ok = 0;
-		return 0;
+		if (strict && force_utilisee)
+			erreur_ajouter(erreur_chargement, sizeof(erreur_chargement),
+			               "repli sur libasound.so.2 désactivé "
+			               "(ORGANUM_LIBASOUND_STRICT)");
+		else
+			erreur_ajouter(erreur_chargement, sizeof(erreur_chargement),
+			               "définissez ORGANUM_LIBASOUND (fichier .so ou répertoire) "
+			               "si libasound n'est pas dans un chemin standard");
+		return chargement_echouer();
 	}
 
-	p_snd_pcm_open = (snd_pcm_open_t)cosmo_dltramp(cosmo_dlsym(libasound_handle, "snd_pcm_open"));
-	p_snd_pcm_set_params = (snd_pcm_set_params_t)cosmo_dltramp(cosmo_dlsym(libasound_handle, "snd_pcm_set_params"));
-	p_snd_pcm_writei = (snd_pcm_writei_t)cosmo_dltramp(cosmo_dlsym(libasound_handle, "snd_pcm_writei"));
-	p_snd_pcm_recover = (snd_pcm_recover_t)cosmo_dltramp(cosmo_dlsym(libasound_handle, "snd_pcm_recover"));
-	p_snd_pcm_close = (snd_pcm_close_t)cosmo_dltramp(cosmo_dlsym(libasound_handle, "snd_pcm_close"));
-	p_snd_strerror = (snd_strerror_t)cosmo_dltramp(cosmo_dlsym(libasound_handle, "snd_strerror"));
-	p_snd_pcm_prepare = (snd_pcm_prepare_t)cosmo_dltramp(cosmo_dlsym(libasound_handle, "snd_pcm_prepare"));
+	const char *manquant = NULL;
+	p_snd_pcm_open = (snd_pcm_open_t)charger_symbole(libasound_handle, "snd_pcm_open");
+	if (!p_snd_pcm_open)
+		manquant = "snd_pcm_open";
+	p_snd_pcm_set_params = (snd_pcm_set_params_t)charger_symbole(libasound_handle, "snd_pcm_set_params");
+	if (!p_snd_pcm_set_params)
+		manquant = manquant ? manquant : "snd_pcm_set_params";
+	p_snd_pcm_writei = (snd_pcm_writei_t)charger_symbole(libasound_handle, "snd_pcm_writei");
+	if (!p_snd_pcm_writei)
+		manquant = manquant ? manquant : "snd_pcm_writei";
+	p_snd_pcm_recover = (snd_pcm_recover_t)charger_symbole(libasound_handle, "snd_pcm_recover");
+	if (!p_snd_pcm_recover)
+		manquant = manquant ? manquant : "snd_pcm_recover";
+	p_snd_pcm_close = (snd_pcm_close_t)charger_symbole(libasound_handle, "snd_pcm_close");
+	if (!p_snd_pcm_close)
+		manquant = manquant ? manquant : "snd_pcm_close";
+	p_snd_strerror = (snd_strerror_t)charger_symbole(libasound_handle, "snd_strerror");
+	if (!p_snd_strerror)
+		manquant = manquant ? manquant : "snd_strerror";
+	p_snd_pcm_prepare = (snd_pcm_prepare_t)charger_symbole(libasound_handle, "snd_pcm_prepare");
+	if (!p_snd_pcm_prepare)
+		manquant = manquant ? manquant : "snd_pcm_prepare";
 
-	if (!p_snd_pcm_open || !p_snd_pcm_set_params || !p_snd_pcm_writei ||
-	    !p_snd_pcm_recover || !p_snd_pcm_close || !p_snd_strerror) {
-		libasound_ok = 0;
-		return 0;
+	if (manquant) {
+		erreur_ajouter(erreur_chargement, sizeof(erreur_chargement),
+		               "symbole absent dans libasound : %s", manquant);
+		/* Aucun pointeur ne doit survivre à la fermeture de la bibliothèque. */
+		p_snd_pcm_open = NULL;
+		p_snd_pcm_set_params = NULL;
+		p_snd_pcm_writei = NULL;
+		p_snd_pcm_recover = NULL;
+		p_snd_pcm_close = NULL;
+		p_snd_strerror = NULL;
+		p_snd_pcm_prepare = NULL;
+		cosmo_dlclose(libasound_handle);
+		libasound_handle = NULL;
+		return chargement_echouer();
 	}
+	/* Les tentatives ratées avant un chargement réussi ne sont pas une erreur. */
+	erreur_effacer(erreur_chargement);
 	libasound_ok = 1;
 	return 1;
+}
+
+const char *alsa_audio_derniere_erreur(void)
+{
+	if (erreur_ouverture[0])
+		return erreur_ouverture;
+	if (erreur_chargement[0])
+		return erreur_chargement;
+	return NULL;
 }
 
 /* ---------- helpers ioctl ---------- */
@@ -130,6 +318,12 @@ static int audio_set_interval(struct snd_pcm_hw_params *params, snd_pcm_hw_param
 
 audio_t *alsa_audio_ouvrir(const char *peripherique, int taux, int canaux, int periode, int nb_periodes)
 {
+	/* Une nouvelle tentative d'ouverture ne doit pas hériter du diagnostic
+	   d'une tentative précédente ; l'erreur de chargement, elle, est
+	   persistante. Effacé avant la garde de plate-forme pour qu'un échec
+	   précoce ne laisse pas un message périmé. */
+	erreur_effacer(erreur_ouverture);
+
 #if defined(__COSMOPOLITAN__)
 	if (!IsLinux()) {
 		errno = ENOSYS;
@@ -153,6 +347,9 @@ audio_t *alsa_audio_ouvrir(const char *peripherique, int taux, int canaux, int p
 
 	audio_t *audio = calloc(1, sizeof(audio_t));
 	if (!audio) {
+		errno = ENOMEM;
+		erreur_ajouter(erreur_ouverture, sizeof(erreur_ouverture),
+		               "mémoire insuffisante");
 		return NULL;
 	}
 	audio->xruns = 0;
@@ -166,16 +363,31 @@ audio_t *alsa_audio_ouvrir(const char *peripherique, int taux, int canaux, int p
 	if (use_ioctl) {
 		audio->chemin = 0;
 
-		int carte = -1, dev = -1;
 		char chemin[256];
-		if (sscanf(name, "hw:%d,%d", &carte, &dev) == 2 && carte >= 0 && dev >= 0) {
-			snprintf(chemin, sizeof(chemin), "/dev/snd/pcmC%dD%dp", carte, dev);
-		} else {
-			snprintf(chemin, sizeof(chemin), "/dev/snd/pcmC0D0p");
+		if (!alsa_construire_chemin_hw(name, chemin, sizeof(chemin))) {
+			errno = ENAMETOOLONG;
+			erreur_ajouter(erreur_ouverture, sizeof(erreur_ouverture),
+			               "nom de périphérique ALSA trop long : %s", name);
+			free(audio);
+			return NULL;
 		}
 
-		int fd = open(chemin, O_WRONLY);
+		/* PipeWire peut détenir le PCM : un open() bloquant attend alors
+		   indéfiniment. Ouvrir sans bloquer, puis revenir en mode bloquant
+		   après HW_PARAMS (les ioctl d'écriture attendent un tampon libre). */
+		int fd = systeme.sys_open(chemin, O_WRONLY | O_NONBLOCK);
 		if (fd < 0) {
+			int err = errno;
+			erreur_effacer(erreur_ouverture);
+			if (err == EAGAIN || err == EBUSY)
+				erreur_ajouter(erreur_ouverture, sizeof(erreur_ouverture),
+				               "%s occupé par un autre serveur audio "
+				               "(PipeWire ?) ; utilisez le périphérique ALSA "
+				               "« default »", chemin);
+			else
+				erreur_ajouter(erreur_ouverture, sizeof(erreur_ouverture),
+				               "open(%s) : %s", chemin, strerror(err));
+			errno = err;
 			free(audio);
 			return NULL;
 		}
@@ -194,7 +406,7 @@ audio_t *alsa_audio_ouvrir(const char *peripherique, int taux, int canaux, int p
 			audio_set_interval(&params, SNDRV_PCM_HW_PARAM_PERIOD_SIZE, periode, periode);
 			audio_set_interval(&params, SNDRV_PCM_HW_PARAM_PERIODS, nb_periodes, nb_periodes);
 
-			ioctl(fd, SNDRV_PCM_IOCTL_HW_REFINE, &params);
+			systeme.sys_ioctl(fd, SNDRV_PCM_IOCTL_HW_REFINE, &params);
 
 			memset(&params, 0, sizeof(params));
 			audio_set_mask(&params, SNDRV_PCM_HW_PARAM_ACCESS, SNDRV_PCM_ACCESS_RW_INTERLEAVED);
@@ -204,7 +416,7 @@ audio_t *alsa_audio_ouvrir(const char *peripherique, int taux, int canaux, int p
 			audio_set_interval(&params, SNDRV_PCM_HW_PARAM_PERIOD_SIZE, periode, periode);
 			audio_set_interval(&params, SNDRV_PCM_HW_PARAM_PERIODS, nb_periodes, nb_periodes);
 
-			if (ioctl(fd, SNDRV_PCM_IOCTL_HW_PARAMS, &params) == 0) {
+			if (systeme.sys_ioctl(fd, SNDRV_PCM_IOCTL_HW_PARAMS, &params) == 0) {
 				audio->fmt = (fmt_essai == SNDRV_PCM_FORMAT_S32_LE) ? 1 : 0;
 				ok = 1;
 				break;
@@ -212,8 +424,31 @@ audio_t *alsa_audio_ouvrir(const char *peripherique, int taux, int canaux, int p
 		}
 
 		if (!ok) {
-			close(fd);
+			int err = errno;
+			if (err == 0)
+				err = EIO;
+			erreur_effacer(erreur_ouverture);
+			erreur_ajouter(erreur_ouverture, sizeof(erreur_ouverture),
+			               "HW_PARAMS(%s) : %s", chemin, strerror(err));
+			systeme.sys_close(fd);
 			free(audio);
+			errno = err;
+			return NULL;
+		}
+
+		/* HW_PARAMS réussi : HW_PARAMS n'a pas besoin d'attendre, mais les
+		   ioctl suivants (SW_PARAMS, PREPARE, WRITEI) attendent un tampon
+		   libre. Revenir en mode bloquant comme avec un open() classique. */
+		int drapeaux = systeme.sys_fcntl(fd, F_GETFL);
+		if (drapeaux < 0 ||
+		    systeme.sys_fcntl(fd, F_SETFL, drapeaux & ~O_NONBLOCK) < 0) {
+			int err = errno;
+			erreur_effacer(erreur_ouverture);
+			erreur_ajouter(erreur_ouverture, sizeof(erreur_ouverture),
+			               "fcntl(%s) : %s", chemin, strerror(err));
+			systeme.sys_close(fd);
+			free(audio);
+			errno = err;
 			return NULL;
 		}
 
@@ -223,10 +458,10 @@ audio_t *alsa_audio_ouvrir(const char *peripherique, int taux, int canaux, int p
 			sw.start_threshold = (snd_pcm_uframes_t)1;
 			sw.stop_threshold = (snd_pcm_uframes_t)-1;
 			sw.avail_min = (snd_pcm_uframes_t)periode;
-			ioctl(fd, SNDRV_PCM_IOCTL_SW_PARAMS, &sw);
+			systeme.sys_ioctl(fd, SNDRV_PCM_IOCTL_SW_PARAMS, &sw);
 		}
 
-		ioctl(fd, SNDRV_PCM_IOCTL_PREPARE, NULL);
+		systeme.sys_ioctl(fd, SNDRV_PCM_IOCTL_PREPARE, NULL);
 
 		return audio;
 	}
@@ -240,6 +475,11 @@ audio_t *alsa_audio_ouvrir(const char *peripherique, int taux, int canaux, int p
 
 	int err = p_snd_pcm_open(&pcm, namebuf, SND_PCM_STREAM_PLAYBACK, 0);
 	if (err < 0) {
+		const char *detail = p_snd_strerror ? p_snd_strerror(err) : NULL;
+		erreur_effacer(erreur_ouverture);
+		erreur_ajouter(erreur_ouverture, sizeof(erreur_ouverture),
+		               "snd_pcm_open(%s) : %s", name,
+		               (detail && detail[0]) ? detail : strerror(-err));
 		errno = -err;
 		free(audio);
 		return NULL;
@@ -257,6 +497,11 @@ audio_t *alsa_audio_ouvrir(const char *peripherique, int taux, int canaux, int p
 	}
 
 	if (chosen < 0) {
+		const char *detail = p_snd_strerror ? p_snd_strerror(err) : NULL;
+		erreur_effacer(erreur_ouverture);
+		erreur_ajouter(erreur_ouverture, sizeof(erreur_ouverture),
+		               "snd_pcm_set_params(%s) : %s", name,
+		               (detail && detail[0]) ? detail : strerror((err < 0) ? -err : EIO));
 		if (p_snd_pcm_close) p_snd_pcm_close(pcm);
 		errno = (err < 0) ? -err : EIO;
 		free(audio);
@@ -348,15 +593,15 @@ int alsa_audio_ecrire(audio_t *audio, const float *entrelace, int trames)
 		struct snd_xferi xfer;
 		xfer.buf = buf;
 		xfer.frames = (snd_pcm_uframes_t)trames;
-		int ret = ioctl(audio->fd, SNDRV_PCM_IOCTL_WRITEI_FRAMES, &xfer);
+		int ret = systeme.sys_ioctl(audio->fd, SNDRV_PCM_IOCTL_WRITEI_FRAMES, &xfer);
 		if (ret < 0) {
 			int err = errno;
 			if (err == EPIPE) {
 				audio->xruns++;
-				if (ioctl(audio->fd, SNDRV_PCM_IOCTL_PREPARE, NULL) >= 0) {
+				if (systeme.sys_ioctl(audio->fd, SNDRV_PCM_IOCTL_PREPARE, NULL) >= 0) {
 					xfer.buf = buf;
 					xfer.frames = (snd_pcm_uframes_t)trames;
-					ret = ioctl(audio->fd, SNDRV_PCM_IOCTL_WRITEI_FRAMES, &xfer);
+					ret = systeme.sys_ioctl(audio->fd, SNDRV_PCM_IOCTL_WRITEI_FRAMES, &xfer);
 					if (ret >= 0) {
 						free(buf);
 						return ret;
@@ -384,15 +629,15 @@ int alsa_audio_ecrire(audio_t *audio, const float *entrelace, int trames)
 		struct snd_xferi xfer;
 		xfer.buf = buf;
 		xfer.frames = (snd_pcm_uframes_t)trames;
-		int ret = ioctl(audio->fd, SNDRV_PCM_IOCTL_WRITEI_FRAMES, &xfer);
+		int ret = systeme.sys_ioctl(audio->fd, SNDRV_PCM_IOCTL_WRITEI_FRAMES, &xfer);
 		if (ret < 0) {
 			int err = errno;
 			if (err == EPIPE) {
 				audio->xruns++;
-				if (ioctl(audio->fd, SNDRV_PCM_IOCTL_PREPARE, NULL) >= 0) {
+				if (systeme.sys_ioctl(audio->fd, SNDRV_PCM_IOCTL_PREPARE, NULL) >= 0) {
 					xfer.buf = buf;
 					xfer.frames = (snd_pcm_uframes_t)trames;
-					ret = ioctl(audio->fd, SNDRV_PCM_IOCTL_WRITEI_FRAMES, &xfer);
+					ret = systeme.sys_ioctl(audio->fd, SNDRV_PCM_IOCTL_WRITEI_FRAMES, &xfer);
 					if (ret >= 0) {
 						free(buf);
 						return ret;
@@ -425,7 +670,7 @@ void alsa_audio_fermer(audio_t *audio)
 		}
 	} else {
 		if (audio->fd >= 0) {
-			close(audio->fd);
+			systeme.sys_close(audio->fd);
 		}
 	}
 	free(audio);

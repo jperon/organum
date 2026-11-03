@@ -24,7 +24,7 @@ jobs:
       - name: Outils
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends musl-tools zip luarocks liblua5.1-0-dev
+          sudo apt-get install -y --no-install-recommends musl-tools zip luarocks liblua5.1-0-dev libasound2-dev
           sudo luarocks install moonscript
 
       # La chaîne cosmocc se construit depuis l'arbre cosmopolitan corrigé :
@@ -39,6 +39,9 @@ jobs:
 
       - name: Construction
         run: scripts/construire.sh
+
+      - name: Tests
+        run: scripts/tester.sh
 
       - name: Vérification
         run: |

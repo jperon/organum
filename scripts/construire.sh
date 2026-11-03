@@ -20,3 +20,7 @@ make -C "$RACINE/externe/cosmopolitan" -j"$JOBS" m= o//tool/organum/organum
 
 echo "== interface web"
 ORGANUM="$RACINE/externe/cosmopolitan/o//tool/organum/organum" "$RACINE/web/scripts/build.sh"
+
+if [ "${ORGANUM_TESTS:-0}" = 1 ]; then
+	"$RACINE/scripts/tester.sh"
+fi

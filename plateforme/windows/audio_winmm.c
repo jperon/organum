@@ -140,4 +140,5 @@ void winmm_audio_fermer(audio_t *a) {
 }
 
 const char *winmm_audio_chemin(audio_t *a) { (void)a; return "winmm"; }
+const char *winmm_audio_derniere_erreur(void) { return NULL; }
 const char *winmm_audio_format(audio_t *a) { (void)a; return "FLOAT_LE"; }

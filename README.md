@@ -58,10 +58,34 @@ reconnecter. L'état courant est visible dans `/api/orgue` (`temps_reel`).
 | `ORGANUM_PERIODE` | `512` | Taille de période audio (trames) |
 | `ORGANUM_TAUX` | `48000` | Fréquence d'échantillonnage |
 | `ORGANUM_PERIPHERIQUE` | `default` | Périphérique ALSA |
+| `ORGANUM_LIBASOUND` | auto | Bibliothèque libasound à charger : fichier `.so` ou répertoire le contenant |
 | `ORGANUM_VOLUME` | auto | Outil de volume : `wpctl`, `pactl` ou `amixer` |
 | `ORGANUM_AMIXER_CONTROLE` | `Master` | Contrôle ALSA utilisé avec `amixer` |
 | `ORGANUM_ETAT` | `~/.config/organum/etat.json` | Registration et combinaisons |
 | `ORGANUM_CONFIG_MIDI` | `~/.config/organum/midi.json` | Associations MIDI |
+
+Sur NixOS et Guix, libasound se trouve souvent uniquement dans le magasin
+(`/nix/store`) et le chargeur dynamique ne sait pas le trouver sans cache
+`ld.so`. Indiquer alors le fichier ou son répertoire :
+
+```bash
+ORGANUM_LIBASOUND=/nix/store/…-alsa-lib/lib organum.com
+```
+
+Sous NixOS, ajouter `pkgs.alsa-lib` à `programs.nix-ld.libraries` évite de
+préciser la variable. En cas d'échec, le message d'erreur indique les chemins
+essayés et l'erreur de chargement ou d'ouverture ALSA.
+
+Variable interne réservée aux tests : `ORGANUM_LIBASOUND_STRICT=1` empêche le
+repli sur `libasound.so.2`/`libasound.so` quand `ORGANUM_LIBASOUND` est défini
+et a échoué. Elle n'est pas destinée à l'usage courant.
+
+Avec `ORGANUM_PERIPHERIQUE=hw:C,D`, organum accède directement au PCM
+`/dev/snd/pcmCCDDP` sans passer par libasound. L'ouverture se fait sans
+bloquer : si PipeWire (ou un autre serveur audio) détient le périphérique,
+l'accès échoue rapidement avec un message explicite au lieu d'attendre.
+Dans ce cas, revenir au périphérique `default` (la valeur par défaut), qui
+passe par le serveur audio.
 
 ### Bouton Panique
 
@@ -87,6 +111,16 @@ Le résultat est `web/build/organum.com`. Le script :
 3. compile le moteur (`moteur/`) en `libaeolus.a` ;
 4. lie l'exécutable dans l'arbre cosmopolitan (`tool/organum` → `cosmo/`) ;
 5. compile l'interface MoonScript et l'ajoute au zip de l'exécutable.
+
+Les tests de la couche plate-forme (dont le diagnostic libasound) se lancent
+séparément, après une construction :
+
+```bash
+scripts/tester.sh
+```
+
+`ORGANUM_TESTS=1 scripts/construire.sh` les enchaîne à la fin de la
+construction. La CI les exécute avant de publier `rolling`.
 
 Variante sans interface native (ni Nuklear ni fenêtre X11/Wayland),
 seulement l'interface web, après `scripts/construire.sh` :

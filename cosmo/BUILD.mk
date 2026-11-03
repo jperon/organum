@@ -79,3 +79,40 @@ o/$(MODE)/tool/organum/bip.dbg:						\
 		$(CRT)							\
 		$(APE_NO_MODIFY_SELF)
 	@$(APELINK)
+
+# Dépendances communes aux petits tests de la couche plate-forme.
+TOOL_ORGANUM_TEST_DEPS =						\
+		$(TOOL_NET_DEPS)					\
+		o/$(MODE)/libc/dlopen/dlopen.a				\
+		o/$(MODE)/tool/organum/plateforme_audio.o		\
+		o/$(MODE)/tool/organum/plateforme_audio_win.o		\
+		o/$(MODE)/tool/organum/plateforme_aiguillage.o		\
+		o/$(MODE)/tool/organum/plateforme_midi.o		\
+		o/$(MODE)/tool/organum/plateforme_midi_win.o
+
+# Vérifie le message d'erreur quand libasound ne peut pas être chargée.
+o/$(MODE)/tool/organum/erreur_alsa.o: private CFLAGS += -Wno-error
+o/$(MODE)/tool/organum/erreur_alsa.dbg:					\
+		$(TOOL_ORGANUM_TEST_DEPS)				\
+		o/$(MODE)/tool/organum/erreur_alsa.o			\
+		$(CRT)							\
+		$(APE_NO_MODIFY_SELF)
+	@$(APELINK)
+
+# Vérifie la construction des chemins (répertoire libasound, hw:C,D).
+o/$(MODE)/tool/organum/chemins_alsa.o: private CFLAGS += -Wno-error
+o/$(MODE)/tool/organum/chemins_alsa.dbg:					\
+		$(TOOL_ORGANUM_TEST_DEPS)				\
+		o/$(MODE)/tool/organum/chemins_alsa.o			\
+		$(CRT)							\
+		$(APE_NO_MODIFY_SELF)
+	@$(APELINK)
+
+# Vérifie les échecs open/fcntl du chemin ioctl, sans matériel.
+o/$(MODE)/tool/organum/injection_alsa.o: private CFLAGS += -Wno-error
+o/$(MODE)/tool/organum/injection_alsa.dbg:				\
+		$(TOOL_ORGANUM_TEST_DEPS)				\
+		o/$(MODE)/tool/organum/injection_alsa.o			\
+		$(CRT)							\
+		$(APE_NO_MODIFY_SELF)
+	@$(APELINK)

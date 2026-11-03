@@ -14,6 +14,7 @@
   void p##_audio_fermer(audio_t *);                                           \
   const char *p##_audio_chemin(audio_t *);                                    \
   const char *p##_audio_format(audio_t *);                                    \
+  const char *p##_audio_derniere_erreur(void);                                \
   midi_t *p##_midi_ouvrir(const char *, const char *);                        \
   int p##_midi_fd(midi_t *);                                                  \
   int p##_midi_lire(midi_t *, midi_msg_t *, int);                             \

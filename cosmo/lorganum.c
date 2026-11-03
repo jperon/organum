@@ -306,8 +306,16 @@ static int l_demarrer(lua_State *L) {
 
   g_moteur = aeolus_creer(taux);
   if (!(g_audio = audio_ouvrir(peripherique, taux, 2, g_periode, nb_periodes))) {
-    lua_pushnil(L);
-    lua_pushstring(L, "sortie audio indisponible");
+    const char *detail = audio_derniere_erreur();
+    char message[1200];
+    if (detail && detail[0]) {
+      snprintf(message, sizeof(message), "sortie audio indisponible : %s", detail);
+      lua_pushnil(L);
+      lua_pushstring(L, message);
+    } else {
+      lua_pushnil(L);
+      lua_pushstring(L, "sortie audio indisponible");
+    }
     return 2;
   }
   if (!(g_midi = midi_ouvrir("Organum", "entree"))) {
