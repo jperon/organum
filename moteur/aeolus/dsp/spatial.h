@@ -68,7 +68,13 @@ public:
 
     void reset();
 
-    void tick(float x, float& l, float& r);
+    inline void tick(float x, float& l, float& r)
+    {
+        _delayLine.write(x);
+
+        l = BiquadFilter::tick(_filterSpec[0], _filterState[0], _delayLine.readNearest(_leftDelay) * _leftAttenuation);
+        r = BiquadFilter::tick(_filterSpec[1], _filterState[1], _delayLine.readNearest(_rightDelay) * _rightAttenuation);
+    }
 
     void process(float* in, float* outL, float* outR, int numFrames);
 

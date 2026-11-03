@@ -19,6 +19,8 @@
 
 
 #include <cassert>
+#include <cstdlib>
+#include <cstring>
 #include "aeolus/simd.h"
 
 #ifdef SIMD
@@ -28,16 +30,30 @@
 
 #if defined (__APPLE__) && defined (__x86_64__) && TARGET_OS_OSX
 #   include <x86intrin.h>
-#   define SIMD
+#   define SIMD 1
 #   define SIMD_FMA 0   // Disable fma on Apple targets
 #   define SIMD_AVX 0
 #elif defined (_MSC_VER)
 #   include <pmmintrin.h>
 #   include <immintrin.h>
 #   include <intrin.h>
-#   define SIMD
+#   define SIMD 1
 #   define SIMD_FMA 1
 #   define SIMD_AVX 1
+#elif defined (__GNUC__) && defined (__x86_64__)
+#   include <immintrin.h>
+#   define SIMD 1
+#   define SIMD_FMA 1
+#   define SIMD_AVX 1
+#endif
+
+// Target attributes keep the SIMD kernels self-contained : the surrounding
+// translation unit is still built for plain x86-64 (SSE2 baseline), so the
+// binary keeps running on an old CPU that only takes the no_simd fallback.
+#if defined(__GNUC__) || defined(__clang__)
+#   define AEOLUS_TARGET(x) __attribute__((target(x)))
+#else
+#   define AEOLUS_TARGET(x)
 #endif
 
 AEOLUS_NAMESPACE_BEGIN
@@ -59,7 +75,7 @@ static void cpuid_func(uint32_t* regs, unsigned funcId)
 
 CPUTraits CPUTraits::get()
 {
-    CPUTraits cpu;
+    CPUTraits cpu = {};
 
     enum
     {
@@ -72,21 +88,57 @@ CPUTraits CPUTraits::get()
     uint32_t regs[4] = {0};
 
     cpuid_func (regs, 1);
-    cpu.sse3     = (regs[ecx] & (1 <<  0)) != 0;
-    cpu.ssse3    = (regs[ecx] & (1 <<  9)) != 0;
-    cpu.fma      = (regs[ecx] & (1 << 12)) != 0;
-    cpu.sse41    = (regs[ecx] & (1 << 19)) != 0;
-    cpu.sse42    = (regs[ecx] & (1 << 20)) != 0;
-    cpu.sse      = (regs[ecx] & (1 << 25)) != 0;
-    cpu.sse2     = (regs[ecx] & (1 << 26)) != 0;
-    cpu.avx      = (regs[ecx] & (1 << 28)) != 0;
+    cpu.sse3     = (regs[ecx] & (1u <<  0)) != 0;
+    cpu.ssse3    = (regs[ecx] & (1u <<  9)) != 0;
+    cpu.fma      = (regs[ecx] & (1u << 12)) != 0;
+    cpu.sse41    = (regs[ecx] & (1u << 19)) != 0;
+    cpu.sse42    = (regs[ecx] & (1u << 20)) != 0;
+    // SSE and SSE2 are reported in EDX bits 25 and 26 (not in ECX).
+    cpu.sse      = (regs[edx] & (1u << 25)) != 0;
+    cpu.sse2     = (regs[edx] & (1u << 26)) != 0;
+    // AVX requires the CPU bit (ECX[28]) *and* the OS XSAVE bit (ECX[27]).
+    cpu.avx      = (regs[ecx] & (1u << 28)) != 0;
 
-    cpuid_func (regs, 7);
-    cpu.avx2     = (regs[ebx] & (1 <<  5)) != 0;
-    cpu.avx512f  = (regs[ebx] & (1 << 16)) != 0;
-    cpu.avx512pf = (regs[ebx] & (1 << 26)) != 0;
-    cpu.avx512er = (regs[ebx] & (1 << 27)) != 0;
-    cpu.avx512cd = (regs[ebx] & (1 << 28)) != 0;
+    const bool osxsave = (regs[ecx] & (1u << 27)) != 0;
+    if (cpu.avx && !osxsave) {
+        cpu.avx = false;
+        cpu.fma = false;
+    }
+
+    // CPUID leaf 7 is only valid if the maximum basic leaf is >= 7.
+    uint32_t maxleaf[4] = {0};
+    cpuid_func (maxleaf, 0);
+    regs[eax] = regs[ebx] = regs[ecx] = regs[edx] = 0;
+    if (maxleaf[eax] >= 7)
+        cpuid_func (regs, 7);
+
+    cpu.avx2     = (regs[ebx] & (1u <<  5)) != 0;
+    cpu.avx512f  = (regs[ebx] & (1u << 16)) != 0;
+    cpu.avx512pf = (regs[ebx] & (1u << 26)) != 0;
+    cpu.avx512er = (regs[ebx] & (1u << 27)) != 0;
+    cpu.avx512cd = (regs[ebx] & (1u << 28)) != 0;
+
+#if defined(SIMD)
+    if (cpu.avx) {
+        // XGETBV would fault if the OS has not enabled XSAVE, hence the
+        // osxsave test above. If XMM/YMM state is not saved by the OS, the
+        // AVX/FMA instructions are unusable even when the CPU reports them.
+        uint32_t xcr0_lo = 0, xcr0_hi = 0;
+#   if defined(_MSC_VER)
+        uint64_t xcr0 = _xgetbv(0);
+        xcr0_lo = (uint32_t) xcr0;
+        xcr0_hi = (uint32_t) (xcr0 >> 32);
+#   elif defined(__GNUC__) && defined(__x86_64__)
+        __asm__ volatile ("xgetbv" : "=a"(xcr0_lo), "=d"(xcr0_hi) : "c"(0));
+#   endif
+        (void) xcr0_hi;
+        if ((xcr0_lo & 0x6) != 0x6) {
+            cpu.avx = false;
+            cpu.avx2 = false;
+            cpu.fma = false;
+        }
+    }
+#endif
 
     return cpu;
 };
@@ -174,6 +226,7 @@ namespace no_simd {
 #ifdef SIMD
 
 namespace sse {
+    AEOLUS_TARGET("sse2")
     void add (float* out, const float* in, size_t size)
     {
         assert((size & 0x3) == 0);
@@ -186,6 +239,7 @@ namespace sse {
         }
     }
 
+    AEOLUS_TARGET("sse2")
     void mul_const_add(float* out, const float* in, const float k, size_t size)
     {
         assert((size & 0x3) == 0);
@@ -200,6 +254,7 @@ namespace sse {
         }
     }
 
+    AEOLUS_TARGET("sse2")
     void add_mul_const(float* out, const float* in, const float k, size_t size)
     {
         assert((size & 0x3) == 0);
@@ -214,6 +269,7 @@ namespace sse {
         }
     }
 
+    AEOLUS_TARGET("sse2")
     void mul_const(float* out, const float k, size_t size)
     {
         assert((size & 0x3) == 0);
@@ -226,6 +282,7 @@ namespace sse {
         }
     }
 
+    AEOLUS_TARGET("sse3")
     float mul_reduce(const float* x, const float* y, size_t size)
     {
         assert((size & 0x3) == 0);
@@ -247,6 +304,7 @@ namespace sse {
         return vec[0];
     }
 
+    AEOLUS_TARGET("sse3")
     float mul_reduce_unaligned(const float* x, const float* y, size_t size)
     {
         float sum = 0.0f;
@@ -278,6 +336,7 @@ namespace sse {
         return sum;
     }
 
+    AEOLUS_TARGET("sse2")
     void complex_mul(float* res, const float* a, const float* b, size_t size)
     {
         assert ((size & 0x3) == 0);
@@ -301,6 +360,7 @@ namespace sse {
         }
     }
 
+    AEOLUS_TARGET("sse2")
     void complex_mul_conj(float* res, const float* a, const float* b, size_t size)
     {
         assert ((size & 0x3) == 0);
@@ -327,6 +387,7 @@ namespace sse {
         }
     }
 
+    AEOLUS_TARGET("sse2")
     void fft_step(float* data, const float* w, size_t n)
     {
         assert ((n & 0x3) == 0);
@@ -365,6 +426,7 @@ namespace sse {
 #if SIMD_FMA
     namespace fma {
 
+        AEOLUS_TARGET("avx,fma")
         void mul_const_add(float* out, const float* in, const float k, size_t size)
         {
             assert ((size & 0x3) == 0);
@@ -378,6 +440,7 @@ namespace sse {
             }
         }
 
+        AEOLUS_TARGET("avx,fma")
         float mul_reduce(const float* x, const float* y, size_t size)
         {
             assert ((size & 0x3) == 0);
@@ -398,6 +461,7 @@ namespace sse {
             return vec[0];
         }
 
+        AEOLUS_TARGET("avx,fma")
         float mul_reduce_unaligned(const float* x, const float* y, size_t size)
         {
             float sum = 0.0f;
@@ -428,6 +492,7 @@ namespace sse {
             return sum;
         }
 
+        AEOLUS_TARGET("avx,fma")
         void complex_mul(float* res, const float* a, const float* b, size_t size)
         {
             assert ((size & 0x3) == 0);
@@ -451,6 +516,7 @@ namespace sse {
             }
         }
 
+        AEOLUS_TARGET("avx,fma")
         void complex_mul_conj(float* res, const float* a, const float* b, size_t size)
         {
             assert ((size & 0x3) == 0);
@@ -478,6 +544,7 @@ namespace sse {
             }
         }
 
+        AEOLUS_TARGET("avx,fma")
         void fft_step(float* data, const float* w, size_t n)
         {
             assert ((n & 0x3) == 0);
@@ -518,6 +585,7 @@ namespace sse {
 
 namespace avx {
 #if SIMD_AVX
+    AEOLUS_TARGET("avx")
     void add(float* out, const float* in, size_t size)
     {
         assert ((size & 0x7) == 0);
@@ -535,6 +603,7 @@ namespace avx {
         _mm256_zeroupper();
     }
 
+    AEOLUS_TARGET("avx")
     void mul_const_add(float* out, const float* in, const float k, size_t size)
     {
         assert ((size & 0x7) == 0);
@@ -554,6 +623,7 @@ namespace avx {
         _mm256_zeroupper();
     }
 
+    AEOLUS_TARGET("avx")
     void add_mul_const(float* out, const float* in, const float k, size_t size)
     {
         assert ((size & 0x7) == 0);
@@ -574,6 +644,7 @@ namespace avx {
         _mm256_zeroupper();
     }
 
+    AEOLUS_TARGET("avx")
     void mul_const(float* out, const float k, size_t size)
     {
         assert ((size & 0x7) == 0);
@@ -590,6 +661,7 @@ namespace avx {
         _mm256_zeroupper();
     }
 
+    AEOLUS_TARGET("avx")
     float mul_reduce(const float* x, const float* y, size_t size)
     {
         assert ((size & 0x7) == 0);
@@ -605,18 +677,18 @@ namespace avx {
             sum = _mm256_add_ps (sum, vs);
         }
 
-        sum = _mm256_hadd_ps (sum, sum);
-        sum = _mm256_hadd_ps (sum, sum);
-        sum = _mm256_hadd_ps (sum, sum);
-
-        alignas (32) float vec[8];
-        _mm256_store_ps (vec, sum);
+        __m128 lo = _mm256_castps256_ps128 (sum);
+        __m128 hi = _mm256_extractf128_ps (sum, 1);
+        __m128 s = _mm_add_ps (lo, hi);
+        s = _mm_hadd_ps (s, s);
+        s = _mm_hadd_ps (s, s);
 
         _mm256_zeroupper();
 
-        return vec[0];
+        return _mm_cvtss_f32 (s);
     }
 
+    AEOLUS_TARGET("avx")
     float mul_reduce_unaligned(const float* x, const float* y, size_t size)
     {
         assert ((size & 0x07) == 0);
@@ -635,14 +707,13 @@ namespace avx {
                 vsum = _mm256_add_ps (vsum, vs);
             }
 
-            vsum = _mm256_hadd_ps (vsum, vsum);
-            vsum = _mm256_hadd_ps (vsum, vsum);
-            vsum = _mm256_hadd_ps (vsum, vsum);
+            __m128 lo = _mm256_castps256_ps128 (vsum);
+            __m128 hi = _mm256_extractf128_ps (vsum, 1);
+            __m128 s = _mm_add_ps (lo, hi);
+            s = _mm_hadd_ps (s, s);
+            s = _mm_hadd_ps (s, s);
 
-            alignas (32) float vec[8];
-            _mm256_store_ps (vec, vsum);
-
-            sum = vec[0];
+            sum = _mm_cvtss_f32 (s);
         }
 
         for (; i < size; ++i)
@@ -653,6 +724,7 @@ namespace avx {
         return sum;
     }
 
+    AEOLUS_TARGET("avx")
     void complex_mul(float* res, const float* a, const float* b, size_t size)
     {
         if (size < 8) {
@@ -688,6 +760,7 @@ namespace avx {
         _mm256_zeroupper();
     }
 
+    AEOLUS_TARGET("avx")
     void complex_mul_conj(float* res, const float* a, const float* b, size_t size)
     {
         if (size < 8) {
@@ -726,6 +799,7 @@ namespace avx {
         _mm256_zeroupper();
     }
 
+    AEOLUS_TARGET("avx")
     void fft_step(float* data, const float* w, size_t n)
     {
         assert ((n & 0x7) == 0);
@@ -765,6 +839,7 @@ namespace avx {
 
     namespace fma {
 #if SIMD_FMA
+        AEOLUS_TARGET("avx,fma")
         void mul_const_add(float* out, const float* in, const float k, size_t size)
         {
             assert ((size & 0x7) == 0);
@@ -784,6 +859,7 @@ namespace avx {
         }
 
 
+        AEOLUS_TARGET("avx,fma")
         float mul_reduce(const float* x, const float* y, size_t size)
         {
             assert ((size & 0x7) == 0);
@@ -798,17 +874,18 @@ namespace avx {
                 sum = _mm256_fmadd_ps (vx, vy, sum);
             }
 
-            sum = _mm256_hadd_ps (sum, sum);
-            sum = _mm256_hadd_ps (sum, sum);
-
-            alignas (32) float vec[8];
-            _mm256_store_ps (vec, sum);
+            __m128 lo = _mm256_castps256_ps128 (sum);
+            __m128 hi = _mm256_extractf128_ps (sum, 1);
+            __m128 s = _mm_add_ps (lo, hi);
+            s = _mm_hadd_ps (s, s);
+            s = _mm_hadd_ps (s, s);
 
             _mm256_zeroupper();
 
-            return vec[0] + vec[4];
+            return _mm_cvtss_f32 (s);
         }
 
+        AEOLUS_TARGET("avx,fma")
         float mul_reduce_unaligned(const float* x, const float* y, size_t size)
         {
             assert ((size & 0x07) == 0);
@@ -826,13 +903,13 @@ namespace avx {
                     vsum = _mm256_fmadd_ps (vx, vy, vsum);
                 }
 
-                vsum = _mm256_hadd_ps (vsum, vsum);
-                vsum = _mm256_hadd_ps (vsum, vsum);
+                __m128 lo = _mm256_castps256_ps128 (vsum);
+                __m128 hi = _mm256_extractf128_ps (vsum, 1);
+                __m128 s = _mm_add_ps (lo, hi);
+                s = _mm_hadd_ps (s, s);
+                s = _mm_hadd_ps (s, s);
 
-                alignas (32) float vec[8];
-                _mm256_store_ps (vec, vsum);
-
-                sum = vec[0] + vec[4];
+                sum = _mm_cvtss_f32 (s);
             }
 
             for (; i < size; ++i)
@@ -843,6 +920,7 @@ namespace avx {
             return sum;
         }
 
+        AEOLUS_TARGET("avx,fma")
         void complex_mul(float* res, const float* a, const float* b, size_t size)
         {
             if (size < 8) {
@@ -879,6 +957,7 @@ namespace avx {
         }
 
 
+        AEOLUS_TARGET("avx,fma")
         void complex_mul_conj(float* res, const float* a, const float* b, size_t size)
         {
             if (size < 8) {
@@ -918,6 +997,7 @@ namespace avx {
             _mm256_zeroupper();
         }
 
+        AEOLUS_TARGET("avx,fma")
         void fft_step(float* data, const float* w, size_t n)
         {
             assert ((n & 0x7) == 0);
@@ -974,35 +1054,76 @@ void  (*simd::fft_step)(float*, const float*, size_t)                       = &n
 
 #ifdef SIMD
 
+// ORGANUM_SIMD permet de forcer un niveau, pour les tests :
+//   "0" / "none"  : repli no_simd intégral ;
+//   "sse"/"sse2"  : SSE2/SSE3 seulement (jeu d'instructions d'un Atom
+//                   Silvermont, sans AVX ni FMA) ;
+//   "avx"/"nofma" : SSE puis AVX, sans FMA ;
+//   absent        : meilleur niveau supporté par le CPU.
+static const char* simd_env()
+{
+    return std::getenv("ORGANUM_SIMD");
+}
+
+static bool simd_none_requested()
+{
+    const char* e = simd_env();
+    if (!e) return false;
+    return (e[0] == '0' && e[1] == '\0') || std::strcmp(e, "none") == 0;
+}
+
+static bool simd_sse_only_requested()
+{
+    const char* e = simd_env();
+    return e && (std::strcmp(e, "sse") == 0 || std::strcmp(e, "sse2") == 0);
+}
+
+static bool simd_no_fma_requested()
+{
+    const char* e = simd_env();
+    return e && (std::strcmp(e, "avx") == 0 || std::strcmp(e, "nofma") == 0);
+}
+
 static const bool simd_map = []() -> bool {
 
-    const auto cpu = CPUTraits::get();
+    if (simd_none_requested())
+        return true;
 
-    if (cpu.sse) {
+    const auto cpu = CPUTraits::get();
+    const bool sse_only = simd_sse_only_requested();
+    const bool no_fma = sse_only || simd_no_fma_requested();
+
+    // SSE2 is the x86-64 baseline: these kernels only use legacy SSE
+    // instructions (MOVAPS/MULPS/ADDPS/SHUFPS) and are safe there.
+    if (cpu.sse2) {
         simd::add                  = &sse::add;
         simd::mul_const_add        = &sse::mul_const_add;
         simd::add_mul_const        = &sse::add_mul_const;
         simd::mul_const            = &sse::mul_const;
-        simd::mul_reduce           = &sse::mul_reduce;
-        simd::mul_reduce_unaligned = &sse::mul_reduce_unaligned;
         simd::complex_mul          = &sse::complex_mul;
         simd::complex_mul_conj     = &sse::complex_mul_conj;
         simd::fft_step             = &sse::fft_step;
-
-#if SIMD_FMA
-        if (cpu.fma) {
-            simd::mul_const_add        = &sse::fma::mul_const_add;
-            simd::mul_reduce           = &sse::fma::mul_reduce;
-            simd::mul_reduce_unaligned = &sse::fma::mul_reduce_unaligned;
-            simd::complex_mul          = &sse::fma::complex_mul;
-            simd::complex_mul_conj     = &sse::fma::complex_mul_conj;
-            simd::fft_step             = &sse::fma::fft_step;
-        }
-#endif // SIMD_FMA
     }
 
+    // The horizontal reductions use HADDPS, which is SSE3.
+    if (cpu.sse3) {
+        simd::mul_reduce           = &sse::mul_reduce;
+        simd::mul_reduce_unaligned = &sse::mul_reduce_unaligned;
+    }
+
+#if SIMD_FMA
+    if (!no_fma && cpu.sse2 && cpu.avx && cpu.fma) {
+        simd::mul_const_add        = &sse::fma::mul_const_add;
+        simd::mul_reduce           = &sse::fma::mul_reduce;
+        simd::mul_reduce_unaligned = &sse::fma::mul_reduce_unaligned;
+        simd::complex_mul          = &sse::fma::complex_mul;
+        simd::complex_mul_conj     = &sse::fma::complex_mul_conj;
+        simd::fft_step             = &sse::fma::fft_step;
+    }
+#endif // SIMD_FMA
+
 #if SIMD_AVX
-    if (cpu.avx) {
+    if (cpu.avx && !sse_only) {
         simd::add                  = &avx::add;
         simd::mul_const_add        = &avx::mul_const_add;
         simd::add_mul_const        = &avx::add_mul_const;
@@ -1014,7 +1135,7 @@ static const bool simd_map = []() -> bool {
         simd::fft_step             = &avx::fft_step;
 
 #if SIMD_FMA
-        if (cpu.fma) {
+        if (!no_fma && cpu.fma) {
             simd::mul_const_add        = &avx::fma::mul_const_add;
             simd::mul_reduce           = &avx::fma::mul_reduce;
             simd::mul_reduce_unaligned = &avx::fma::mul_reduce_unaligned;
@@ -1028,7 +1149,6 @@ static const bool simd_map = []() -> bool {
 
     return true;
 }();
-
 #endif
 
 AEOLUS_NAMESPACE_END

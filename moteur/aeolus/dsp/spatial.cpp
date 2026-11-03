@@ -48,19 +48,61 @@ void SpatialSource::reset()
     BiquadFilter::resetState(_filterSpec[1], _filterState[1]);
 }
 
-void SpatialSource::tick(float x, float& l, float& r)
-{
-    _delayLine.write(x);
-
-    l = BiquadFilter::tick(_filterSpec[0], _filterState[0], _delayLine.readNearest(_leftDelay) * _leftAttenuation);
-    r = BiquadFilter::tick(_filterSpec[1], _filterState[1], _delayLine.readNearest(_rightDelay) * _rightAttenuation);
-}
-
 void SpatialSource::process(float* in, float* outL, float* outR, int numFrames)
 {
+    if (numFrames <= 0)
+        return;
+
+    // Memes operations flottantes que numFrames appels a tick(), mais avec
+    // l'index d'ecriture, les etats de filtres et les constantes en locaux.
+    float* const buf = _delayLine.bufferData();
+    const size_t sz = _delayLine.size();
+    size_t wi = _delayLine.writeIndex();
+
+    const int leftDelay = _leftDelay;
+    const int rightDelay = _rightDelay;
+    const float leftAttenuation = _leftAttenuation;
+    const float rightAttenuation = _rightAttenuation;
+
+    const BiquadFilter::Spec& specL = _filterSpec[0];
+    const BiquadFilter::Spec& specR = _filterSpec[1];
+    BiquadFilter::State stateL = _filterState[0];
+    BiquadFilter::State stateR = _filterState[1];
+
     for (int i = 0; i < numFrames; ++i) {
-        tick(in[i], outL[i], outR[i]);
+        if (wi == 0)
+            wi = sz - 1;
+        else
+            --wi;
+        const float x = in[i];
+        buf[wi] = x;
+
+        {
+            const float inL = buf[wrapDelayIndex((size_t) leftDelay + wi, sz)] * leftAttenuation;
+            const float y = specL.b[0] * inL + specL.b[1] * stateL.x[0] + specL.b[2] * stateL.x[1]
+                            - specL.a[1] * stateL.y[0] - specL.a[2] * stateL.y[1];
+            stateL.x[1] = stateL.x[0];
+            stateL.x[0] = inL;
+            stateL.y[1] = stateL.y[0];
+            stateL.y[0] = y;
+            outL[i] = y;
+        }
+
+        {
+            const float inR = buf[wrapDelayIndex((size_t) rightDelay + wi, sz)] * rightAttenuation;
+            const float y = specR.b[0] * inR + specR.b[1] * stateR.x[0] + specR.b[2] * stateR.x[1]
+                            - specR.a[1] * stateR.y[0] - specR.a[2] * stateR.y[1];
+            stateR.x[1] = stateR.x[0];
+            stateR.x[0] = inR;
+            stateR.y[1] = stateR.y[0];
+            stateR.y[0] = y;
+            outR[i] = y;
+        }
     }
+
+    _delayLine.setWriteIndex(wi);
+    _filterState[0] = stateL;
+    _filterState[1] = stateR;
 }
 
 static float distanceToCutOffFrequency(float d)

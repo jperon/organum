@@ -63,7 +63,21 @@ struct BiquadFilter
 
     static void updateSpec(Spec& spec);
     static void resetState(const Spec& spec, State& state);
-    static float tick(const Spec& spec, State& state, float in);
+
+    static inline float tick(const Spec& spec, State& state, float in)
+    {
+        const float x = in;
+        const float y = spec.b[0] * x + spec.b[1] * state.x[0] + spec.b[2] * state.x[1]
+                        - spec.a[1] * state.y[0] - spec.a[2] * state.y[1];
+
+        state.x[1] = state.x[0];
+        state.x[0] = x;
+        state.y[1] = state.y[0];
+        state.y[0] = y;
+
+        return y;
+    }
+
     static void process(const Spec& spec, State& state, const float* in, float* out, size_t size);
 };
 
