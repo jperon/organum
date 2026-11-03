@@ -14,6 +14,14 @@ JS = [[
   var statusDisplay = document.getElementById('status');
   var muteButton = document.getElementById('mute');
 
+  var etatReseau = false;
+  var etatAeolus = false;
+  var LIBELLES_ETAT = {
+    vert: 'Connecté et synchronisé',
+    orange: 'Connecté, non synchronisé',
+    rouge: 'Déconnecté'
+  };
+
   var state = { volume: 50, muted: false };
   var revision = 0;
   var dragging = false;
@@ -63,13 +71,27 @@ JS = [[
     muteButton.classList.toggle('is-muted', state.muted);
   }
 
-  function setStatus(isOnline) {
-    var text = isOnline ? 'Connecté' : 'Hors ligne…';
-    if (statusDisplay.textContent !== text) {
-      statusDisplay.textContent = text;
+  function majPuceEtat() {
+    var etat = !etatReseau ? 'rouge' : (etatAeolus ? 'vert' : 'orange');
+    var classe = 'etat-' + etat;
+    var libelle = LIBELLES_ETAT[etat] || LIBELLES_ETAT.rouge;
+    statusDisplay.classList.remove('etat-vert', 'etat-orange', 'etat-rouge');
+    statusDisplay.classList.add(classe);
+    statusDisplay.title = libelle;
+    var texte = statusDisplay.querySelector('.sr-only');
+    if (texte && texte.textContent !== libelle) {
+      texte.textContent = libelle;
     }
-    statusDisplay.classList.toggle('online', isOnline);
-    statusDisplay.classList.toggle('offline', !isOnline);
+  }
+
+  function setStatus(isOnline) {
+    etatReseau = isOnline === true;
+    majPuceEtat();
+  }
+
+  function setAeolusMode(actif) {
+    etatAeolus = actif === true;
+    majPuceEtat();
   }
 
   function applyState(next) {
@@ -224,29 +246,14 @@ JS = [[
     function shouldPollOrgue() {
       return orgueTabActive() && document.visibilityState === 'visible';
     }
-    function syncEl() {
-      var el = document.getElementById('orgue-sync');
-      if (!el) {
-        el = document.createElement('span');
-        el.id = 'orgue-sync';
-        el.textContent = 'synchronisé';
-        el.setAttribute('style', 'font-size:0.78rem;color:#7cf0b2;margin-left:8px;');
-        var st = document.getElementById('status');
-        if (st && st.parentNode) { st.parentNode.appendChild(el); }
-      }
-      return el;
-    }
     function updateSyncUI() {
       var note = document.querySelector('#panel-orgue .note');
-      var sync = document.getElementById('orgue-sync');
       if (aeolusMode) {
         if (note) { note.style.display = 'none'; }
-        var s = sync || syncEl();
-        if (s) { s.style.display = ''; }
       } else {
         if (note) { note.style.display = ''; }
-        if (sync) { sync.style.display = 'none'; }
       }
+      setAeolusMode(aeolusMode);
     }
 
     function stateOf(div, idx) {
@@ -371,7 +378,8 @@ JS = [[
           }
         })
         .catch(function () {
-          if (token !== orgueToken) { return; }
+          if (token !== orgueToken || !shouldPollOrgue()) { return; }
+          setAeolusMode(false);
           window.setTimeout(function () {
             if (token === orgueToken && shouldPollOrgue()) { attendreLoop(instance, seq, token); }
           }, 2000);
@@ -393,7 +401,8 @@ JS = [[
           }
         })
         .catch(function () {
-          if (token !== orgueToken) { return; }
+          if (token !== orgueToken || !shouldPollOrgue()) { return; }
+          setAeolusMode(false);
           window.setTimeout(function () {
             if (token === orgueToken && shouldPollOrgue()) { fetchOrgueInitial(token); }
           }, 2000);

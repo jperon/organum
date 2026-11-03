@@ -94,32 +94,52 @@ CSS = [[
   }
 
   .status {
-    margin: 0;
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 7px;
-    color: var(--text-dim);
-    font-size: 0.78rem;
-    font-weight: 500;
-    text-align: center;
-  }
-
-  .status::before {
-    content: "";
     flex: 0 0 auto;
-    width: 9px;
-    height: 9px;
+    width: 12px;
+    height: 12px;
+    min-width: 12px;
+    min-height: 12px;
+    margin: 0;
+    padding: 0;
+    border: 0;
     border-radius: 50%;
     background: var(--off);
+    box-shadow: none;
+    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
   }
 
-  .status.online::before {
+  .status.etat-vert {
     background: var(--ok);
   }
 
-  .status.offline::before {
-    background: var(--off);
+  .status.etat-orange {
+    background: var(--warn);
+    box-shadow: inset 0 0 0 3px var(--bg);
+  }
+
+  .status.etat-rouge {
+    border: 2px solid var(--off);
+    background: transparent;
+  }
+
+  .etat-fallback {
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
   }
 
   .controls {
@@ -517,7 +537,6 @@ CSS = [[
     min-width: 3.5em;
     text-align: right;
   }
-  .volume-general .status { font-size: 0.7rem; }
   .volume-etiquette, .reverb { font-size: 0.85rem; color: var(--text-dim); }
   .barre .btn.mute,
   .barre .btn.panic { flex: 1 1 0; width: auto; min-height: 44px; font-size: 1rem; margin: 0; }
