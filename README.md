@@ -76,18 +76,21 @@ curl -s localhost:8080/api/orgue \
 | `instabilite` | booléen | `true` | instabilité aléatoire de hauteur |
 | `spatialisation` | entier | `2` | 0 = coupée, 1 = simplifiée, 2 = complète |
 | `polyphonie_max` | entier | `0` | 0 = illimitée, sinon 1 à 512 voix |
-| `tete_reverb` | booléen | `true` | tête zéro latence (au prochain démarrage) |
+| `tete_reverb` | booléen | `true` | tête zéro latence EFFECTIVE (ORGANUM_REVERB_TETE compris), au prochain démarrage pour un changement |
+| `tete_reverb_impose` | booléen | `false` | vrai quand ORGANUM_REVERB_TETE force la valeur |
 | `niveau` | entier | présélection correspondante, sinon `-1` | 0 à 3 |
 | `auto` | booléen | `true` au premier lancement | calibration automatique au démarrage |
 | `calibration` | objet | absent si aucune calibration | résultat de la calibration de ce démarrage |
 
 Les quatre premiers champs s'appliquent à chaud, aux notes déclenchées
-ensuite. `tete_reverb`, lui, ne change qu'au démarrage suivant.
+ensuite. `tete_reverb` expose la valeur EFFECTIVE (après application de
+`ORGANUM_REVERB_TETE`) ; un changement de configuration ne s'applique qu'au
+démarrage suivant.
 
 Mode automatique : au premier lancement (fichier d'état sans clé `qualite`)
 ou avec `ORGANUM_QUALITE=auto`, une calibration mesure la machine **avant
 d'ouvrir l'audio**, sans créer d'instance du moteur, et choisit le niveau
-dont le temps de bloc estimé à 150 voix reste sous 60 % de l'échéance réelle
+dont le temps de bloc estimé à 250 voix reste sous 60 % de l'échéance réelle
 (`periode / taux`). Le niveau retenu est appliqué comme une présélection, et
 `auto` reste vrai tant qu'un champ individuel n'a pas été modifié à la main.
 Si la calibration échoue ou dépasse 1,5 s, organum se replie sur le niveau 3
@@ -115,13 +118,16 @@ présélection :
 
 | niveau | spatialisation | bruit_attaque | instabilite | polyphonie_max | tete_reverb |
 |---|---|---|---|---|---|
-| 0 | 0 | non | non | 96 | non |
-| 1 | 1 | non | non | 160 | non |
-| 2 | 1 | oui | oui | 256 | oui |
+| 0 | 0 | non | non | 64 | non |
+| 1 | 1 | non | non | 128 | non |
+| 2 | 1 | oui | oui | 192 | oui |
 | 3 | 2 | oui | oui | 0 (illimité) | oui |
 
 Une valeur invalide (champ inconnu, type incorrect, valeur hors bornes,
-objet vide) renvoie `400` avec un message en français. La réponse indique
+objet vide) renvoie `400` avec un message en français. La réponse reflète
+les valeurs **demandées** pour les champs à chaud (elle n'attend pas que le
+fil audio les ait publiées) ; `tete_reverb` y reste la valeur effective, un
+changement ne s'appliquant qu'au redémarrage. La réponse indique
 `redemarrage_requis: true` quand `tete_reverb` change. Les réglages sont
 enregistrés dans `etat.json` (clé `qualite`) et restaurés au démarrage.
 
@@ -206,7 +212,7 @@ livrer le son à temps. Ne pas la relever au-dessus de PipeWire.
 | `ORGANUM_QUALITE` | auto | `auto` ou `0`..`3` : force la qualité au démarrage, prioritaire sur `etat.json` |
 | `ORGANUM_REVERB_TETE` | oui | `non` (ou `0`) coupe la tête zéro latence de la réverbération, prioritaire sur `tete_reverb` |
 | `ORGANUM_CALIBRATION_FACTEUR` | `1` | Réservé aux tests : multiplie tous les coûts mesurés par la calibration (simule une machine plus lente) |
-| `ORGANUM_CALIBRATION_VOIX` | `150` | Réservé aux tests : nombre de voix de référence de la calibration |
+| `ORGANUM_CALIBRATION_VOIX` | `250` | Réservé aux tests : nombre de voix de référence de la calibration |
 
 Le limiteur de sortie est actif par défaut. Les pilotes audio convertissent
 les échantillons flottants en entiers et **écrêtent dur** au-delà de 1.0 :

@@ -428,6 +428,8 @@ texte_calibration = (c) ->
       instabilite: base.instabilite == true
       spatialisation: base.spatialisation or 0
       polyphonie_max: base.polyphonie_max or 0
+      tete_reverb: base.tete_reverb
+      tete_reverb_impose: base.tete_reverb_impose == true
       niveau: modele.niveau_correspondant base
       calibration: base.calibration
     }
@@ -806,9 +808,12 @@ texte_calibration = (c) ->
           if ui\choix(nom, actif) != actif
             regler_qualite {spatialisation: v - 1}
 
-        -- Polyphonie maximale : 0 = illimitée, jusqu'à 512.
-        ui\ligne ligne, 3
+        -- Polyphonie maximale : 0 = illimitée, jusqu'à 512. Colonnes de
+        -- largeurs inégales : le libellé complet et un curseur assez long
+        -- pour rester manœuvrable même à 720 px de large.
+        ui\ligne_ratio ligne, {1.9, 0.25, 2.0, 0.85}
         ui\texte "Polyphonie max.", "droite"
+        ui\texte ""
         poly = ui\curseur (q.polyphonie_max or 0), 0, 512, 1
         if bouge (q.polyphonie_max or 0), poly
           regler_qualite {polyphonie_max: math.floor poly + 0.5}
@@ -816,9 +821,18 @@ texte_calibration = (c) ->
 
         if a_tete
           ui\ligne ligne, 1
-          actif_tete = q.tete_reverb == true
-          nouveau = ui\choix "Tête de réverbération zéro latence (prochain démarrage)", actif_tete
-          regler_qualite {tete_reverb: nouveau} if nouveau != actif_tete
+          if q.tete_reverb_impose == true
+            -- ORGANUM_REVERB_TETE force la valeur : l'afficher, sans
+            -- proposer un réglage que le prochain démarrage ignorerait.
+            texte_tete = if q.tete_reverb == true
+              "Tête de réverbération zéro latence : imposée par ORGANUM_REVERB_TETE"
+            else
+              "Tête de réverbération coupée : imposée par ORGANUM_REVERB_TETE"
+            ui\texte tronquer(texte_tete, l - 2 * MARGE - ESPACE)
+          else
+            actif_tete = q.tete_reverb == true
+            nouveau = ui\choix "Tête de réverbération zéro latence (prochain démarrage)", actif_tete
+            regler_qualite {tete_reverb: nouveau} if nouveau != actif_tete
 
         if calib
           ui\ligne ligne, 1

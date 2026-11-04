@@ -86,6 +86,8 @@ qualite_html = ->
       h.label class: "qualite-case qualite-tete",
         h.input type: "checkbox", id: "qualite-tete", checked: true,
         h.span {}, "Tête de réverbération zéro latence ", h.em {}, "(au prochain démarrage)",
+    h.p class: "note", id: "qualite-tete-impose", hidden: true,
+      "Valeur imposée par ORGANUM_REVERB_TETE : non modifiable ici.",
     h.p class: "note qualite-calibration", id: "qualite-calibration", hidden: true,
     h.p class: "note qualite-message", id: "qualite-message", role: "status", ["aria-live"]: "polite", hidden: true
 

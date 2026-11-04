@@ -275,6 +275,10 @@ public:
      */
     void setReverbZeroDelay(bool actif);
 
+    /// Tête de réverbération zéro latence effectivement active (lecture) :
+    /// tient compte de l'option demandée et de la réponse choisie.
+    bool getReverbZeroDelay() const noexcept { return _convolver.zeroDelay(); }
+
     /**
      * Set the reverb IR by its number asynchronously.
      * This to be called on the main (UI) thread.

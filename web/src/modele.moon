@@ -109,9 +109,9 @@ libelle_association = (a, divisions) ->
 -- Source unique pour l'interface native ; la page web reçoit les mêmes choix
 -- dans son HTML et le client les envoie sous forme de `niveau`.
 PRESELECTIONS = {
-  {spatialisation: 0, bruit_attaque: false, instabilite: false, polyphonie_max: 96, tete_reverb: false}
-  {spatialisation: 1, bruit_attaque: false, instabilite: false, polyphonie_max: 160, tete_reverb: false}
-  {spatialisation: 1, bruit_attaque: true, instabilite: true, polyphonie_max: 256, tete_reverb: true}
+  {spatialisation: 0, bruit_attaque: false, instabilite: false, polyphonie_max: 64, tete_reverb: false}
+  {spatialisation: 1, bruit_attaque: false, instabilite: false, polyphonie_max: 128, tete_reverb: false}
+  {spatialisation: 1, bruit_attaque: true, instabilite: true, polyphonie_max: 192, tete_reverb: true}
   {spatialisation: 2, bruit_attaque: true, instabilite: true, polyphonie_max: 0, tete_reverb: true}
 }
 

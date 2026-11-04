@@ -166,6 +166,14 @@ extern "C" void aeolus_reverb_tete(void* moteur, int actif)
     static_cast<Handle*>(moteur)->engine->setReverbZeroDelay(actif != 0);
 }
 
+extern "C" int aeolus_lire_reverb_tete(void* moteur)
+{
+    return moteur
+               && static_cast<Handle*>(moteur)->engine->getReverbZeroDelay()
+           ? 1
+           : 0;
+}
+
 extern "C" void aeolus_gain(void* moteur, int div, float v)
 {
     if (!moteur) return;

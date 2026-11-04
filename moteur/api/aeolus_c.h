@@ -42,6 +42,9 @@ void aeolus_reverb(void* moteur, float v);
 /* Tête de convolution zéro latence de la réverbération (défaut : active).
    À n'appeler qu'au démarrage, avant le fil audio. */
 void aeolus_reverb_tete(void* moteur, int actif);
+/* Valeur EFFECTIVE de la tête après application de l'option et de
+   ORGANUM_REVERB_TETE : 1 si elle est active, 0 sinon. */
+int aeolus_lire_reverb_tete(void* moteur);
 /* Limiteur de sortie : actif par défaut (voir aeolus_creer). */
 void aeolus_limiteur(void* moteur, int actif);
 void aeolus_gain(void* moteur, int div, float v);

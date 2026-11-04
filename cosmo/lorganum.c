@@ -83,6 +83,9 @@ struct etat {
   float volume, reverb;
   // Réglages de qualité publiés par le moteur (voir aeolus_qualite).
   int bruit_attaque, instabilite, spatialisation, polyphonie_max;
+  // Tête de réverbération : valeur effective (option + ORGANUM_REVERB_TETE)
+  // et indique si la variable d'environnement impose cette valeur.
+  int tete_reverb, tete_reverb_impose;
   int canaux_controle, canaux_expression;
   int nassociations;
   struct association associations[MAX_ASSOCIATIONS];
@@ -164,6 +167,10 @@ static void publier(void) {
     if (qualite[1] != e->instabilite) e->instabilite = qualite[1], change = 1;
     if (qualite[2] != e->spatialisation) e->spatialisation = qualite[2], change = 1;
     if (qualite[3] != e->polyphonie_max) e->polyphonie_max = qualite[3], change = 1;
+  }
+  {
+    int tete = aeolus_lire_reverb_tete(g_moteur);
+    if (tete != e->tete_reverb) e->tete_reverb = tete, change = 1;
   }
   if (g_erreurs_ecriture != e->erreurs_ecriture) {
     e->erreurs_ecriture = g_erreurs_ecriture;
@@ -483,6 +490,7 @@ static int l_demarrer(lua_State *L) {
   // reste prioritaire (=non ou 0 coupe, sinon comportement par défaut).
   {
     int tete = 1;
+    int impose = 0;
     if (lua_istable(L, 1)) {
       lua_getfield(L, 1, "tete_reverb");
       if (!lua_isnil(L, -1)) tete = lua_toboolean(L, -1);
@@ -490,10 +498,15 @@ static int l_demarrer(lua_State *L) {
     }
     const char *env = getenv("ORGANUM_REVERB_TETE");
     if (env && (!strcmp(env, "non") || !strcmp(env, "0")))
-      tete = 0;
+      tete = 0, impose = 1;
     else if (env && (!strcmp(env, "oui") || !strcmp(env, "1")))
-      tete = 1;
+      tete = 1, impose = 1;
     aeolus_reverb_tete(g_moteur, tete);
+    // Valeur effective publiée dès le démarrage, avant le premier battement
+    // du fil audio : l'interface ne doit jamais annoncer la valeur demandée
+    // quand l'environnement la force.
+    g_etat->tete_reverb = aeolus_lire_reverb_tete(g_moteur);
+    g_etat->tete_reverb_impose = impose;
   }
   // Ne pas tenter de borner audio_ouvrir() par SIGALRM : cosmo_dlopen fait
   // passer les appels dans libasound par un trampoline qui bloque tous les
@@ -594,7 +607,8 @@ static void envoyer(lua_State *L, struct commande c) {
 //                   erreurs_ecriture, temps_reel, midi="c:p",
 //                   canaux_controle, canaux_expression, canaux_actifs,
 //                   qualite={bruit_attaque, instabilite, spatialisation,
-//                            polyphonie_max},
+//                            polyphonie_max, tete_reverb (effectif),
+//                            tete_reverb_impose},
 //                   divisions={{nom, gain, jeux={{nom, actif}, …}}, …}}
 // canaux_actifs est éphémère (activité des 250 dernières ms) et hors de seq.
 static int l_etat(lua_State *L) {
@@ -627,11 +641,14 @@ static int l_etat(lua_State *L) {
   lua_pushinteger(L, copie.canaux_controle), lua_setfield(L, -2, "canaux_controle");
   lua_pushinteger(L, copie.canaux_expression), lua_setfield(L, -2, "canaux_expression");
   lua_pushinteger(L, canaux_actifs), lua_setfield(L, -2, "canaux_actifs");
-  lua_createtable(L, 0, 4);
+  lua_createtable(L, 0, 6);
   lua_pushboolean(L, copie.bruit_attaque), lua_setfield(L, -2, "bruit_attaque");
   lua_pushboolean(L, copie.instabilite), lua_setfield(L, -2, "instabilite");
   lua_pushinteger(L, copie.spatialisation), lua_setfield(L, -2, "spatialisation");
   lua_pushinteger(L, copie.polyphonie_max), lua_setfield(L, -2, "polyphonie_max");
+  lua_pushboolean(L, copie.tete_reverb), lua_setfield(L, -2, "tete_reverb");
+  lua_pushboolean(L, copie.tete_reverb_impose),
+      lua_setfield(L, -2, "tete_reverb_impose");
   lua_setfield(L, -2, "qualite");
   lua_createtable(L, copie.nassociations, 0);
   for (int i = 0; i < copie.nassociations; ++i) {

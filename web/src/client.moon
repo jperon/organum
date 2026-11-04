@@ -258,6 +258,7 @@ JS = [[
     var curseurPolyphonie = document.getElementById('qualite-polyphonie');
     var valeurPolyphonie = document.getElementById('qualite-polyphonie-valeur');
     var caseTete = document.getElementById('qualite-tete');
+    var noteTeteImpose = document.getElementById('qualite-tete-impose');
     var ligneCalibration = document.getElementById('qualite-calibration');
     var message = document.getElementById('qualite-message');
     var indisponible = document.getElementById('qualite-indisponible');
@@ -323,6 +324,7 @@ JS = [[
         section.hidden = false;
         desactiver(true);
         if (indisponible) { indisponible.hidden = false; }
+        if (noteTeteImpose) { noteTeteImpose.hidden = true; }
         if (ligneCalibration) { ligneCalibration.hidden = true; }
         return;
       }
@@ -346,6 +348,8 @@ JS = [[
         if (valeurPolyphonie) { valeurPolyphonie.textContent = textePolyphonie(q.polyphonie_max); }
       }
       if (caseTete && typeof q.tete_reverb === 'boolean') { caseTete.checked = q.tete_reverb; }
+      if (caseTete) { caseTete.disabled = q.tete_reverb_impose === true; }
+      if (noteTeteImpose) { noteTeteImpose.hidden = q.tete_reverb_impose !== true; }
       if (ligneCalibration) {
         var texte = texteCalibration(q.calibration);
         ligneCalibration.textContent = texte;

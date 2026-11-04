@@ -10,9 +10,9 @@
 //    complète : reste = K_RESTE * cout_spat2. K_RESTE = 1,7 est mesuré sur le
 //    banc de charge de la machine de développement (8,6 ms niveau 2 dont
 //    3,2 ms de spatialisation complète, 5,4 ms de reste pour ~600 voix).
-//  - Voix de référence : 150. C'est le plein jeu typique visé par la
-//    spécification ; le modèle ne sait pas combien de voix seront réellement
-//    jouées.
+//  - Voix de référence : 250. Un accord de 6 notes sur deux claviers fait
+//    252 voix, plein jeu typique visé par la spécification ; le modèle ne
+//    sait pas combien de voix seront réellement jouées.
 //  - On exige que le temps estimé reste ≤ 60 % de l'échéance : marge pour les
 //    pics (release, vol de voix, ordonnanceur) et pour l'imprécision du modèle.
 //
@@ -277,12 +277,12 @@ int lire_env_entier(const char* nom, int defaut)
 
 // Constantes du modèle, documentées en tête de fichier.
 constexpr double K_RESTE = 1.7;
-constexpr int VOIX_REF = 150;
+constexpr int VOIX_REF = 250;
 constexpr double FRACTION_ECHEANCE = 0.6;
 
 // Table de la spécification §3.
 constexpr int NIVEAU_SPATIAL[4] = {0, 1, 1, 2};
-constexpr int NIVEAU_POLYPHONIE[4] = {96, 160, 256, 0}; // 0 = illimité
+constexpr int NIVEAU_POLYPHONIE[4] = {64, 128, 192, 0}; // 0 = illimité
 constexpr int NIVEAU_TETE[4] = {0, 0, 1, 1};
 
 } // namespace

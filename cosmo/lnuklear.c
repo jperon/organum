@@ -214,6 +214,33 @@ static int ui_ligne(lua_State *L) {
   return 0;
 }
 
+// ui:ligne_ratio(hauteur, {poids…}) : rangée à colonnes de largeurs
+// proportionnelles (NK_DYNAMIC). Contrairement à ui:ligne, le libellé peut
+// recevoir plus de place que le curseur.
+static int ui_ligne_ratio(lua_State *L) {
+  ui_t *u = luaL_checkudata(L, 1, "nk.ui");
+  float h = (float)luaL_checknumber(L, 2);
+  luaL_checktype(L, 3, LUA_TTABLE);
+  int cols = (int)lua_rawlen(L, 3);
+  if (cols < 1 || cols > 16) return luaL_error(L, "poids : 1 à 16 colonnes");
+  // Nuklear conserve un pointeur vers le tableau (pas une copie) : il doit
+  // rester valide jusqu'au placement des widgets de la rangée.
+  static float ratio[16];
+  float somme = 0.0f;
+  for (int i = 0; i < cols; ++i) {
+    lua_rawgeti(L, 3, i + 1);
+    ratio[i] = (float)luaL_checknumber(L, -1);
+    lua_pop(L, 1);
+    if (ratio[i] <= 0.0f) return luaL_error(L, "poids positif requis");
+    somme += ratio[i];
+  }
+  // Nuklear attend des fractions dont la somme vaut 1 : les poids sont
+  // relatifs, on les normalise ici.
+  for (int i = 0; i < cols; ++i) ratio[i] /= somme;
+  nk_layout_row(u->ctx, NK_DYNAMIC, h, cols, ratio);
+  return 0;
+}
+
 static int ui_texte(lua_State *L) {
   ui_t *u = luaL_checkudata(L, 1, "nk.ui");
   const char *s = luaL_checkstring(L, 2);
@@ -346,6 +373,7 @@ static const struct luaL_Reg uifuncs[] = {
   {"fin", ui_fin},
   {"taille", ui_taille},
   {"ligne", ui_ligne},
+  {"ligne_ratio", ui_ligne_ratio},
   {"texte", ui_texte},
   {"bouton", ui_bouton},
   {"choix", ui_choix},

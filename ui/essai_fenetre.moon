@@ -39,7 +39,7 @@ etat = {
       tete_reverb: true
       echeance_ms: 10.67
       estimation_ms: {4.2, 5.1, 6.3, 8.9}
-      voix_ref: 150
+      voix_ref: 250
       duree_calibration_ms: 35.0
     }
   }

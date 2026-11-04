@@ -87,17 +87,22 @@ done
 
 URL="http://127.0.0.1:$PORT"
 
-# lancer [ORGANUM_QUALITE] [ORGANUM_CALIBRATION_FACTEUR] : démarre l'orgue et
-# attend qu'il réponde. Les deux variables sont propres à ce lancement.
+# lancer [ORGANUM_QUALITE] [ORGANUM_CALIBRATION_FACTEUR] [ORGANUM_REVERB_TETE] :
+# démarre l'orgue et attend qu'il réponde. Les variables sont propres à ce
+# lancement.
 lancer() {
   qualite=$1
   facteur=${2:-}
-  unset ORGANUM_QUALITE ORGANUM_CALIBRATION_FACTEUR
+  tete=${3:-}
+  unset ORGANUM_QUALITE ORGANUM_CALIBRATION_FACTEUR ORGANUM_REVERB_TETE
   if [ -n "$qualite" ]; then
     export ORGANUM_QUALITE="$qualite"
   fi
   if [ -n "$facteur" ]; then
     export ORGANUM_CALIBRATION_FACTEUR="$facteur"
+  fi
+  if [ -n "$tete" ]; then
+    export ORGANUM_REVERB_TETE="$tete"
   fi
   ORGANUM_ETAT="$ETAT" \
   ORGANUM_CONFIG_MIDI="$CONFIG" \
@@ -105,7 +110,7 @@ lancer() {
   ORGANUM_PERIPHERIQUE=null \
   "$BIN" -l 127.0.0.1 -p "$PORT" >"$JOURNAL" 2>&1 &
   PID=$!
-  unset ORGANUM_QUALITE ORGANUM_CALIBRATION_FACTEUR
+  unset ORGANUM_QUALITE ORGANUM_CALIBRATION_FACTEUR ORGANUM_REVERB_TETE
   i=0
   # Le moteur charge ses ressources avant d'écouter : jusqu'à ~2 min sur une
   # machine chargée. Chaque essai est borné pour ne jamais bloquer.
@@ -187,10 +192,13 @@ verifie "bruit_attaque par défaut = true" '"bruit_attaque":true' "$S"
 verifie "instabilite par défaut = true" '"instabilite":true' "$S"
 verifie "polyphonie_max par défaut = 0" '"polyphonie_max":0' "$S"
 verifie "tete_reverb par défaut = true" '"tete_reverb":true' "$S"
+verifie "tete_reverb non imposée par défaut" '"tete_reverb_impose":false' "$S"
 
 echo "== POST valide : un seul champ"
 R=$(post '{"qualite":{"spatialisation":1}}')
 verifie "réponse 200 avec ok" '"ok":true' "$R"
+verifie "la réponse reflète la spatialisation demandée = 1" '"spatialisation":1' "$R"
+verifie_absent "la réponse ne renvoie pas l'ancienne spatialisation = 2" '"spatialisation":2' "$R"
 attendre_publication
 S=$(get)
 verifie "spatialisation appliquée = 1" '"spatialisation":1' "$S"
@@ -200,6 +208,9 @@ verifie "modification individuelle : auto = false" '"auto":false' "$S"
 echo "== POST valide : plusieurs champs"
 R=$(post '{"qualite":{"bruit_attaque":false,"instabilite":false,"polyphonie_max":128}}')
 verifie "réponse 200 avec ok" '"ok":true' "$R"
+verifie "réponse : bruit_attaque demandé = false" '"bruit_attaque":false' "$R"
+verifie "réponse : instabilite demandée = false" '"instabilite":false' "$R"
+verifie "réponse : polyphonie_max demandée = 128" '"polyphonie_max":128' "$R"
 attendre_publication
 S=$(get)
 verifie "bruit_attaque appliqué = false" '"bruit_attaque":false' "$S"
@@ -210,13 +221,17 @@ echo "== POST valide : niveau 1 (présélection d'un coup)"
 R=$(post '{"qualite":{"niveau":1}}')
 verifie "réponse 200 avec ok" '"ok":true' "$R"
 verifie "changement de tete_reverb : redemarrage_requis = true" '"redemarrage_requis":true' "$R"
+verifie "réponse : niveau demandé = 1" '"niveau":1' "$R"
+verifie "réponse : spatialisation demandée = 1" '"spatialisation":1' "$R"
+verifie "réponse : polyphonie_max demandée = 128" '"polyphonie_max":128' "$R"
 attendre_publication
 S=$(get)
 verifie "niveau 1 : spatialisation = 1" '"spatialisation":1' "$S"
 verifie "niveau 1 : bruit_attaque = false" '"bruit_attaque":false' "$S"
 verifie "niveau 1 : instabilite = false" '"instabilite":false' "$S"
-verifie "niveau 1 : polyphonie_max = 160" '"polyphonie_max":160' "$S"
-verifie "niveau 1 : tete_reverb = false" '"tete_reverb":false' "$S"
+verifie "niveau 1 : polyphonie_max = 128" '"polyphonie_max":128' "$S"
+verifie "niveau 1 : tete_reverb effective reste true avant redémarrage" '"tete_reverb":true' "$S"
+verifie "niveau 1 : tete_reverb_impose = false" '"tete_reverb_impose":false' "$S"
 verifie "niveau 1 : niveau = 1" '"niveau":1' "$S"
 
 echo "== POST invalides (400)"
@@ -256,7 +271,7 @@ lancer "" 1 || exit 1
 S=$(get)
 verifie "après relance : niveau 2 restauré" '"niveau":2' "$S"
 verifie "après relance : auto false restauré" '"auto":false' "$S"
-verifie "après relance : polyphonie_max = 256" '"polyphonie_max":256' "$S"
+verifie "après relance : polyphonie_max = 192" '"polyphonie_max":192' "$S"
 verifie "après relance : tete_reverb = true" '"tete_reverb":true' "$S"
 verifie_absent "après relance manuelle : pas de recalibration" '"calibration"' "$S"
 
@@ -266,7 +281,7 @@ lancer 1 || exit 1
 S=$(get)
 verifie "ORGANUM_QUALITE=1 : niveau = 1" '"niveau":1' "$S"
 verifie "ORGANUM_QUALITE=1 : spatialisation = 1" '"spatialisation":1' "$S"
-verifie "ORGANUM_QUALITE=1 : polyphonie_max = 160" '"polyphonie_max":160' "$S"
+verifie "ORGANUM_QUALITE=1 : polyphonie_max = 128" '"polyphonie_max":128' "$S"
 verifie "ORGANUM_QUALITE=1 : tete_reverb = false" '"tete_reverb":false' "$S"
 
 echo "== calibration automatique : machine lente (facteur 100)"
@@ -279,7 +294,7 @@ verifie "machine lente : niveau retenu = 0" '"niveau":0' "$S"
 verifie "niveau 0 : spatialisation = 0" '"spatialisation":0' "$S"
 verifie "niveau 0 : bruit_attaque = false" '"bruit_attaque":false' "$S"
 verifie "niveau 0 : instabilite = false" '"instabilite":false' "$S"
-verifie "niveau 0 : polyphonie_max = 96" '"polyphonie_max":96' "$S"
+verifie "niveau 0 : polyphonie_max = 64" '"polyphonie_max":64' "$S"
 verifie "niveau 0 : tete_reverb = false" '"tete_reverb":false' "$S"
 
 echo "== modification individuelle en mode auto"
@@ -309,6 +324,27 @@ verifie "machine rapide : niveau le plus haut = 3" '"niveau":3' "$S"
 verifie "niveau 3 : spatialisation = 2" '"spatialisation":2' "$S"
 verifie "niveau 3 : polyphonie_max = 0" '"polyphonie_max":0' "$S"
 
+echo "== ORGANUM_REVERB_TETE=non : la tête effective est coupée"
+effacer_etat
+lancer 3 1 non || exit 1
+S=$(get)
+verifie "niveau 3 demandé : tete_reverb configurée = true" '"niveau":3' "$S"
+verifie "ORGANUM_REVERB_TETE=non : tete_reverb effective = false" '"tete_reverb":false' "$S"
+verifie "ORGANUM_REVERB_TETE=non : tete_reverb_impose = true" '"tete_reverb_impose":true' "$S"
+R=$(post '{"qualite":{"tete_reverb":true}}')
+verifie "réponse sous contrainte : tete_reverb effective = false" '"tete_reverb":false' "$R"
+verifie "réponse sous contrainte : tete_reverb_impose = true" '"tete_reverb_impose":true' "$R"
+arreter
+
+echo "== ORGANUM_REVERB_TETE=oui : la tête effective est activée"
+effacer_etat
+lancer 1 1 oui || exit 1
+S=$(get)
+verifie "niveau 1 : tete_reverb configurée = false" '"niveau":1' "$S"
+verifie "ORGANUM_REVERB_TETE=oui : tete_reverb effective = true" '"tete_reverb":true' "$S"
+verifie "ORGANUM_REVERB_TETE=oui : tete_reverb_impose = true" '"tete_reverb_impose":true' "$S"
+arreter
+
 echo "== ORGANUM_QUALITE=2 prioritaire sur la calibration auto"
 effacer_etat
 lancer 2 100 || exit 1
@@ -317,7 +353,7 @@ verifie "ORGANUM_QUALITE=2 : niveau = 2" '"niveau":2' "$S"
 verifie "ORGANUM_QUALITE=2 : spatialisation = 1" '"spatialisation":1' "$S"
 verifie "ORGANUM_QUALITE=2 : bruit_attaque = true" '"bruit_attaque":true' "$S"
 verifie "ORGANUM_QUALITE=2 : instabilite = true" '"instabilite":true' "$S"
-verifie "ORGANUM_QUALITE=2 : polyphonie_max = 256" '"polyphonie_max":256' "$S"
+verifie "ORGANUM_QUALITE=2 : polyphonie_max = 192" '"polyphonie_max":192' "$S"
 verifie "ORGANUM_QUALITE=2 : tete_reverb = true" '"tete_reverb":true' "$S"
 verifie "ORGANUM_QUALITE=2 : auto false" '"auto":false' "$S"
 verifie_absent "ORGANUM_QUALITE=2 : pas de calibration" '"calibration"' "$S"

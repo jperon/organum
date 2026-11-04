@@ -233,9 +233,9 @@ ETAT_FICHIER = os.getenv("ORGANUM_ETAT") or "#{os.getenv 'HOME'}/.config/organum
 QUALITE_FICHIER = "#{ETAT_FICHIER}.qualite.json"
 
 PRESELECTIONS = {
-  {spatialisation: 0, bruit_attaque: false, instabilite: false, polyphonie_max: 96, tete_reverb: false}
-  {spatialisation: 1, bruit_attaque: false, instabilite: false, polyphonie_max: 160, tete_reverb: false}
-  {spatialisation: 1, bruit_attaque: true, instabilite: true, polyphonie_max: 256, tete_reverb: true}
+  {spatialisation: 0, bruit_attaque: false, instabilite: false, polyphonie_max: 64, tete_reverb: false}
+  {spatialisation: 1, bruit_attaque: false, instabilite: false, polyphonie_max: 128, tete_reverb: false}
+  {spatialisation: 1, bruit_attaque: true, instabilite: true, polyphonie_max: 192, tete_reverb: true}
   {spatialisation: 2, bruit_attaque: true, instabilite: true, polyphonie_max: 0, tete_reverb: true}
 }
 
@@ -561,7 +561,9 @@ lancer_fenetre!
 
 -- Qualité exposée : les quatre champs du moteur (valeur réelle), plus les
 -- réglages tenus côté Lua. niveau vaut la présélection correspondante, ou -1
--- si l'utilisateur a modifié un champ à la main.
+-- si l'utilisateur a modifié un champ à la main. tete_reverb est la valeur
+-- EFFECTIVE (ORGANUM_REVERB_TETE compris) ; tete_reverb_impose indique que
+-- la variable d'environnement force cette valeur.
 qualite_etat = ->
   e = organum.etat!
   q = qualite_locale_actuelle!
@@ -570,7 +572,8 @@ qualite_etat = ->
     instabilite: e.qualite.instabilite == true
     spatialisation: e.qualite.spatialisation
     polyphonie_max: e.qualite.polyphonie_max
-    tete_reverb: q.tete_reverb
+    tete_reverb: e.qualite.tete_reverb == true
+    tete_reverb_impose: e.qualite.tete_reverb_impose == true
     niveau: q.niveau
     auto: q.auto
   }
@@ -818,6 +821,7 @@ handle_orgue = ->
     loc.auto = q.auto if q.auto != nil
     modifie = false
     redemarrage = false
+    p = nil
     if q.bruit_attaque != nil
       organum.qualite "bruit_attaque", q.bruit_attaque
       modifie = true
@@ -849,7 +853,24 @@ handle_orgue = ->
       loc.auto = false
     ecrire_qualite_locale loc
 
+    -- La réponse reflète les valeurs DEMANDÉES, pas celles que le fil audio
+    -- n'a pas encore publiées (il reçoit la commande de façon asynchrone).
+    -- tete_reverb reste la valeur effective : elle ne change qu'au
+    -- redémarrage, et ORGANUM_REVERB_TETE peut l'imposer.
     reponse = qualite_etat!
+    if q.niveau != nil
+      reponse.niveau = q.niveau
+      reponse.auto = false
+      reponse.spatialisation = p.spatialisation
+      reponse.bruit_attaque = p.bruit_attaque
+      reponse.instabilite = p.instabilite
+      reponse.polyphonie_max = p.polyphonie_max
+    else
+      reponse.spatialisation = q.spatialisation if q.spatialisation != nil
+      reponse.bruit_attaque = q.bruit_attaque if q.bruit_attaque != nil
+      reponse.instabilite = q.instabilite if q.instabilite != nil
+      reponse.polyphonie_max = q.polyphonie_max if q.polyphonie_max != nil
+      reponse.auto = q.auto if q.auto != nil
     reponse.ok = true
     reponse.redemarrage_requis = redemarrage
     send_json 200, reponse
