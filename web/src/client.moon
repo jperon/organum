@@ -26,7 +26,7 @@ JS = [[
     var classe = lienQualite.getAttribute('data-charge-classe-' + niveau) || 'charge-gris';
     var libelle = lienQualite.getAttribute('data-charge-libelle-' + niveau) || 'Pas encore évalué';
     lienQualite.className = 'btn small lien-qualite ' + classe;
-    lienQualite.textContent = niveau >= 2 ? 'Qualité !' : 'Qualité';
+    lienQualite.textContent = niveau >= 3 ? 'Qualité !!' : niveau >= 2 ? 'Qualité !' : 'Qualité';
     lienQualite.setAttribute('aria-label', 'Qualité — ' + libelle);
   }
 
