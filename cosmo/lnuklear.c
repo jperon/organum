@@ -254,10 +254,42 @@ static int ui_texte(lua_State *L) {
   return 0;
 }
 
+// ui:bouton(texte[, niveau]) → clic.
+//
+// `niveau` (facultatif) colore le fond du bouton, avec le même mécanisme que
+// ui:etat : styles empilés juste avant le dessin puis restaurés juste après.
+// 2 = orange, 3 = rouge ; toute autre valeur laisse le style de bouton intact.
 static int ui_bouton(lua_State *L) {
   ui_t *u = luaL_checkudata(L, 1, "nk.ui");
   const char *s = luaL_checkstring(L, 2);
+  int niveau = (int)luaL_optinteger(L, 3, 0);
+  struct nk_style_button *btn = &u->ctx->style.button;
+  int items = 0, couleurs = 0;
+
+  if (niveau >= 2) {
+    int rouge = niveau >= 3;
+    struct nk_color fond = nk_rgb(rouge ? 185 : 200, rouge ? 40 : 110,
+                                  rouge ? 40 : 20);
+    struct nk_color survol = nk_rgb(rouge ? 205 : 220, rouge ? 60 : 130,
+                                    rouge ? 60 : 30);
+    struct nk_color presse = nk_rgb(rouge ? 155 : 170, rouge ? 30 : 90,
+                                    rouge ? 30 : 15);
+    struct nk_color texte = nk_rgb(255, 255, 255);
+    if (nk_style_push_style_item(u->ctx, &btn->normal,
+                                 nk_style_item_color(fond))) items++;
+    if (nk_style_push_style_item(u->ctx, &btn->hover,
+                                 nk_style_item_color(survol))) items++;
+    if (nk_style_push_style_item(u->ctx, &btn->active,
+                                 nk_style_item_color(presse))) items++;
+    if (nk_style_push_color(u->ctx, &btn->text_normal, texte)) couleurs++;
+    if (nk_style_push_color(u->ctx, &btn->text_hover, texte)) couleurs++;
+    if (nk_style_push_color(u->ctx, &btn->text_active, texte)) couleurs++;
+  }
+
   lua_pushboolean(L, nk_button_label(u->ctx, s));
+
+  while (couleurs--) nk_style_pop_color(u->ctx);
+  while (items--) nk_style_pop_style_item(u->ctx);
   return 1;
 }
 
