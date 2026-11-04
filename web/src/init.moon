@@ -239,8 +239,9 @@ PRESELECTIONS = {
   {spatialisation: 2, bruit_attaque: true, instabilite: true, polyphonie_max: 0, tete_reverb: true}
 }
 
--- Valeurs par défaut du comportement d'avant : niveau illimité (3), mode
--- automatique désactivé (le défaut passera à vrai avec Q3), tête active.
+-- Au premier lancement (etat.json sans clé qualite), le mode automatique est
+-- actif : la calibration choisit le niveau. Un réglage manuel sauvegardé met
+-- auto à faux et empêche toute recalibration au démarrage suivant.
 qualite_locale = {niveau: -1, auto: false, tete_reverb: true}
 
 entier_borne = (v, min, max) ->
@@ -330,6 +331,8 @@ do
       niveau_impose = true
     qualite_locale.auto = q.auto if type(q.auto) == "boolean"
     qualite_locale.tete_reverb = q.tete_reverb if type(q.tete_reverb) == "boolean"
+  else
+    qualite_locale.auto = true
   impose = os.getenv "ORGANUM_QUALITE"
   if impose and impose != ""
     if impose == "auto"
@@ -352,10 +355,51 @@ do
       else
         Log kLogWarn, "organum : ORGANUM_QUALITE invalide (#{impose}), ignoré"
 
+taux_demarrage = entier_env "ORGANUM_TAUX", 48000
+periode_demarrage = entier_env "ORGANUM_PERIODE", 512
+calibration_demarrage = nil
+
+-- Calibration automatique, uniquement quand auto est vrai (premier lancement,
+-- ORGANUM_QUALITE=auto, ou état sauvegardé en mode auto). Elle se fait AVANT
+-- organum.demarrer : le micro-banc ne dépend pas du moteur. En cas d'échec
+-- ou de dépassement de 1,5 s, repli sur le niveau 3 sans jamais planter.
+if qualite_locale.auto
+  ok_cal, cal = pcall(organum.calibrer, {
+    taux: taux_demarrage
+    periode: periode_demarrage
+  })
+  valide = ok_cal and type(cal) == "table" and
+    entier_borne(cal.niveau, 0, 3) and
+    type(cal.duree_calibration_ms) == "number" and
+    cal.duree_calibration_ms <= 1500
+  if valide
+    p = PRESELECTIONS[cal.niveau + 1]
+    qualite_demarrage = {
+      spatialisation: p.spatialisation
+      bruit_attaque: p.bruit_attaque
+      instabilite: p.instabilite
+      polyphonie_max: p.polyphonie_max
+    }
+    qualite_locale.tete_reverb = p.tete_reverb
+    qualite_locale.niveau = cal.niveau
+    calibration_demarrage = cal
+    Log kLogInfo, "organum : calibration automatique : niveau #{cal.niveau} en #{math.floor cal.duree_calibration_ms} ms"
+  else
+    p = PRESELECTIONS[4]
+    qualite_demarrage = {
+      spatialisation: p.spatialisation
+      bruit_attaque: p.bruit_attaque
+      instabilite: p.instabilite
+      polyphonie_max: p.polyphonie_max
+    }
+    qualite_locale.tete_reverb = p.tete_reverb
+    qualite_locale.niveau = 3
+    Log kLogWarn, "organum : calibration automatique impossible ou trop longue ; repli sur le niveau 3"
+
 if organum.demarrer
   ok, err = organum.demarrer {
-    taux: entier_env "ORGANUM_TAUX", 48000
-    periode: entier_env "ORGANUM_PERIODE", 512
+    taux: taux_demarrage
+    periode: periode_demarrage
     peripherique: os.getenv "ORGANUM_PERIPHERIQUE"
     limiteur: os.getenv("ORGANUM_LIMITEUR") != "non"
     etat: type(etat_sauve.moteur) == "string" and etat_sauve.moteur or nil
@@ -521,7 +565,7 @@ lancer_fenetre!
 qualite_etat = ->
   e = organum.etat!
   q = qualite_locale_actuelle!
-  {
+  etat_qualite = {
     bruit_attaque: e.qualite.bruit_attaque == true
     instabilite: e.qualite.instabilite == true
     spatialisation: e.qualite.spatialisation
@@ -530,6 +574,8 @@ qualite_etat = ->
     niveau: q.niveau
     auto: q.auto
   }
+  etat_qualite.calibration = calibration_demarrage if calibration_demarrage
+  etat_qualite
 
 -- État au format du socket d'Aeolus (PROTOCOLE-SOCKET.md), que le client
 -- connaît déjà ; les divisions et jeux y sont indexés à partir de 0.

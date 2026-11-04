@@ -384,6 +384,48 @@ static int l_qualite(lua_State *L) {
   return 0;
 }
 
+// organum.calibrer{taux=48000, periode=512} → table de calibration, ou nil,
+// erreur. Le micro-banc ne crée aucune instance du moteur : à appeler AVANT
+// organum.demarrer (la calibration ne dépend pas du moteur déjà créé).
+static int l_calibrer(lua_State *L) {
+  int taux = 48000, periode = 512;
+  if (lua_istable(L, 1)) {
+    lua_getfield(L, 1, "taux");
+    if (lua_isinteger(L, -1)) taux = (int)lua_tointeger(L, -1);
+    lua_getfield(L, 1, "periode");
+    if (lua_isinteger(L, -1)) periode = (int)lua_tointeger(L, -1);
+    lua_pop(L, 2);
+  }
+  if (taux <= 0 || periode <= 0) {
+    lua_pushnil(L);
+    lua_pushstring(L, "calibration : taux ou période invalide");
+    return 2;
+  }
+  aeolus_calibrage c;
+  memset(&c, 0, sizeof(c));
+  aeolus_calibrer(taux, periode, &c);
+  lua_createtable(L, 0, 11);
+  lua_pushinteger(L, c.niveau), lua_setfield(L, -2, "niveau");
+  lua_pushboolean(L, c.tete_reverb), lua_setfield(L, -2, "tete_reverb");
+  lua_pushnumber(L, c.echeance_ms), lua_setfield(L, -2, "echeance_ms");
+  lua_createtable(L, 4, 0);
+  for (int i = 0; i < 4; ++i) {
+    lua_pushnumber(L, c.estimation_ms[i]);
+    lua_rawseti(L, -2, i + 1);
+  }
+  lua_setfield(L, -2, "estimation_ms");
+  lua_pushnumber(L, c.cout_spat2_us), lua_setfield(L, -2, "cout_spat2_us");
+  lua_pushnumber(L, c.cout_spat1_us), lua_setfield(L, -2, "cout_spat1_us");
+  lua_pushnumber(L, c.cout_reverb_tete_ms);
+  lua_setfield(L, -2, "cout_reverb_tete_ms");
+  lua_pushnumber(L, c.cout_reverb_sans_tete_ms);
+  lua_setfield(L, -2, "cout_reverb_sans_tete_ms");
+  lua_pushinteger(L, c.voix_ref), lua_setfield(L, -2, "voix_ref");
+  lua_pushnumber(L, c.duree_calibration_ms);
+  lua_setfield(L, -2, "duree_calibration_ms");
+  return 1;
+}
+
 // organum.demarrer{taux=48000, periode=512, peripherique="default",
 //                  limiteur=true, jeux={{division, jeu}, …},
 //                  qualite={bruit_attaque=…, …}, tete_reverb=true}
@@ -842,7 +884,7 @@ static const luaL_Reg kFonctions[] = {
     {"demarrer", l_demarrer}, {"etat", l_etat},     {"attendre", l_attendre},
     {"jeu", l_jeu},           {"gain", l_gain},     {"volume", l_volume},
     {"reverb", l_reverb},     {"midi", l_midi},     {"panique", l_panique},
-    {"qualite", l_qualite},
+    {"qualite", l_qualite}, {"calibrer", l_calibrer},
     {"canaux_division", l_canaux_division},
     {"canaux_controle", l_canaux_controle},
     {"canaux_expression", l_canaux_expression},

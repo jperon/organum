@@ -87,25 +87,25 @@ done
 
 URL="http://127.0.0.1:$PORT"
 
-# lancer [ORGANUM_QUALITE] : démarre l'orgue et attend qu'il réponde.
+# lancer [ORGANUM_QUALITE] [ORGANUM_CALIBRATION_FACTEUR] : démarre l'orgue et
+# attend qu'il réponde. Les deux variables sont propres à ce lancement.
 lancer() {
   qualite=$1
-  unset ORGANUM_QUALITE
+  facteur=${2:-}
+  unset ORGANUM_QUALITE ORGANUM_CALIBRATION_FACTEUR
   if [ -n "$qualite" ]; then
-    ORGANUM_QUALITE="$qualite" \
-    ORGANUM_ETAT="$ETAT" \
-    ORGANUM_CONFIG_MIDI="$CONFIG" \
-    ORGANUM_FENETRE=non \
-    ORGANUM_PERIPHERIQUE=null \
-    "$BIN" -p "$PORT" >"$JOURNAL" 2>&1 &
-  else
-    ORGANUM_ETAT="$ETAT" \
-    ORGANUM_CONFIG_MIDI="$CONFIG" \
-    ORGANUM_FENETRE=non \
-    ORGANUM_PERIPHERIQUE=null \
-    "$BIN" -p "$PORT" >"$JOURNAL" 2>&1 &
+    export ORGANUM_QUALITE="$qualite"
   fi
+  if [ -n "$facteur" ]; then
+    export ORGANUM_CALIBRATION_FACTEUR="$facteur"
+  fi
+  ORGANUM_ETAT="$ETAT" \
+  ORGANUM_CONFIG_MIDI="$CONFIG" \
+  ORGANUM_FENETRE=non \
+  ORGANUM_PERIPHERIQUE=null \
+  "$BIN" -l 127.0.0.1 -p "$PORT" >"$JOURNAL" 2>&1 &
   PID=$!
+  unset ORGANUM_QUALITE ORGANUM_CALIBRATION_FACTEUR
   i=0
   # Le moteur charge ses ressources avant d'écouter : jusqu'à ~2 min sur une
   # machine chargée. Chaque essai est borné pour ne jamais bloquer.
@@ -150,19 +150,43 @@ attendre_sauvegarde() {
   sleep 3
 }
 
-unset ORGANUM_QUALITE ORGANUM_REVERB_TETE
+# Vérifie qu'une chaîne ne contient pas un motif littéral.
+verifie_absent() {
+  desc=$1
+  motif=$2
+  sortie=$3
+  if printf '%s' "$sortie" | grep -qF -- "$motif"; then
+    echec "$desc (motif « $motif » présent ; vu : $sortie)"
+  else
+    ok "$desc"
+  fi
+}
+
+# Repart d'un premier lancement : ni etat.json ni son fichier de qualité.
+effacer_etat() {
+  arreter
+  rm -f "$ETAT" "$ETAT.qualite.json"
+}
+
+unset ORGANUM_QUALITE ORGANUM_REVERB_TETE ORGANUM_CALIBRATION_FACTEUR
 
 echo "== démarrage sur le port $PORT (état temporaire $TMP)"
-lancer "" || exit 1
+effacer_etat
+lancer "" 1 || exit 1
 
-echo "== valeurs par défaut"
+echo "== premier lancement : calibration automatique (facteur 1)"
 S=$(get)
+verifie "calibration présente" '"calibration":{' "$S"
+verifie "calibration : durée renseignée" '"duree_calibration_ms":' "$S"
+verifie "calibration : échéance = 10,67 ms (512/48000)" '"echeance_ms":10.6666' "$S"
+verifie "calibration : quatre estimations" '"estimation_ms":[' "$S"
+verifie "auto par défaut au premier lancement = true" '"auto":true' "$S"
+verifie "machine rapide (facteur 1) : niveau le plus haut = 3" '"niveau":3' "$S"
 verifie "spatialisation par défaut = 2" '"spatialisation":2' "$S"
 verifie "bruit_attaque par défaut = true" '"bruit_attaque":true' "$S"
 verifie "instabilite par défaut = true" '"instabilite":true' "$S"
 verifie "polyphonie_max par défaut = 0" '"polyphonie_max":0' "$S"
 verifie "tete_reverb par défaut = true" '"tete_reverb":true' "$S"
-verifie "auto par défaut = false" '"auto":false' "$S"
 
 echo "== POST valide : un seul champ"
 R=$(post '{"qualite":{"spatialisation":1}}')
@@ -222,19 +246,19 @@ S=$(get)
 verifie "spatialisation = 0" '"spatialisation":0' "$S"
 verifie "niveau repasse à -1" '"niveau":-1' "$S"
 
-echo "== persistance dans etat.json"
+echo "== persistance dans etat.json (réglage manuel, auto faux)"
 post '{"qualite":{"niveau":2}}' >/dev/null
-post '{"qualite":{"auto":true}}' >/dev/null
 attendre_publication
 attendre_sauvegarde
 verifie "etat.json contient la clé qualite" '"qualite"' "$(cat "$ETAT" 2>/dev/null || true)"
 arreter
-lancer "" || exit 1
+lancer "" 1 || exit 1
 S=$(get)
 verifie "après relance : niveau 2 restauré" '"niveau":2' "$S"
-verifie "après relance : auto true restauré" '"auto":true' "$S"
+verifie "après relance : auto false restauré" '"auto":false' "$S"
 verifie "après relance : polyphonie_max = 256" '"polyphonie_max":256' "$S"
 verifie "après relance : tete_reverb = true" '"tete_reverb":true' "$S"
+verifie_absent "après relance manuelle : pas de recalibration" '"calibration"' "$S"
 
 echo "== ORGANUM_QUALITE=1 prioritaire sur le fichier"
 arreter
@@ -244,6 +268,59 @@ verifie "ORGANUM_QUALITE=1 : niveau = 1" '"niveau":1' "$S"
 verifie "ORGANUM_QUALITE=1 : spatialisation = 1" '"spatialisation":1' "$S"
 verifie "ORGANUM_QUALITE=1 : polyphonie_max = 160" '"polyphonie_max":160' "$S"
 verifie "ORGANUM_QUALITE=1 : tete_reverb = false" '"tete_reverb":false' "$S"
+
+echo "== calibration automatique : machine lente (facteur 100)"
+effacer_etat
+lancer "" 100 || exit 1
+S=$(get)
+verifie "machine lente : calibration présente" '"calibration":{' "$S"
+verifie "machine lente : auto true" '"auto":true' "$S"
+verifie "machine lente : niveau retenu = 0" '"niveau":0' "$S"
+verifie "niveau 0 : spatialisation = 0" '"spatialisation":0' "$S"
+verifie "niveau 0 : bruit_attaque = false" '"bruit_attaque":false' "$S"
+verifie "niveau 0 : instabilite = false" '"instabilite":false' "$S"
+verifie "niveau 0 : polyphonie_max = 96" '"polyphonie_max":96' "$S"
+verifie "niveau 0 : tete_reverb = false" '"tete_reverb":false' "$S"
+
+echo "== modification individuelle en mode auto"
+post '{"qualite":{"spatialisation":1}}' >/dev/null
+attendre_publication
+S=$(get)
+verifie "modification : auto passe à false" '"auto":false' "$S"
+verifie "modification : niveau = -1" '"niveau":-1' "$S"
+attendre_sauvegarde
+arreter
+
+echo "== relance sur le même état : pas de recalibration"
+lancer "" 1 || exit 1
+S=$(get)
+verifie_absent "relance manuelle : calibration absente" '"calibration"' "$S"
+verifie "relance manuelle : réglage restauré (spatialisation 1)" '"spatialisation":1' "$S"
+verifie "relance manuelle : auto reste false" '"auto":false' "$S"
+verifie "relance manuelle : niveau reste -1" '"niveau":-1' "$S"
+
+echo "== calibration automatique : machine rapide (facteur 1)"
+effacer_etat
+lancer "" 1 || exit 1
+S=$(get)
+verifie "machine rapide : calibration présente" '"calibration":{' "$S"
+verifie "machine rapide : auto true" '"auto":true' "$S"
+verifie "machine rapide : niveau le plus haut = 3" '"niveau":3' "$S"
+verifie "niveau 3 : spatialisation = 2" '"spatialisation":2' "$S"
+verifie "niveau 3 : polyphonie_max = 0" '"polyphonie_max":0' "$S"
+
+echo "== ORGANUM_QUALITE=2 prioritaire sur la calibration auto"
+effacer_etat
+lancer 2 100 || exit 1
+S=$(get)
+verifie "ORGANUM_QUALITE=2 : niveau = 2" '"niveau":2' "$S"
+verifie "ORGANUM_QUALITE=2 : spatialisation = 1" '"spatialisation":1' "$S"
+verifie "ORGANUM_QUALITE=2 : bruit_attaque = true" '"bruit_attaque":true' "$S"
+verifie "ORGANUM_QUALITE=2 : instabilite = true" '"instabilite":true' "$S"
+verifie "ORGANUM_QUALITE=2 : polyphonie_max = 256" '"polyphonie_max":256' "$S"
+verifie "ORGANUM_QUALITE=2 : tete_reverb = true" '"tete_reverb":true' "$S"
+verifie "ORGANUM_QUALITE=2 : auto false" '"auto":false' "$S"
+verifie_absent "ORGANUM_QUALITE=2 : pas de calibration" '"calibration"' "$S"
 
 arreter
 

@@ -78,10 +78,27 @@ curl -s localhost:8080/api/orgue \
 | `polyphonie_max` | entier | `0` | 0 = illimitée, sinon 1 à 512 voix |
 | `tete_reverb` | booléen | `true` | tête zéro latence (au prochain démarrage) |
 | `niveau` | entier | présélection correspondante, sinon `-1` | 0 à 3 |
-| `auto` | booléen | `false` | mode automatique (pas encore exploité) |
+| `auto` | booléen | `true` au premier lancement | calibration automatique au démarrage |
+| `calibration` | objet | absent si aucune calibration | résultat de la calibration de ce démarrage |
 
 Les quatre premiers champs s'appliquent à chaud, aux notes déclenchées
 ensuite. `tete_reverb`, lui, ne change qu'au démarrage suivant.
+
+Mode automatique : au premier lancement (fichier d'état sans clé `qualite`)
+ou avec `ORGANUM_QUALITE=auto`, une calibration mesure la machine **avant
+d'ouvrir l'audio**, sans créer d'instance du moteur, et choisit le niveau
+dont le temps de bloc estimé à 150 voix reste sous 60 % de l'échéance réelle
+(`periode / taux`). Le niveau retenu est appliqué comme une présélection, et
+`auto` reste vrai tant qu'un champ individuel n'a pas été modifié à la main.
+Si la calibration échoue ou dépasse 1,5 s, organum se replie sur le niveau 3
+et l'écrit dans le journal. Quand `auto` est faux (réglage manuel
+sauvegardé), aucune recalibration n'a lieu au démarrage suivant.
+
+Quand une calibration a eu lieu, `qualite.calibration` contient `niveau`,
+`tete_reverb`, `echeance_ms`, `estimation_ms` (table de 4 valeurs, une par
+niveau), `cout_spat2_us`, `cout_spat1_us`, `cout_reverb_tete_ms`,
+`cout_reverb_sans_tete_ms`, `voix_ref` et `duree_calibration_ms`. La clé est
+absente si aucune calibration n'a eu lieu à ce démarrage.
 
 `POST /api/orgue` accepte un unique champ `qualite`, objet contenant un ou
 plusieurs réglages :
@@ -188,6 +205,8 @@ livrer le son à temps. Ne pas la relever au-dessus de PipeWire.
 | `ORGANUM_CONFIG_MIDI` | `~/.config/organum/midi.json` | Associations MIDI |
 | `ORGANUM_QUALITE` | auto | `auto` ou `0`..`3` : force la qualité au démarrage, prioritaire sur `etat.json` |
 | `ORGANUM_REVERB_TETE` | oui | `non` (ou `0`) coupe la tête zéro latence de la réverbération, prioritaire sur `tete_reverb` |
+| `ORGANUM_CALIBRATION_FACTEUR` | `1` | Réservé aux tests : multiplie tous les coûts mesurés par la calibration (simule une machine plus lente) |
+| `ORGANUM_CALIBRATION_VOIX` | `150` | Réservé aux tests : nombre de voix de référence de la calibration |
 
 Le limiteur de sortie est actif par défaut. Les pilotes audio convertissent
 les échantillons flottants en entiers et **écrêtent dur** au-delà de 1.0 :
