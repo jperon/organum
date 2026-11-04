@@ -573,25 +573,33 @@ CSS = [[
   }
   .qualite-corps {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
-    gap: 4px 12px;
-    align-items: center;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+    gap: 6px 12px;
+    align-items: start;
     min-width: 0;
   }
   .qualite-champ,
   .qualite-case,
   .qualite-tete {
-    display: flex;
-    align-items: center;
-    gap: 6px;
     min-width: 0;
     font-size: 0.82rem;
     color: var(--text-dim);
   }
-  .qualite-champ > span { flex: 0 0 auto; }
+  /* Chaque réglage empile son libellé puis son contrôle : la cellule peut
+     être étroite sans jamais écraser la valeur affichée. */
+  .qualite-champ {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3px 6px;
+    align-items: center;
+  }
+  .qualite-champ > span { min-width: 0; }
   .qualite-champ select,
-  .qualite-champ input[type="text"],
-  .qualite-champ input[type="range"] { flex: 1 1 auto; min-width: 0; }
+  .qualite-champ input[type="text"] {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
   .qualite-champ input[type="text"] {
     padding: 3px 5px;
     border: 1px solid var(--border);
@@ -601,12 +609,15 @@ CSS = [[
     font: inherit;
     font-size: 0.82rem;
   }
+  /* Les notes (valeur imposée, écart au prochain démarrage) occupent leur
+     propre ligne, sous le libellé et le contrôle. */
   .qualite-note {
-    flex: 0 0 auto;
+    display: block;
     font-size: 0.72rem;
     color: var(--text-dim);
     font-style: italic;
   }
+  .qualite-note[hidden] { display: none; }
   .qualite-repli {
     margin: 3px 0 0;
     font-size: 0.78rem;
@@ -626,17 +637,35 @@ CSS = [[
     gap: 2px 12px;
     min-width: 0;
   }
+  /* Case et libellé restent solidaires (même ligne de grille) ; le texte
+     peut se replier à droite sans séparer la case. */
   .qualite-case {
-    flex: 0 1 auto;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 2px 6px;
+    align-items: center;
+    min-width: 0;
     cursor: pointer;
   }
-  .qualite-tete { flex-wrap: wrap; }
+  .qualite-case > input { grid-column: 1; }
+  .qualite-case > span:not(.qualite-note) { grid-column: 2; min-width: 0; }
+  .qualite-case > .qualite-note { grid-column: 1 / -1; }
+  .qualite-tete { align-items: start; }
   .qualite-case input[type="checkbox"] {
-    flex: 0 0 auto;
     width: 18px;
     height: 18px;
     margin: 0;
     accent-color: var(--accent);
+  }
+  /* Polyphonie : le libellé au-dessus, puis le curseur et sa valeur sur une
+     même ligne ; le curseur garde une largeur utile même en colonne étroite. */
+  .qualite-polyphonie {
+    grid-template-columns: minmax(140px, 1fr) auto;
+  }
+  .qualite-polyphonie > span { grid-column: 1 / -1; }
+  .qualite-polyphonie input[type="range"] {
+    width: 100%;
+    min-width: 140px;
   }
   /* Le curseur de polyphonie est horizontal et dans le flux, comme celui de
      la réverbération ; le style de base est pivoté. */
