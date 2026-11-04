@@ -77,6 +77,11 @@ struct association {
 
 struct etat {
   atomic_uint seq;
+  // Demandes de reconfiguration audio : le demandeur incrémente demandes
+  // avant d'envoyer CMD_RECONFIG, le fil audio incrémente traitees après
+  // chaque demande traitée, succès comme échec. Leur écart pilote
+  // qualite.application (une demande fusionnée reste comptée).
+  atomic_uint demandes_audio, traitees_audio;
   int ndivisions;
   struct {
     char nom[MAX_NOM];
@@ -719,6 +724,12 @@ static void *boucle_audio(void *arg) {
           struct demande_audio dem;
           copier_demande(&dem);
           appliquer_demande(&dem, &g, &d, &entrelace);
+          // Fin de la demande, succès comme échec : le message « Application… »
+          // s'éteint et audio_erreur prend le relais si besoin. Les réessais
+          // automatiques (plus bas) ne comptent pas comme de nouvelles demandes.
+          atomic_fetch_add_explicit(&g_etat->traitees_audio, 1,
+                                    memory_order_acq_rel);
+          atomic_fetch_add_explicit(&g_etat->seq, 1, memory_order_release);
         } else {
           appliquer(&cmds[i]);
         }
@@ -1073,7 +1084,19 @@ static int l_reconfigurer_audio(lua_State *L) {
   verrou_prendre(&g_partage->verrou_demande);
   g_partage->demande_audio = d;
   verrou_rendre(&g_partage->verrou_demande);
-  envoyer(L, (struct commande){CMD_RECONFIG});
+  // Compteur incrémenté AVANT l'envoi : le fil audio peut traiter la commande
+  // très vite, il ne doit jamais publier « traité » avant « demandé ».
+  // Le numéro de séquence change aussi au début pour réveiller attendre.
+  atomic_fetch_add_explicit(&g_etat->demandes_audio, 1, memory_order_acq_rel);
+  atomic_fetch_add_explicit(&g_etat->seq, 1, memory_order_release);
+  struct commande c = {CMD_RECONFIG};
+  if (write(g_tube[1], &c, sizeof(c)) != sizeof(c)) {
+    int sauve = errno;
+    // Commande non envoyée : ne pas laisser les compteurs décalés.
+    atomic_fetch_sub_explicit(&g_etat->demandes_audio, 1, memory_order_acq_rel);
+    atomic_fetch_sub_explicit(&g_etat->seq, 1, memory_order_release);
+    return luaL_error(L, "commande perdue : %s", strerror(sauve));
+  }
   return 0;
 }
 
@@ -1110,6 +1133,12 @@ static int l_etat(lua_State *L) {
   // Activité MIDI : chargée à part, elle ne participe pas à seq.
   unsigned canaux_actifs =
       atomic_load_explicit(&g_partage->canaux_actifs, memory_order_relaxed);
+  // Compteurs de reconfiguration, lus atomiquement (comme seq, ils ne sont
+  // pas pris dans la copie cohérente).
+  unsigned demandes_audio =
+      atomic_load_explicit(&g_etat->demandes_audio, memory_order_acquire);
+  unsigned traitees_audio =
+      atomic_load_explicit(&g_etat->traitees_audio, memory_order_acquire);
 
   lua_createtable(L, 0, 7);
   lua_pushinteger(L, seq), lua_setfield(L, -2, "seq");
@@ -1142,6 +1171,8 @@ static int l_etat(lua_State *L) {
   lua_setfield(L, -2, "limiteur");
   lua_pushstring(L, copie.audio_erreur);
   lua_setfield(L, -2, "audio_erreur");
+  lua_pushboolean(L, demandes_audio != traitees_audio);
+  lua_setfield(L, -2, "application");
   lua_setfield(L, -2, "qualite");
   lua_createtable(L, copie.nassociations, 0);
   for (int i = 0; i < copie.nassociations; ++i) {

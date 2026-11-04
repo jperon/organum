@@ -237,6 +237,18 @@ verifie "polyphonie_max par défaut = 0" '"polyphonie_max":0' "$S"
 verifie "tete_reverb par défaut = true" '"tete_reverb":true' "$S"
 verifie "tete_reverb non imposée par défaut" '"tete_reverb_impose":false' "$S"
 
+echo "== pages : /qualite séparée de /"
+CODE=$(curl -s -o "$TMP/qualite.html" -w '%{http_code}' "$URL/qualite")
+if [ "$CODE" = "200" ]; then
+  ok "/qualite répond 200"
+else
+  echec "/qualite attendu 200, reçu $CODE"
+fi
+verifie "/qualite contient qualite-niveau" 'qualite-niveau' "$(cat "$TMP/qualite.html" 2>/dev/null || true)"
+curl -s "$URL/" >"$TMP/accueil.html"
+verifie_absent "/ ne contient plus la section Qualité" 'qualite-niveau' "$(cat "$TMP/accueil.html" 2>/dev/null || true)"
+verifie "/ contient un lien vers /qualite" 'href="/qualite"' "$(cat "$TMP/accueil.html" 2>/dev/null || true)"
+
 echo "== POST valide : un seul champ"
 R=$(post '{"qualite":{"spatialisation":1}}')
 verifie "réponse 200 avec ok" '"ok":true' "$R"
@@ -448,6 +460,63 @@ S=$(get)
 REV0=$(champ_num "$S" reverb)
 XR0=$(champ_num "$S" xruns)
 EQ0=$(champ_num "$S" erreurs_ecriture)
+
+echo "== application : état explicite pendant un changement de taux"
+R=$(post '{"qualite":{"taux":44100}}')
+VU_APPLI=0
+if printf '%s' "$R" | grep -qF '"application":true'; then VU_APPLI=1; fi
+i=0
+while [ "$i" -lt 300 ] && [ "$VU_APPLI" -eq 0 ]; do
+  S=$(get)
+  if printf '%s' "$S" | grep -qF '"application":true'; then VU_APPLI=1; fi
+  sleep 0.01
+  i=$((i + 1))
+done
+if [ "$VU_APPLI" -eq 1 ]; then
+  ok "changement de taux : application passe à vrai"
+else
+  echec "changement de taux : application n'est jamais passé à vrai"
+fi
+# Le taux effectif est publié par le fil audio au battement suivant : attendre
+# d'abord la valeur effective, puis la fin de l'application.
+S=$(attendre_etat '"taux":44100' 200) || true
+verifie "changement de taux : taux 44100 effectif" '"taux":44100' "$S"
+S=$(attendre_etat '"application":false' 100) || true
+verifie "changement de taux : application revient à faux" '"application":false' "$S"
+post '{"qualite":{"taux":48000}}' >/dev/null
+S=$(attendre_etat '"taux":48000' 200) || true
+S=$(attendre_etat '"application":false' 100) || true
+verifie "retour au taux 48000 : application à faux" '"application":false' "$S"
+
+echo "== application : échec de périphérique puis retour à faux"
+post '{"qualite":{"peripherique":"hw:98,98"}}' >/dev/null
+S=$(attendre_etat '"audio_erreur":"p' 100) || true
+verifie "périphérique inexistant : audio_erreur présent" '"audio_erreur":"p' "$S"
+S=$(attendre_etat '"application":false' 100) || true
+verifie "périphérique inexistant : application revient à faux" '"application":false' "$S"
+post '{"qualite":{"peripherique":""}}' >/dev/null
+S=$(attendre_etat '"audio_erreur":""' 100) || true
+S=$(attendre_etat '"application":false' 100) || true
+verifie "périphérique rétabli : audio_erreur vidé" '"audio_erreur":""' "$S"
+
+echo "== application : 5 demandes de période rapprochées"
+for p in 256 1024 128 2048 512; do
+  post "{\"qualite\":{\"periode\":$p}}" >/dev/null
+  sleep 0.02
+done
+S=$(attendre_etat '"application":false' 200) || true
+verifie "5 demandes rapprochées : application finit à faux" '"application":false' "$S"
+verifie "5 demandes rapprochées : période finale = 512" '"periode":512' "$S"
+
+echo "== application : échec de POST avant la commande"
+CODE=$(code_post '{"qualite":{"taux":22050}}')
+if [ "$CODE" = "400" ]; then
+  ok "taux invalide : POST refusé (400)"
+else
+  echec "taux invalide : 400 attendu, reçu $CODE"
+fi
+S=$(get)
+verifie "POST refusé : application reste à faux" '"application":false' "$S"
 
 echo "== période à chaud, sans relance (moins de 3 s)"
 T0=$(date +%s%N)

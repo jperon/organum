@@ -726,6 +726,7 @@ qualite_etat = ->
     limiteur_impose: IMPOSE.limiteur
     audio_repli: AUDIO_REPLI
     audio_erreur: e.qualite.audio_erreur or ""
+    application: e.qualite.application == true
     niveau: q.niveau
     auto: q.auto
   }

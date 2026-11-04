@@ -444,6 +444,7 @@ texte_calibration = (c) ->
       limiteur_prochain: true
       limiteur_impose: false
       audio_repli: ""
+      application: base.application == true
       niveau: modele.niveau_correspondant base
       calibration: base.calibration
     }
@@ -902,7 +903,13 @@ texte_calibration = (c) ->
           ui\texte tronquer texte_calibration(calib), l - 2 * MARGE - ESPACE
 
         ui\ligne ligne, 1
-        message_affiche = message_qualite
+        -- Pendant l'application (état explicite publié par le fil audio), le
+        -- message le plus important est « Application… » ; une fois terminée,
+        -- un échec éventuel reprend la ligne.
+        message_affiche = nil
+        if q.application == true
+          message_affiche = "Application…"
+        message_affiche or= message_qualite
         if not message_affiche and type(q.audio_erreur) == "string" and q.audio_erreur != ""
           message_affiche = "Reconfiguration audio : #{q.audio_erreur}"
         if not message_affiche and type(q.audio_repli) == "string" and q.audio_repli != ""
