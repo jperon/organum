@@ -160,6 +160,53 @@ disposer_connexions = (nports, l, h) ->
     ligne = math.max 1, ligne
   {police: police, :ligne, :visibles, :compte, :trop_petit, colonne: case}
 
+-- Disposition du panneau Qualité : une ligne d'en-tête, une par réglage,
+-- puis les lignes facultatives (tête de réverbération, calibration) et le
+-- message d'état. rows vient de l'appelant ; colonnes est le nombre de cases
+-- de la ligne « Niveau » (6 avec Auto, 5 sinon). Comme les autres panneaux,
+-- tout doit tenir sans défilement : la police est bornée par la hauteur et
+-- par la largeur, et si même la police plancher ne suffit pas, trop_petit
+-- le signale (une seule ligne d'avertissement est alors dessinée).
+disposer_qualite = (rows, l, h, colonnes) ->
+  fixe = 2 * MARGE + ESPACE * (rows + 1)
+  ligne = math.floor (h - fixe) / rows
+  par_hauteur = ligne / LIGNE_POLICE
+  case = (l - 2 * MARGE) / colonnes - ESPACE
+  par_largeur = case / 5.5
+  police = math.floor math.min(par_hauteur, par_largeur, POLICE_MAX)
+  trop_petit = false
+  if police < POLICE_MIN
+    police = POLICE_MIN
+    ligne = math.ceil(police * LIGNE_POLICE)
+    dispo = h - 2 * MARGE - ESPACE
+    rows_fit = math.floor dispo / (ligne + ESPACE)
+    trop_petit = rows_fit < rows
+  else
+    ligne = math.max 1, ligne
+  {police: police, :ligne, :trop_petit}
+
+-- Ligne d'information de la calibration automatique (facultative) : niveau
+-- choisi, temps estimé pour ce niveau, échéance du bloc, nombre de voix de
+-- référence. Les champs absents sont simplement omis.
+texte_calibration = (c) ->
+  parties = {}
+  if type(c.niveau) == "number"
+    table.insert parties, "Calibration : niveau #{c.niveau}"
+  else
+    table.insert parties, "Calibration automatique"
+  est = c.estimation_ms
+  if type(est) == "table" and type(c.niveau) == "number" and type(est[c.niveau + 1]) == "number"
+    table.insert parties, ("estimation %.1f ms")\format est[c.niveau + 1]
+  elseif type(est) == "number"
+    table.insert parties, ("estimation %.1f ms")\format est
+  if type(c.echeance_ms) == "number"
+    table.insert parties, ("échéance %.1f ms")\format c.echeance_ms
+  if type(c.voix_ref) == "number"
+    table.insert parties, "#{c.voix_ref} voix"
+  if type(c.tete_reverb) == "boolean"
+    table.insert parties, c.tete_reverb and "tête zéro latence" or "sans tête"
+  table.concat parties, " · "
+
 (organum, nk, options = {}) ->
   -- Police : Libertinus Serif (OFL), réduite au latin, embarquée dans le zip.
   -- ORGANUM_POLICE : autre fichier .ttf, pour essayer une police.
@@ -171,8 +218,14 @@ disposer_connexions = (nports, l, h) ->
   continuer = options.continuer or -> true
   police, seq = 20, nil
   midi = options.midi
-  mode = "console"  -- "console", "midi" ou "connexions" ; les deux panneaux remplacent la console
+  mode = "console"  -- "console", "midi", "connexions" ou "qualite" ; ces panneaux remplacent la console
   mc = nil           -- configuration MIDI locale, même forme qu'etat_midi
+  -- Qualité : options.qualite (facultatif) fournit l'état complet (niveau,
+  -- auto, tête de réverbération, calibration) et l'enregistrement persistant ;
+  -- sans lui, la fenêtre reste utilisable sur les quatre champs à chaud que
+  -- publie le moteur. message_qualite affiche un échec ou un redémarrage.
+  qualite_opt = options.qualite
+  message_qualite = nil
   cible_apprentissage = "volume"
   -- Apprentissage : {i: n} refait l'association n, {nouveau: true} attend un
   -- contrôle pour en créer une. dernier_vu est le dernier contrôle publié au
@@ -360,6 +413,56 @@ disposer_connexions = (nports, l, h) ->
   lire_sys = ->
     v = systeme.lire!
     v and v / 100
+
+  -- État de qualité pour le panneau. Avec options.qualite, on interroge son
+  -- état complet ; sinon on se rabat sur les quatre champs à chaud du moteur
+  -- et le niveau se déduit des présélections (modele.niveau_correspondant).
+  etat_qualite = (e) ->
+    base = e.qualite or {}
+    if qualite_opt and qualite_opt.etat
+      ok, q = pcall qualite_opt.etat
+      if ok and type(q) == "table"
+        return q
+    {
+      bruit_attaque: base.bruit_attaque == true
+      instabilite: base.instabilite == true
+      spatialisation: base.spatialisation or 0
+      polyphonie_max: base.polyphonie_max or 0
+      niveau: modele.niveau_correspondant base
+      calibration: base.calibration
+    }
+
+  -- Applique un ou plusieurs réglages. Avec options.qualite, c'est lui qui
+  -- enregistre et renvoie éventuellement {redemarrage_requis: true} ; sinon
+  -- on écrit directement les champs à chaud du moteur et une présélection
+  -- est décomposée en ses quatre champs.
+  regler_qualite = (payload) ->
+    message_qualite = nil
+    if qualite_opt and qualite_opt.regler
+      ok, res = pcall qualite_opt.regler, payload
+      if ok
+        if type(res) == "table" and res.redemarrage_requis
+          message_qualite = "Tête de réverbération : au prochain démarrage"
+      else
+        message_qualite = "Échec de l'enregistrement des réglages"
+        Log kLogWarn, "fenêtre : qualité : #{res}" if Log
+      seq = nil
+      return
+    if payload.niveau != nil
+      pr = modele.PRESELECTIONS[payload.niveau + 1]
+      if pr
+        organum.qualite "spatialisation", pr.spatialisation
+        organum.qualite "bruit_attaque", pr.bruit_attaque
+        organum.qualite "instabilite", pr.instabilite
+        organum.qualite "polyphonie_max", pr.polyphonie_max
+    else
+      for k, v in pairs payload
+        switch k
+          when "bruit_attaque", "instabilite"
+            organum.qualite k, v == true
+          when "spatialisation", "polyphonie_max"
+            organum.qualite k, math.floor v
+    seq = nil
 
   while continuer!
     ouverte, sale = ui\evenements 50
@@ -637,6 +740,96 @@ disposer_connexions = (nports, l, h) ->
         ui\dessiner 30, 30, 30
       continue
 
+    if mode == "qualite"
+      l, h = ui\taille!
+      q = etat_qualite e
+      a_tete = type(q.tete_reverb) == "boolean"
+      calib = type(q.calibration) == "table" and q.calibration or nil
+      -- Rangées : en-tête, niveau, deux cases, spatialisation, polyphonie,
+      -- puis (tête), (calibration) et message. Le nombre de cases de la ligne
+      -- « Niveau » vaut 6 quand le mode Auto existe (bouton en plus), 5 sinon.
+      rows = 6 + (a_tete and 1 or 0) + (calib and 1 or 0)
+      colonnes = (type(q.auto) == "boolean") and 6 or 5
+      p = disposer_qualite rows, l, h, colonnes
+      if p.police != police
+        ui\police p.police
+        police = p.police
+      ligne = p.ligne
+      if p.trop_petit
+        -- Même la police plancher ne laisse pas passer toutes les rangées :
+        -- une seule ligne d'avertissement, sans débordement.
+        if ui\debut "", 0, 0, l, h
+          ui\ligne ligne, 2
+          if ui\bouton "Retour"
+            mode = "console"
+            seq = nil
+          ui\texte "Fenêtre trop petite pour les réglages de qualité"
+          ui\fin!
+          ui\dessiner 30, 30, 30
+        continue
+      if ui\debut "", 0, 0, l, h
+        ui\ligne ligne, 3
+        if ui\bouton "Retour"
+          mode = "console"
+          seq = nil
+        ui\texte "Qualité", "droite"
+        ui\texte (if q.auto == true then "Auto" elseif q.niveau == -1 then "Personnalisé" else "Niveau #{q.niveau}"), "droite"
+
+        -- Niveau : Auto (si disponible) ou une présélection 0 à 3.
+        ui\ligne ligne, colonnes
+        ui\texte "Niveau", "droite"
+        if type(q.auto) == "boolean"
+          auto_actif = q.auto == true
+          if ui\choix("Auto", auto_actif) != auto_actif
+            regler_qualite {auto: true}
+        for n = 0, 3
+          actif = q.auto != true and q.niveau == n
+          if ui\choix(tostring(n), actif) != actif
+            regler_qualite {niveau: n}
+
+        -- Bruit d'attaque et instabilité (champs à chaud). Boutons-bascule
+        -- plutôt que cases : l'état actif est lisible (accent bleu), alors que
+        -- le rendu rawfb des cases est peu contrasté.
+        ui\ligne ligne, 2
+        actif_bruit = q.bruit_attaque == true
+        nouveau = ui\choix "Bruit d'attaque", actif_bruit
+        regler_qualite {bruit_attaque: nouveau} if nouveau != actif_bruit
+        actif_instabilite = q.instabilite == true
+        nouveau = ui\choix "Instabilité", actif_instabilite
+        regler_qualite {instabilite: nouveau} if nouveau != actif_instabilite
+
+        -- Spatialisation : coupée, simplifiée, complète.
+        ui\ligne ligne, 4
+        ui\texte "Spatialisation", "droite"
+        for v, nom in ipairs {"Coupée", "Simplifiée", "Complète"}
+          actif = q.spatialisation == v - 1
+          if ui\choix(nom, actif) != actif
+            regler_qualite {spatialisation: v - 1}
+
+        -- Polyphonie maximale : 0 = illimitée, jusqu'à 512.
+        ui\ligne ligne, 3
+        ui\texte "Polyphonie max.", "droite"
+        poly = ui\curseur (q.polyphonie_max or 0), 0, 512, 1
+        if bouge (q.polyphonie_max or 0), poly
+          regler_qualite {polyphonie_max: math.floor poly + 0.5}
+        ui\texte (if (q.polyphonie_max or 0) == 0 then "Illimitée" else "#{q.polyphonie_max} voix"), "droite"
+
+        if a_tete
+          ui\ligne ligne, 1
+          actif_tete = q.tete_reverb == true
+          nouveau = ui\choix "Tête de réverbération zéro latence (prochain démarrage)", actif_tete
+          regler_qualite {tete_reverb: nouveau} if nouveau != actif_tete
+
+        if calib
+          ui\ligne ligne, 1
+          ui\texte tronquer texte_calibration(calib), l - 2 * MARGE - ESPACE
+
+        ui\ligne ligne, 1
+        ui\texte message_qualite or ""
+        ui\fin!
+        ui\dessiner 30, 30, 30
+      continue
+
     l, h = ui\taille!
     -- Rapport largeur/taille du plus long nom de jeu, à la police courante.
     plus_long = 0
@@ -650,8 +843,8 @@ disposer_connexions = (nports, l, h) ->
     ligne = p.ligne
 
     if ui\debut "", 0, 0, l, h
-      -- Réglages généraux
-      ui\ligne ligne, (midi and 7 or 6)
+      -- Réglages généraux (le bouton Qualité s'ajoute toujours, MIDI si fourni)
+      ui\ligne ligne, (midi and 8 or 7)
       ui\texte "Volume", "droite"
       if systeme and vol_sys
         v = ui\curseur vol_sys, 0, 1, 0.01
@@ -664,6 +857,10 @@ disposer_connexions = (nports, l, h) ->
       organum.reverb r if bouge e.reverb, r
       ui\texte ""
       organum.panique! if ui\bouton "Panique"
+      if ui\bouton "Qualité"
+        mode = "qualite"
+        message_qualite = nil
+        seq = nil
       if midi and ui\bouton "MIDI"
         mode = "midi"
         appel_ok = true

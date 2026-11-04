@@ -555,6 +555,97 @@ CSS = [[
     .barre .btn.panic { flex: 0 0 auto; padding: 0 24px; margin: 0; }
   }
 
+  /* Réglages de qualité : section compacte, une colonne au téléphone, deux
+     dès que la largeur le permet ; aucune largeur minimale fixe, donc jamais
+     de défilement horizontal. */
+  .qualite {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 6px;
+    background: var(--panel);
+    min-width: 0;
+  }
+  .qualite[hidden] { display: none; }
+  .qualite-titre {
+    margin: 0 0 3px;
+    font-size: 0.9rem;
+    font-weight: 700;
+  }
+  .qualite-corps {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+    gap: 4px 12px;
+    align-items: center;
+    min-width: 0;
+  }
+  .qualite-champ,
+  .qualite-case,
+  .qualite-tete {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    font-size: 0.82rem;
+    color: var(--text-dim);
+  }
+  .qualite-champ > span { flex: 0 0 auto; }
+  .qualite-champ select,
+  .qualite-champ input[type="range"] { flex: 1 1 auto; min-width: 0; }
+  .qualite select {
+    padding: 3px 5px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--panel-raised);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.82rem;
+  }
+  .qualite-cases {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 12px;
+    min-width: 0;
+  }
+  .qualite-case {
+    flex: 0 1 auto;
+    cursor: pointer;
+  }
+  .qualite-tete { flex-wrap: wrap; }
+  .qualite-case input[type="checkbox"] {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    accent-color: var(--accent);
+  }
+  /* Le curseur de polyphonie est horizontal et dans le flux, comme celui de
+     la réverbération ; le style de base est pivoté. */
+  .qualite input[type="range"] {
+    position: static;
+    transform: none;
+    width: auto;
+    height: 30px;
+    padding: 0;
+    margin: 0;
+  }
+  .qualite output {
+    flex: 0 0 auto;
+    min-width: 4.2em;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+  }
+  .qualite select:focus-visible,
+  .qualite input:focus-visible {
+    outline: 3px solid var(--focus);
+    outline-offset: 2px;
+  }
+  .qualite select:disabled,
+  .qualite input:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,

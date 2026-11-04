@@ -1,6 +1,6 @@
 -- Le harnais charge fenetre.lua et modele.lua compilés (par défaut dans
 -- /tmp/fenetre) ; FENETRE_PATH peut désigner un autre dossier.
-package.path = (os.getenv "FENETRE_PATH" or "/tmp/fenetre/?.lua") .. ";" .. package.path
+package.path = ((os.getenv "FENETRE_PATH") or "/tmp/fenetre/?.lua") .. ";" .. package.path
 
 lancer = require "fenetre"
 modele = require "modele"
@@ -24,6 +24,25 @@ etat = {
   }
   dernier_controle: {canal: 1, cc: 7, valeur: 100}
   divisions: {}
+  -- Réglages de qualité factices, avec une calibration au démarrage pour
+  -- exercer la ligne d'information du panneau.
+  qualite: {
+    bruit_attaque: true
+    instabilite: true
+    spatialisation: 2
+    polyphonie_max: 0
+    tete_reverb: true
+    niveau: 3
+    auto: false
+    calibration: {
+      niveau: 2
+      tete_reverb: true
+      echeance_ms: 10.67
+      estimation_ms: {4.2, 5.1, 6.3, 8.9}
+      voix_ref: 150
+      duree_calibration_ms: 35.0
+    }
+  }
 }
 
 noms_claviers = {"Pedal", "Manual I", "Manual II", "Manual III"}
@@ -74,6 +93,12 @@ organum.reverb = (v) ->
   bump!
 organum.panique = ->
   print "panique"
+  bump!
+-- Repli sans options.qualite : la fenêtre écrit directement les quatre
+-- champs à chaud du moteur.
+organum.qualite = (champ, valeur) ->
+  etat.qualite[champ] = valeur
+  print "qualite #{champ}=#{valeur}"
   bump!
 organum.midi = (status, n) ->
   etat.etape = n
@@ -151,9 +176,43 @@ midi = {
     print "enregistrer midi : #{#cfg.associations} association(s)"
 }
 
+-- État complet de qualité, comme le fournira init.moon : niveau, mode auto,
+-- tête de réverbération et calibration. Les mutations suivent les règles du
+-- serveur (une présélection écrit les quatre champs ; un champ seul passe en
+-- « personnalisé »).
+qualite = {
+  etat: -> etat.qualite
+  regler: (payload) ->
+    redemarrage = false
+    if payload.niveau != nil
+      p = modele.PRESELECTIONS[payload.niveau + 1]
+      if p
+        redemarrage = p.tete_reverb != etat.qualite.tete_reverb
+        etat.qualite.spatialisation = p.spatialisation
+        etat.qualite.bruit_attaque = p.bruit_attaque
+        etat.qualite.instabilite = p.instabilite
+        etat.qualite.polyphonie_max = p.polyphonie_max
+        etat.qualite.tete_reverb = p.tete_reverb
+      etat.qualite.niveau = payload.niveau
+      etat.qualite.auto = false
+    else
+      if payload.tete_reverb != nil
+        redemarrage = payload.tete_reverb != etat.qualite.tete_reverb
+      for k, v in pairs payload
+        etat.qualite[k] = v
+      if payload.auto != nil
+        etat.qualite.auto = payload.auto == true
+      else
+        etat.qualite.niveau = -1
+        etat.qualite.auto = false
+    print "qualite regler niveau=#{etat.qualite.niveau} auto=#{etat.qualite.auto} redemarrage=#{redemarrage}"
+    bump!
+    {ok: true, redemarrage_requis: redemarrage}
+}
+
 largeur = tonumber(os.getenv "LARGEUR") or 800
 hauteur = tonumber(os.getenv "HAUTEUR") or 600
 
-ok, err = lancer organum, nk, {titre: "essai organum", largeur: largeur, hauteur: hauteur, :midi}
+ok, err = lancer organum, nk, {titre: "essai organum", largeur: largeur, hauteur: hauteur, :midi, :qualite}
 print err if err
 print "fin"

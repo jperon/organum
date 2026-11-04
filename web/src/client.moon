@@ -244,6 +244,202 @@ JS = [[
   refresh();
   window.setInterval(refresh, POLL_DELAY);
 
+  // --- Qualité (section « Qualité ») ---
+  // qualiteMaj est appelé par la boucle d'état de l'orgue (plus bas) avec
+  // l'objet `qualite` de GET /api/orgue, et par les réponses de POST.
+  var qualiteMaj = null;
+  (function () {
+    var section = document.getElementById('qualite');
+    if (!section) { return; }
+    var selNiveau = document.getElementById('qualite-niveau');
+    var caseBruit = document.getElementById('qualite-bruit');
+    var caseInstabilite = document.getElementById('qualite-instabilite');
+    var selSpatialisation = document.getElementById('qualite-spatialisation');
+    var curseurPolyphonie = document.getElementById('qualite-polyphonie');
+    var valeurPolyphonie = document.getElementById('qualite-polyphonie-valeur');
+    var caseTete = document.getElementById('qualite-tete');
+    var ligneCalibration = document.getElementById('qualite-calibration');
+    var message = document.getElementById('qualite-message');
+    var indisponible = document.getElementById('qualite-indisponible');
+    var enAttente = 0;
+    var polyActif = false;
+    var polyEnvoye = null;
+
+    function nombre(valeur) {
+      var n = Number(valeur);
+      return isFinite(n) ? n : null;
+    }
+
+    function textePolyphonie(n) {
+      return n === 0 ? 'Illimitée' : n + ' voix';
+    }
+
+    function choixNiveau(q) {
+      if (q.auto === true) { return 'auto'; }
+      if (typeof q.niveau === 'number' && q.niveau >= 0 && q.niveau <= 3) {
+        return String(q.niveau);
+      }
+      return '-1';
+    }
+
+    function texteCalibration(c) {
+      if (!c || typeof c !== 'object') { return ''; }
+      var parties = [];
+      var niveau = nombre(c.niveau);
+      parties.push(niveau === null ? 'Calibration automatique' : 'Calibration automatique : niveau ' + niveau);
+      var estimation = null;
+      if (Object.prototype.toString.call(c.estimation_ms) === '[object Array]' &&
+          niveau !== null && typeof c.estimation_ms[niveau] === 'number') {
+        estimation = c.estimation_ms[niveau];
+      } else if (typeof c.estimation_ms === 'number') {
+        estimation = c.estimation_ms;
+      }
+      if (estimation !== null) { parties.push('estimation ' + estimation.toFixed(1) + ' ms'); }
+      if (typeof c.echeance_ms === 'number') { parties.push('échéance ' + c.echeance_ms.toFixed(1) + ' ms'); }
+      if (typeof c.voix_ref === 'number') { parties.push(c.voix_ref + ' voix'); }
+      if (typeof c.tete_reverb === 'boolean') {
+        parties.push(c.tete_reverb ? 'tête zéro latence' : 'sans tête');
+      }
+      return parties.join(' · ');
+    }
+
+    function afficherMessage(texte) {
+      if (!message) { return; }
+      message.textContent = texte || '';
+      message.hidden = !texte;
+    }
+
+    function desactiver(actif) {
+      [selNiveau, caseBruit, caseInstabilite, selSpatialisation, curseurPolyphonie, caseTete].forEach(function (el) {
+        if (el) { el.disabled = actif; }
+      });
+    }
+
+    function maj(q) {
+      if (enAttente > 0) { return; }
+      if (!q || typeof q !== 'object') {
+        // Serveur sans réglages de qualité (ancienne version) : la section
+        // reste visible mais ses contrôles sont inertes, avec une explication.
+        section.hidden = false;
+        desactiver(true);
+        if (indisponible) { indisponible.hidden = false; }
+        if (ligneCalibration) { ligneCalibration.hidden = true; }
+        return;
+      }
+      section.hidden = false;
+      desactiver(false);
+      if (indisponible) { indisponible.hidden = true; }
+      if (selNiveau) {
+        var choix = choixNiveau(q);
+        var option = selNiveau.querySelector('option[value="' + choix + '"]');
+        if (!option) { option = selNiveau.querySelector('option[value="-1"]'); }
+        selNiveau.value = option ? option.value : '-1';
+      }
+      if (caseBruit) { caseBruit.checked = q.bruit_attaque === true; }
+      if (caseInstabilite) { caseInstabilite.checked = q.instabilite === true; }
+      if (selSpatialisation && typeof q.spatialisation === 'number') {
+        selSpatialisation.value = String(q.spatialisation);
+      }
+      if (!polyActif && typeof q.polyphonie_max === 'number') {
+        polyEnvoye = null;
+        if (curseurPolyphonie) { curseurPolyphonie.value = String(q.polyphonie_max); }
+        if (valeurPolyphonie) { valeurPolyphonie.textContent = textePolyphonie(q.polyphonie_max); }
+      }
+      if (caseTete && typeof q.tete_reverb === 'boolean') { caseTete.checked = q.tete_reverb; }
+      if (ligneCalibration) {
+        var texte = texteCalibration(q.calibration);
+        ligneCalibration.textContent = texte;
+        ligneCalibration.hidden = !texte;
+      }
+    }
+
+    function envoyer(payload) {
+      enAttente += 1;
+      afficherMessage('');
+      return fetch('/api/orgue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ qualite: payload })
+      })
+        .then(function (r) {
+          return r.json().then(
+            function (data) {
+              if (!r.ok) { throw new Error((data && data.error) || ('HTTP ' + r.status)); }
+              return data;
+            },
+            function () {
+              if (!r.ok) { throw new Error('HTTP ' + r.status); }
+              return {};
+            }
+          );
+        })
+        .then(function (data) {
+          enAttente -= 1;
+          if (data && data.redemarrage_requis) {
+            afficherMessage('Tête de réverbération enregistrée : elle change au prochain démarrage.');
+          }
+          maj(data);
+        })
+        .catch(function (err) {
+          enAttente -= 1;
+          var detail = err && err.message ? err.message : 'erreur réseau';
+          afficherMessage('Qualité : échec de l’enregistrement (' + detail + ').');
+        });
+    }
+
+    if (selNiveau) {
+      selNiveau.addEventListener('change', function () {
+        var valeur = selNiveau.value;
+        if (valeur === 'auto') { envoyer({ auto: true }); return; }
+        if (valeur === '-1') { return; }
+        var n = nombre(valeur);
+        if (n !== null && n >= 0 && n <= 3) { envoyer({ niveau: Math.round(n) }); }
+      });
+    }
+    if (caseBruit) {
+      caseBruit.addEventListener('change', function () {
+        envoyer({ bruit_attaque: caseBruit.checked });
+      });
+    }
+    if (caseInstabilite) {
+      caseInstabilite.addEventListener('change', function () {
+        envoyer({ instabilite: caseInstabilite.checked });
+      });
+    }
+    if (selSpatialisation) {
+      selSpatialisation.addEventListener('change', function () {
+        var n = nombre(selSpatialisation.value);
+        if (n !== null && n >= 0 && n <= 2) { envoyer({ spatialisation: Math.round(n) }); }
+      });
+    }
+    if (curseurPolyphonie) {
+      curseurPolyphonie.addEventListener('input', function () {
+        polyActif = true;
+        var n = nombre(curseurPolyphonie.value);
+        if (n !== null && valeurPolyphonie) { valeurPolyphonie.textContent = textePolyphonie(n); }
+      });
+      var finPolyphonie = function () {
+        polyActif = false;
+        var n = nombre(curseurPolyphonie.value);
+        if (n === null) { return; }
+        n = Math.round(n);
+        if (n < 0) { n = 0; }
+        if (n > 512) { n = 512; }
+        if (n === polyEnvoye) { return; }
+        polyEnvoye = n;
+        envoyer({ polyphonie_max: n });
+      };
+      curseurPolyphonie.addEventListener('change', finPolyphonie);
+      curseurPolyphonie.addEventListener('blur', finPolyphonie);
+    }
+    if (caseTete) {
+      caseTete.addEventListener('change', function () {
+        envoyer({ tete_reverb: caseTete.checked });
+      });
+    }
+    qualiteMaj = maj;
+  })();
+
   // --- Orgue (temps réel Aeolus + repli mémoire) ---
   (function () {
     var ORGUE_API = '/api/orgue';
@@ -354,6 +550,9 @@ JS = [[
     }
 
     function applyOrgueData(data) {
+      if (qualiteMaj) {
+        qualiteMaj(data && typeof data === 'object' ? data.qualite : null);
+      }
       if (data && typeof data === 'object' && data.source === 'aeolus') {
         aeolusMode = true;
         if (typeof data.instance === 'string') { aeolusInstance = data.instance; }

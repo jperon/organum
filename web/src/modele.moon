@@ -105,6 +105,31 @@ libelle_association = (a, divisions) ->
   cc = a.cc == nil and "?" or tostring a.cc
   "#{canal} · CC #{cc} → #{cible}"
 
+-- Présélections de qualité (spécification §3), dans l'ordre des niveaux 0 à 3.
+-- Source unique pour l'interface native ; la page web reçoit les mêmes choix
+-- dans son HTML et le client les envoie sous forme de `niveau`.
+PRESELECTIONS = {
+  {spatialisation: 0, bruit_attaque: false, instabilite: false, polyphonie_max: 96, tete_reverb: false}
+  {spatialisation: 1, bruit_attaque: false, instabilite: false, polyphonie_max: 160, tete_reverb: false}
+  {spatialisation: 1, bruit_attaque: true, instabilite: true, polyphonie_max: 256, tete_reverb: true}
+  {spatialisation: 2, bruit_attaque: true, instabilite: true, polyphonie_max: 0, tete_reverb: true}
+}
+
+-- Niveau dont les quatre réglages à chaud correspondent à q, sinon -1
+-- (« personnalisé »). La tête de réverbération n'entre pas dans la
+-- comparaison : elle ne s'applique qu'au démarrage et peut ne pas être
+-- exposée par l'appelant.
+niveau_correspondant = (q) ->
+  q = q or {}
+  for i, p in ipairs PRESELECTIONS
+    meme_spatialisation = p.spatialisation == (q.spatialisation or 2)
+    meme_bruit = p.bruit_attaque == (q.bruit_attaque and true)
+    meme_instabilite = p.instabilite == (q.instabilite and true)
+    meme_polyphonie = p.polyphonie_max == (q.polyphonie_max or 0)
+    if meme_spatialisation and meme_bruit and meme_instabilite and meme_polyphonie
+      return i - 1
+  -1
+
 -- Libellé court d'un port du séquenceur : « 24:0 — Clavier USB ». Le nom du
 -- client suffit ; à défaut on prend celui du port ou l'adresse.
 libelle_port = (p) ->
@@ -139,6 +164,8 @@ etat_port = (p) ->
   :canaux_liste
   :canaux_masque
   :liste_json
+  :PRESELECTIONS
+  :niveau_correspondant
   :ETATS
   :etat_puce
   :cible_midi
