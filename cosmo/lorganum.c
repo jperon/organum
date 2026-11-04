@@ -105,6 +105,11 @@ struct etat {
   // Dernier contrôleur reçu, pour l'apprentissage depuis la page MIDI.
   int dernier_canal, dernier_cc, derniere_valeur;
   int xruns;
+  // Mesure de charge du fil audio : charge et charge_pointe sont écrites
+  // sans réveiller les attentes ; charge_niveau ne change qu'au plus une
+  // fois par seconde et fait alors avancer seq.
+  int charge, charge_pointe, charge_evaluee, charge_niveau;
+  int xruns_recents;  // xruns des 60 dernières secondes (hors changements)
   int temps_reel;  // le fil audio a obtenu SCHED_FIFO
   int etape, netapes;  // combinaison courante (séquenceur), à partir de 0
   int midi_client, midi_port;
@@ -158,9 +163,60 @@ static struct association g_associations[MAX_ASSOCIATIONS];
 static int g_nassociations;
 static int g_dernier[3] = {-1, -1, -1};
 // Horloge du fil audio : échantillons écoulés et échéance d'activité par
-// canal (aucun appel à clock_gettime dans la boucle).
+// canal. La mesure de charge appelle clock_gettime autour du rendu : sous
+// Linux cosmopolitan résout __vdso_clock_gettime (libc/intrin/
+// clock_gettime.c), donc pas d'appel système dans la boucle.
 static unsigned long long g_echantillons;
 static unsigned long long g_echeances[16];
+
+// Mesure de charge, fil audio uniquement. Aucune allocation, aucun verrou,
+// aucun flottant : deux lectures d'horloge et de l'arithmétique entière par
+// tampon. Les xruns récents tiennent dans un anneau fixe de 60 secondes.
+#define XRUNS_ANNEAU 60
+static unsigned long long g_mesure_prochaine_seconde;
+static unsigned long long g_mesure_echantillons_joues;
+static unsigned g_mesure_somme;
+static unsigned g_mesure_tampons_seconde;
+static unsigned g_mesure_pointe;
+static int g_mesure_evaluee;
+static int g_xruns_vus;
+static unsigned long long g_xruns_blocage;
+static unsigned short g_xruns_anneau[XRUNS_ANNEAU];
+static int g_xruns_anneau_pos;
+static int g_xruns_recents;
+
+// Règle de la puce, calculée sur des entiers : jamais de vert sans mesure.
+static int calculer_charge_niveau(int pointe, int recents, int evaluee) {
+  if (pointe >= 90 || recents >= 3) return 3;
+  if (pointe >= 65 || recents >= 1) return 2;
+  if (evaluee && recents == 0) return 1;
+  return 0;
+}
+
+// Nouveau réglage audio ou de qualité : la pointe repart de zéro et aucune
+// couleur ne doit être affichée avant une seconde de jeu.
+static void mesure_reinitialiser(void) {
+  g_mesure_pointe = 0;
+  g_mesure_echantillons_joues = 0;
+  g_mesure_evaluee = 0;
+  g_etat->charge_pointe = 0;
+  g_etat->charge_evaluee = 0;
+}
+
+// État de mesure remis à zéro au démarrage (le mmap est déjà remis à zéro).
+static void mesure_init(void) {
+  g_mesure_prochaine_seconde = 0;
+  g_mesure_echantillons_joues = 0;
+  g_mesure_somme = 0;
+  g_mesure_tampons_seconde = 0;
+  g_mesure_pointe = 0;
+  g_mesure_evaluee = 0;
+  g_xruns_vus = 0;
+  g_xruns_blocage = 0;
+  memset(g_xruns_anneau, 0, sizeof(g_xruns_anneau));
+  g_xruns_anneau_pos = 0;
+  g_xruns_recents = 0;
+}
 
 // Un fils issu du fork hérite des descripteurs et des mappages PCM du
 // processus principal. Les fermer ici, sans aucun appel ALSA (jamais
@@ -439,15 +495,21 @@ static void appliquer(const struct commande *c) {
       // La valeur passe par masque (16 bits) : polyphonie_max va jusqu'à 512,
       // que le champ b (8 bits) tronquerait.
       aeolus_qualite(g_moteur, c->a, c->masque);
+      mesure_reinitialiser();
       break;
     case CMD_LIMITEUR:
       g_limiteur = c->a != 0;
       aeolus_limiteur(g_moteur, g_limiteur);
+      mesure_reinitialiser();
       break;
     case CMD_TETE:
       // ORGANUM_REVERB_TETE reste prioritaire.
       if (!g_etat->tete_reverb_impose)
         aeolus_reverb_tete(g_moteur, c->a != 0);
+      // Une bascule de tête produit un xrun connu : ignorer ceux de la
+      // seconde qui suit.
+      g_xruns_blocage = g_echantillons + (unsigned long long)g_taux;
+      mesure_reinitialiser();
       break;
     case CMD_RECONFIG:
       // Traité par boucle_audio, qui possède les tampons de rendu.
@@ -725,6 +787,10 @@ static void *boucle_audio(void *arg) {
           struct demande_audio dem;
           copier_demande(&dem);
           appliquer_demande(&dem, &g, &d, &entrelace);
+          // Nouveau réglage audio : la pointe repart de zéro et les xruns de
+          // la seconde qui suit (dont ceux de l'ouverture) sont ignorés.
+          mesure_reinitialiser();
+          g_xruns_blocage = g_echantillons + (unsigned long long)g_taux;
           // Fin de la demande, succès comme échec : le message « Application… »
           // s'éteint et audio_erreur prend le relais si besoin. Les réessais
           // automatiques (plus bas) ne comptent pas comme de nouvelles demandes.
@@ -751,6 +817,8 @@ static void *boucle_audio(void *arg) {
           strlcpy(dem.peripherique, g_peripherique, sizeof(dem.peripherique));
         }
         appliquer_demande(&dem, &g, &d, &entrelace);
+        mesure_reinitialiser();
+        g_xruns_blocage = g_echantillons + (unsigned long long)g_taux;
       }
       if (!g_audio) {
         struct timespec pause = {0, 20 * 1000 * 1000};
@@ -760,13 +828,77 @@ static void *boucle_audio(void *arg) {
       }
     }
 
+    // Deux lectures d'horloge par tampon, autour du seul rendu : l'attente
+    // d'écriture audio n'entre pas dans la charge. Sous Linux, cosmopolitan
+    // passe par __vdso_clock_gettime : aucun appel système.
+    struct timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
     aeolus_rendre(g_moteur, g, d, g_periode);
+    clock_gettime(CLOCK_MONOTONIC, &t1);
     for (int i = 0; i < g_periode; ++i) {
       entrelace[2 * i] = g[i];
       entrelace[2 * i + 1] = d[i];
     }
     if (audio_ecrire(g_audio, entrelace, g_periode) < 0) ++g_erreurs_ecriture;
     g_echantillons += g_periode;
+
+    // Charge du tampon, en pourcentage entier de la durée de période.
+    long long duree_ns = (t1.tv_sec - t0.tv_sec) * 1000000000LL +
+                         (t1.tv_nsec - t0.tv_nsec);
+    unsigned long long periode_ns =
+        (unsigned long long)g_periode * 1000000000ULL / (unsigned)g_taux;
+    unsigned pct = periode_ns && duree_ns > 0
+                       ? (unsigned)((unsigned long long)duree_ns * 100 /
+                                    periode_ns)
+                       : 0;
+    g_mesure_somme += pct;
+    ++g_mesure_tampons_seconde;
+    // Pointe et évaluation seulement quand des voix sonnent.
+    if (aeolus_nb_voix(g_moteur) > 0) {
+      if (pct > g_mesure_pointe) g_mesure_pointe = pct;
+      g_mesure_echantillons_joues += g_periode;
+      if (g_mesure_echantillons_joues >= (unsigned long long)g_taux)
+        g_mesure_evaluee = 1;
+    }
+
+    // Xruns récents : on ignore ceux qui arrivent pendant l'application ou
+    // dans la seconde qui suit une reconfiguration ou une bascule de tête.
+    int total_xruns = g_xruns_base + (g_audio ? audio_xruns(g_audio) : 0);
+    int delta_xruns = total_xruns - g_xruns_vus;
+    g_xruns_vus = total_xruns;
+    if (delta_xruns > 0 &&
+        atomic_load_explicit(&g_partage->demandes_audio, memory_order_acquire) ==
+            atomic_load_explicit(&g_partage->traitees_audio,
+                                 memory_order_acquire) &&
+        g_echantillons >= g_xruns_blocage) {
+      unsigned ajout = delta_xruns > 65535 ? 65535 : (unsigned)delta_xruns;
+      g_xruns_anneau[g_xruns_anneau_pos] += ajout;
+      g_xruns_recents += (int)ajout;
+    }
+
+    // Une fois par seconde au plus : niveau (comparaison entière) et
+    // publication des pourcentages sans toucher à seq.
+    if (g_echantillons >= g_mesure_prochaine_seconde) {
+      g_mesure_prochaine_seconde = g_echantillons + (unsigned long long)g_taux;
+      g_xruns_anneau_pos = (g_xruns_anneau_pos + 1) % XRUNS_ANNEAU;
+      g_xruns_recents -= g_xruns_anneau[g_xruns_anneau_pos];
+      g_xruns_anneau[g_xruns_anneau_pos] = 0;
+      if (g_xruns_recents < 0) g_xruns_recents = 0;
+      g_etat->charge = g_mesure_tampons_seconde
+                           ? (int)(g_mesure_somme / g_mesure_tampons_seconde)
+                           : 0;
+      g_etat->charge_pointe = (int)g_mesure_pointe;
+      g_etat->charge_evaluee = g_mesure_evaluee;
+      g_etat->xruns_recents = g_xruns_recents;
+      int niveau = calculer_charge_niveau((int)g_mesure_pointe,
+                                          g_xruns_recents, g_mesure_evaluee);
+      if (niveau != g_etat->charge_niveau) {
+        g_etat->charge_niveau = niveau;
+        atomic_fetch_add_explicit(&g_etat->seq, 1, memory_order_release);
+      }
+      g_mesure_somme = 0;
+      g_mesure_tampons_seconde = 0;
+    }
 
     if (++tours % 4 == 0) publier();  // ~40 ms à 512 trames
   }
@@ -904,6 +1036,7 @@ static int l_demarrer(lua_State *L) {
   atomic_init(&g_partage->verrou_demande, 0);
   atomic_init(&g_partage->demandes_audio, 0);
   atomic_init(&g_partage->traitees_audio, 0);
+  mesure_init();
   if (pipe(g_tube) < 0) {
     liberer_demarrage();
     lua_pushnil(L);
@@ -1178,6 +1311,16 @@ static int l_etat(lua_State *L) {
   lua_setfield(L, -2, "audio_erreur");
   lua_pushboolean(L, demandes_audio != traitees_audio);
   lua_setfield(L, -2, "application");
+  lua_pushinteger(L, copie.xruns), lua_setfield(L, -2, "xruns");
+  lua_pushinteger(L, copie.xruns_recents);
+  lua_setfield(L, -2, "xruns_recents");
+  lua_pushinteger(L, copie.charge), lua_setfield(L, -2, "charge");
+  lua_pushinteger(L, copie.charge_pointe);
+  lua_setfield(L, -2, "charge_pointe");
+  lua_pushboolean(L, copie.charge_evaluee);
+  lua_setfield(L, -2, "charge_evaluee");
+  lua_pushinteger(L, copie.charge_niveau);
+  lua_setfield(L, -2, "charge_niveau");
   lua_setfield(L, -2, "qualite");
   lua_createtable(L, copie.nassociations, 0);
   for (int i = 0; i < copie.nassociations; ++i) {
@@ -1428,11 +1571,22 @@ static int l_midi_deconnecter(lua_State *L) {
   return 1;
 }
 
+// organum.charge_niveau(pointe, xruns_recents, evaluee) → 0..3.
+// Point d'entrée de diagnostic pour tester la règle C sans moteur audio.
+static int l_charge_niveau_diag(lua_State *L) {
+  int pointe = (int)luaL_checkinteger(L, 1);
+  int recents = (int)luaL_checkinteger(L, 2);
+  int evaluee = lua_toboolean(L, 3);
+  lua_pushinteger(L, calculer_charge_niveau(pointe, recents, evaluee));
+  return 1;
+}
+
 static const luaL_Reg kFonctions[] = {
     {"demarrer", l_demarrer}, {"etat", l_etat},     {"attendre", l_attendre},
     {"jeu", l_jeu},           {"gain", l_gain},     {"volume", l_volume},
     {"reverb", l_reverb},     {"midi", l_midi},     {"panique", l_panique},
     {"qualite", l_qualite}, {"calibrer", l_calibrer},
+    {"charge_niveau", l_charge_niveau_diag},
     {"limiteur", l_limiteur}, {"tete_reverb", l_tete_reverb},
     {"oublier_audio", l_oublier_audio},
     {"reconfigurer_audio", l_reconfigurer_audio},

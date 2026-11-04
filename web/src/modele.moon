@@ -65,6 +65,21 @@ ETATS =
     libelle: "Déconnecté"
     title: "Déconnecté"
 
+-- Niveaux de la puce d'adaptation à la machine, indexés 0 à 3 (0 = pas
+-- encore évalué). Le calcul du niveau est en C ; ce module ne fait que
+-- traduire en libellé et classe CSS, pour le web et la fenêtre native.
+CHARGE_NIVEAUX = {
+  {classe: "charge-gris", libelle: "Pas encore évalué — jouez quelques accords", court: "Pas encore évalué"}
+  {classe: "charge-vert", libelle: "Confortable", court: "Confortable"}
+  {classe: "charge-orange", libelle: "Limite", court: "Limite !"}
+  {classe: "charge-rouge", libelle: "Inadapté", court: "Inadapté !"}
+}
+
+charge_niveau = (n) ->
+  n = math.tointeger n
+  return 0 if n == nil or n < 0
+  n > 3 and 3 or n
+
 -- Clé d'état de la puce : le réseau est la condition indispensable, la
 -- synchronisation Aeolus distingue ensuite vert et orange.
 etat_puce = (connecte, synchronise) ->
@@ -168,6 +183,8 @@ etat_port = (p) ->
   :niveau_correspondant
   :ETATS
   :etat_puce
+  :CHARGE_NIVEAUX
+  :charge_niveau
   :cible_midi
   :cible_midi_court
   :canal_texte

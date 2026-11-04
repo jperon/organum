@@ -727,6 +727,12 @@ qualite_etat = ->
     audio_repli: AUDIO_REPLI
     audio_erreur: e.qualite.audio_erreur or ""
     application: e.qualite.application == true
+    charge: e.qualite.charge or 0
+    charge_pointe: e.qualite.charge_pointe or 0
+    charge_evaluee: e.qualite.charge_evaluee == true
+    charge_niveau: e.qualite.charge_niveau or 0
+    xruns: e.xruns or 0
+    xruns_recents: e.qualite.xruns_recents or 0
     niveau: q.niveau
     auto: q.auto
   }
@@ -1190,6 +1196,13 @@ _G.OnWorkerStart = ->
 
 _G.OnHttpRequest = ->
   path = GetPath!
+  -- Diagnostic opt-in : teste la règle C du niveau de charge sans moteur.
+  if os.getenv("ORGANUM_DIAGNOSTIC") == "1" and path == "/api/diagnostic/charge"
+    pointe = tonumber(GetParam "pointe") or 0
+    recents = tonumber(GetParam "xruns") or 0
+    evaluee = GetParam("evaluee") == "1"
+    send_json 200, {niveau: organum.charge_niveau pointe, recents, evaluee}
+    return
   if path == "/api/volume"
     handle_volume!
   elseif path == "/api/orgue/attendre"
