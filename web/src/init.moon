@@ -1009,7 +1009,7 @@ handle_orgue = ->
     send_json 400, {error: "corps JSON invalide"}
     return
 
-  actions = {stop: true, cancel: true, step: true, reverb: true, panic: true, gain: true, link: true, qualite: true}
+  actions = {stop: true, cancel: true, step: true, reverb: true, panic: true, gain: true, link: true, qualite: true, volume: true}
   n = 0
   for k in pairs data
     unless actions[k]
@@ -1073,6 +1073,12 @@ handle_orgue = ->
     else
       send_json 400, {error: err}
     return
+
+  elseif data.volume != nil
+    unless is_finite_number(data.volume) and data.volume >= 0 and data.volume <= 1
+      send_json 400, {error: "volume hors limites"}
+      return
+    organum.volume data.volume
 
   elseif data.panic == true
     organum.panique!
