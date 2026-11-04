@@ -81,9 +81,13 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   le résultat dans `qualite.calibration`.
 - Puce d'adaptation à la machine : le fil audio mesure le rendu avec deux
   `clock_gettime(CLOCK_MONOTONIC)` par tampon (vDSO sous Linux, donc sans
-  appel système), hors attente d'écriture. Il publie `qualite.charge` (moyenne
-  ~1 s), `qualite.charge_pointe` (maximum depuis le dernier réglage, seulement
-  quand des voix sonnent), `qualite.charge_evaluee` (1 s de jeu mesurée),
+  appel système), hors attente d'écriture. Pour chaque seconde pleine, la
+  moyenne des tampons de cette seconde est retenue quand des voix sonnent (les
+  secondes sans voix valent 0) ; `qualite.charge_pointe` est le maximum de ces
+  moyennes sur un anneau fixe de 60 secondes, remis à zéro par
+  `mesure_reinitialiser`. Une préemption isolée est donc lissée sur la seconde.
+  Il publie aussi `qualite.charge` (moyenne ~1 s), `qualite.charge_evaluee`
+  (1 s de jeu mesurée), la seconde partielle en cours n'étant jamais comptée,
   `qualite.charge_niveau` (0 gris, 1 vert, 2 orange, 3 rouge, calculé en C au
   plus une fois par seconde), `qualite.xruns` et `qualite.xruns_recents`
   (anneau de 60 s, hors `application` et hors seconde suivant une
