@@ -121,6 +121,13 @@ par l'article 13 de l'AGPL.
 - `html.moon` produit `<div/>` pour un élément vide : passer `""`.
 - Aeolus ne mémorise une combinaison qu'en la quittant : `publier()` appelle
   `aeolus_capturer_etape` à chaque changement de registration.
+- PCM hérité au fork : tout fils durable (fenêtre native, et chaque fils de
+  requête via `OnWorkerStart`) doit appeler `organum.oublier_audio`, qui ferme
+  les descripteurs `/dev/snd/pcm` hérités et oublie leurs mappages sans aucun
+  appel ALSA (jamais `snd_pcm_close`/`drop`/ioctl, qui arrêteraient le flux du
+  parent). Sans cela, le périphérique reste occupé après `audio_fermer` et la
+  sortie ne se rouvre plus. Le fil audio réessaie l'ouverture sur EBUSY
+  pendant au plus ~500 ms.
 - Les binaires cosmo bouclent sous Wine 9 (`MapViewOfFileEx`) : Windows n'est
   pas testable ainsi.
 - CI : `.github/workflows/rolling.yml` construit à chaque push sur `master`

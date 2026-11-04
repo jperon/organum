@@ -16,6 +16,7 @@
 #include "third_party/lua/lauxlib.h"
 #include "third_party/lua/lua.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -153,6 +154,73 @@ static int g_dernier[3] = {-1, -1, -1};
 // canal (aucun appel à clock_gettime dans la boucle).
 static unsigned long long g_echantillons;
 static unsigned long long g_echeances[16];
+
+// Un fils issu du fork hérite des descripteurs et des mappages PCM du
+// processus principal. Les fermer ici, sans aucun appel ALSA (jamais
+// snd_pcm_close/drop/ioctl, qui arrêteraient le flux du parent), libère le
+// périphérique pour la réouverture. Ne touche ni /dev/snd/seq ni le tube.
+#define CHEMIN_MAX 4096
+
+static int commence_par(const char *s, const char *prefixe) {
+  return strncmp(s, prefixe, strlen(prefixe)) == 0;
+}
+
+static void fermer_pcm_herites(void) {
+  DIR *d = opendir("/proc/self/fd");
+  if (!d) return;
+  int dfd = dirfd(d);
+  struct dirent *e;
+  char lien[64], cible[CHEMIN_MAX];
+  while ((e = readdir(d))) {
+    int fd = atoi(e->d_name);
+    if (fd <= 2 || fd == dfd) continue;
+    snprintf(lien, sizeof(lien), "/proc/self/fd/%d", fd);
+    ssize_t n = readlink(lien, cible, sizeof(cible) - 1);
+    if (n <= 0) continue;
+    cible[n] = '\0';
+    if (commence_par(cible, "/dev/snd/pcm")) close(fd);
+  }
+  closedir(d);
+}
+
+static void oublier_une_zone(char *ligne) {
+  unsigned long debut, fin;
+  if (sscanf(ligne, "%lx-%lx", &debut, &fin) != 2 || fin <= debut) return;
+  char *chemin = strchr(ligne, '/');
+  if (chemin && commence_par(chemin, "/dev/snd/pcm"))
+    munmap((void *)debut, (size_t)(fin - debut));
+}
+
+static void oublier_audio_fils(void) {
+  if (!IsLinux()) return;
+  fermer_pcm_herites();
+
+  int fd = open("/proc/self/maps", O_RDONLY);
+  if (fd < 0) return;
+  char buf[8192];
+  size_t len = 0;
+  for (;;) {
+    ssize_t n = read(fd, buf + len, sizeof(buf) - len - 1);
+    if (n <= 0) break;
+    len += (size_t)n;
+    buf[len] = '\0';
+    char *p = buf, *nl;
+    while ((nl = strchr(p, '\n'))) {
+      *nl = '\0';
+      oublier_une_zone(p);
+      p = nl + 1;
+    }
+    size_t reste = strlen(p);
+    memmove(buf, p, reste);
+    len = reste;
+    if (len == sizeof(buf) - 1) len = 0;  // ligne anormalement longue
+  }
+  if (len) {
+    buf[len] = '\0';
+    oublier_une_zone(buf);
+  }
+  close(fd);
+}
 
 // Libère tout ce que l_demarrer a alloué, pour qu'un second appel puisse
 // réessayer avec d'autres réglages (repli de init.moon après un échec
@@ -474,6 +542,20 @@ static long maintenant_ms(void) {
   return (long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
+// Une réouverture peut échouer sur EBUSY juste après un fork : un fils né
+// à l'instant même du fork peut encore tenir le PCM quelques dizaines de ms.
+// Réessayer un peu, sans dépasser la limite globale demandée.
+static int ouvrir_audio_attente(const struct demande_audio *d, long limite_ms) {
+  for (;;) {
+    if (ouvrir_audio_cfg(d)) return 1;
+    const char *detail = audio_derniere_erreur();
+    int occupe = detail && (strstr(detail, "busy") || strstr(detail, "EBUSY"));
+    if (!occupe || maintenant_ms() >= limite_ms) return 0;
+    struct timespec pause = {0, 50 * 1000 * 1000};
+    nanosleep(&pause, NULL);
+  }
+}
+
 // Applique une demande : ferme, ouvre la nouvelle sortie, réalloue les
 // tampons et recrée le moteur si le taux change. En cas d'échec, rouvre
 // l'ancienne configuration ; si elle ne s'ouvre pas non plus, la demande
@@ -488,6 +570,7 @@ static int appliquer_demande(struct demande_audio *dem, float **bg,
     g_demande_pendante_valide = 0;
     return 1;
   }
+  long limite = maintenant_ms() + 500;
   int ancien_taux = g_taux, ancien_periode = g_periode;
   char ancien_periph[PERIPH_MAX + 1];
   strlcpy(ancien_periph, g_peripherique, sizeof(ancien_periph));
@@ -495,12 +578,12 @@ static int appliquer_demande(struct demande_audio *dem, float **bg,
 
   if (etait_ouvert) fermer_audio_cumuler();
 
-  if (!ouvrir_audio_cfg(dem)) {
+  if (!ouvrir_audio_attente(dem, limite)) {
     struct demande_audio echec = *dem;
     erreur_audio(&echec);
     struct demande_audio ancienne = {ancien_taux, ancien_periode, {0}};
     strlcpy(ancienne.peripherique, ancien_periph, sizeof(ancienne.peripherique));
-    if (!ouvrir_audio_cfg(&ancienne)) {
+    if (!ouvrir_audio_attente(&ancienne, limite)) {
       g_demande_pendante = *dem;
       g_demande_pendante_valide = 1;
     }
@@ -920,6 +1003,15 @@ static int l_tete_reverb(lua_State *L) {
   return 0;
 }
 
+// organum.oublier_audio() : à appeler dans un fils après fork. Ferme les
+// descripteurs PCM hérités et oublie leurs mappages, sans toucher au flux du
+// parent (aucun appel ALSA).
+static int l_oublier_audio(lua_State *L) {
+  oublier_audio_fils();
+  lua_pushboolean(L, 1);
+  return 1;
+}
+
 // organum.reconfigurer_audio{taux=, periode=, peripherique=} : dépose la
 // demande complète dans le mmap partagé, puis réveille le fil audio par le
 // tube. Le nom du périphérique ne tient pas dans struct commande.
@@ -1271,6 +1363,7 @@ static const luaL_Reg kFonctions[] = {
     {"reverb", l_reverb},     {"midi", l_midi},     {"panique", l_panique},
     {"qualite", l_qualite}, {"calibrer", l_calibrer},
     {"limiteur", l_limiteur}, {"tete_reverb", l_tete_reverb},
+    {"oublier_audio", l_oublier_audio},
     {"reconfigurer_audio", l_reconfigurer_audio},
     {"canaux_division", l_canaux_division},
     {"canaux_controle", l_canaux_controle},

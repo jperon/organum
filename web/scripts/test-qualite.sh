@@ -469,6 +469,14 @@ else
   echec "xruns/erreurs d'écriture incohérents ($XR0→$XR1, $EQ0→$EQ1)"
 fi
 
+echo "== fils de requête : oublier_audio ne casse ni l'état ni les commandes"
+S=$(get)
+verifie "état lisible dans un fil de requête" '"qualite":{' "$S"
+R=$(post '{"gain":{"division":3,"value":0.61}}')
+verifie "commande acceptée dans un fil de requête" '"ok":true' "$R"
+S=$(get)
+verifie "commande appliquée dans un fil de requête" '"gain":0.61' "$S"
+
 echo "== taux à chaud (recréation silencieuse, moins de 15 s)"
 T0=$(date +%s%N)
 post '{"qualite":{"taux":44100}}' >/dev/null

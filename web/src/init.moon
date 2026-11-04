@@ -43,6 +43,9 @@ run = (bin, args, env, delai_max) ->
     return nil, "unix.fork a échoué"
 
   if pid == 0
+    -- Le fils ne doit pas garder le PCM hérité pendant l'exécution de
+    -- l'outil externe (il retarderait une reconfiguration audio).
+    pcall organum.oublier_audio if organum and organum.oublier_audio
     unix.close r
     unix.close 1
     unix.dup w
@@ -663,6 +666,9 @@ lancer_fenetre = ->
   -- Sous Windows, un serveur X local (VcXsrv, Xming…) est essayé par défaut.
   return unless os.getenv("WAYLAND_DISPLAY") or os.getenv("DISPLAY") or GetHostOs! == "WINDOWS"
   return unless unix.fork! == 0
+  -- Juste après le fork : lâcher le PCM hérité sans toucher au flux du
+  -- parent (le fil audio principal continue de l'utiliser).
+  pcall organum.oublier_audio
   maitre = unix.getppid!
   ok, err = pcall ->
     lancer = require "fenetre"
@@ -1172,6 +1178,13 @@ page = require "page"
 divisions_page = ->
   e = etat_orgue!
   e.divisions, e.steps
+
+-- Chaque fils de requête hérite des descripteurs PCM du processus principal.
+-- Les lâcher avant de servir : sinon le périphérique reste occupé après une
+-- fermeture côté fil audio, et la sortie ne peut plus se rouvrir.
+_G.OnWorkerStart = ->
+  pcall organum.oublier_audio
+  return
 
 _G.OnHttpRequest = ->
   path = GetPath!
