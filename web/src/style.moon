@@ -555,6 +555,66 @@ CSS = [[
     .barre .btn.panic { flex: 0 0 auto; padding: 0 24px; margin: 0; }
   }
 
+  /* Puce d'adaptation et bouton Qualité : la couleur double toujours un
+     libellé, jamais l'information seule. */
+  .lien-qualite { font-weight: 700; }
+  .lien-qualite.charge-gris {
+    background: var(--panel-raised);
+    color: var(--text);
+    border-color: var(--border);
+  }
+  .lien-qualite.charge-vert {
+    background: var(--ok);
+    color: #062016;
+    border-color: var(--ok);
+  }
+  .lien-qualite.charge-orange {
+    background: var(--warn);
+    color: #2b1800;
+    border-color: var(--warn);
+  }
+  .lien-qualite.charge-rouge {
+    background: var(--off);
+    color: #2b0505;
+    border-color: var(--off);
+  }
+  .puce-bloc {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    min-width: 0;
+  }
+  .puce-charge {
+    display: inline-block;
+    max-width: 100%;
+    padding: 4px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 0.85rem;
+    line-height: 1.25;
+  }
+  .puce-charge.charge-gris {
+    background: var(--panel-raised);
+    color: var(--text);
+  }
+  .puce-charge.charge-vert {
+    background: var(--ok);
+    color: #062016;
+    border-color: var(--ok);
+  }
+  .puce-charge.charge-orange {
+    background: var(--warn);
+    color: #2b1800;
+    border-color: var(--warn);
+  }
+  .puce-charge.charge-rouge {
+    background: var(--off);
+    color: #2b0505;
+    border-color: var(--off);
+  }
+
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,

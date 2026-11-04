@@ -13,6 +13,22 @@ JS = [[
   var valueDisplay = document.getElementById('value');
   var statusDisplay = document.getElementById('status');
   var muteButton = document.getElementById('mute');
+  var lienQualite = document.getElementById('lien-qualite');
+
+  // Couleur du lien Qualité : vient de charge_niveau déjà reçu par la boucle
+  // d'état, sans requête supplémentaire. Le texte porte aussi le niveau.
+  function majLienQualite(qualite) {
+    if (!lienQualite) { return; }
+    if (qualite && qualite.application === true) { return; }
+    var niveau = qualite && typeof qualite.charge_niveau === 'number'
+      ? qualite.charge_niveau : 0;
+    if (niveau < 0 || niveau > 3) { niveau = 0; }
+    var classe = lienQualite.getAttribute('data-charge-classe-' + niveau) || 'charge-gris';
+    var libelle = lienQualite.getAttribute('data-charge-libelle-' + niveau) || 'Pas encore évalué';
+    lienQualite.className = 'btn small lien-qualite ' + classe;
+    lienQualite.textContent = niveau >= 2 ? 'Qualité !' : 'Qualité';
+    lienQualite.setAttribute('aria-label', 'Qualité — ' + libelle);
+  }
 
   var etatReseau = false;
   var etatAeolus = false;
@@ -354,6 +370,7 @@ JS = [[
     }
 
     function applyOrgueData(data) {
+      majLienQualite(data && typeof data === 'object' ? data.qualite : null);
       if (data && typeof data === 'object' && data.source === 'aeolus') {
         aeolusMode = true;
         if (typeof data.instance === 'string') { aeolusInstance = data.instance; }

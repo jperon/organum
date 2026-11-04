@@ -3,6 +3,7 @@
 -- réglages sont envoyés par POST /api/orgue {qualite}.
 h = require "html"
 style = require "style"
+modele = require "modele"
 
 css = [[
   .qualite-page {
@@ -217,6 +218,8 @@ script = [[
   var ligneCalibration = document.getElementById('qualite-calibration');
   var message = document.getElementById('qualite-message');
   var indisponible = document.getElementById('qualite-indisponible');
+  var puce = document.getElementById('qualite-puce');
+  var puceDetail = document.getElementById('qualite-puce-detail');
   var enAttente = 0;
   var polyActif = false;
   var polyEnvoye = null;
@@ -298,6 +301,28 @@ script = [[
     message.hidden = !texte;
   }
 
+  // Puce d'adaptation : le niveau vient du C ; ce script ne fait que
+  // traduire la classe et le libellé. Pendant « Application… », on ne
+  // réévalue pas la puce.
+  function majPuce(q) {
+    if (!puce) { return; }
+    if (q && typeof q === 'object' && q.application === true) { return; }
+    var niveau = q && typeof q.charge_niveau === 'number' ? q.charge_niveau : 0;
+    if (niveau < 0 || niveau > 3) { niveau = 0; }
+    var classe = section.getAttribute('data-charge-classe-' + niveau) || 'charge-gris';
+    var libelle = section.getAttribute('data-charge-libelle-' + niveau) ||
+      'Pas encore évalué — jouez quelques accords';
+    puce.className = 'puce-charge ' + classe;
+    puce.textContent = libelle;
+    if (puceDetail) {
+      var pointe = q && typeof q.charge_pointe === 'number' ? q.charge_pointe : 0;
+      var mesure = q && q.charge_evaluee === true;
+      var xruns = q && typeof q.xruns === 'number' ? q.xruns : 0;
+      puceDetail.textContent = (mesure ? 'Pointe : ' + pointe + ' %' : 'Pointe : —') +
+        ' · Xruns : ' + xruns;
+    }
+  }
+
   function desactiver(actif) {
     [selNiveau, caseBruit, caseInstabilite, selSpatialisation, curseurPolyphonie, caseTete,
      selPeriode, selTaux, champPeripherique, caseLimiteur].forEach(function (el) {
@@ -306,7 +331,7 @@ script = [[
   }
 
   function maj(q) {
-    if (enAttente > 0) { majMessage(q); return; }
+    if (enAttente > 0) { majMessage(q); majPuce(q); return; }
     if (!q || typeof q !== 'object') {
       // Serveur sans réglages de qualité (ancienne version) : la section
       // reste visible mais ses contrôles sont inertes, avec une explication.
@@ -316,6 +341,7 @@ script = [[
       if (noteTeteImpose) { noteTeteImpose.hidden = true; }
       if (ligneCalibration) { ligneCalibration.hidden = true; }
       majMessage(q);
+      majPuce(q);
       return;
     }
     section.hidden = false;
@@ -418,6 +444,7 @@ script = [[
       ligneCalibration.hidden = !texte;
     }
     majMessage(q);
+    majPuce(q);
   }
 
   function envoyer(payload) {
@@ -610,6 +637,16 @@ script = [[
     else { device.token += 1; }
   });
 
+  // Les pourcentages sont publiés sans changer seq : le panneau ouvert les
+  // relit au plus une fois toutes les 2 s. Fermé ou caché, aucune requête.
+  window.setInterval(function () {
+    if (document.visibilityState === 'hidden') { return; }
+    fetch('/api/orgue', { cache: 'no-store', headers: { Accept: 'application/json' } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) { if (data) { appliquerEtat(data); } })
+      .catch(function () {});
+  }, 2000);
+
   demarrer();
 })();
 ]]
@@ -626,7 +663,10 @@ script = [[
         h.div class: "entete",
           h.a href: "/", "← Orgue",
           h.h2 "Qualité",
-        h.section class: "qualite", id: "qualite", ["aria-label"]: "Réglages de qualité",
+        h.div class: "puce-bloc",
+          h.span class: "puce-charge charge-gris", id: "qualite-puce", role: "status", ["aria-live"]: "polite", "Pas encore évalué — jouez quelques accords",
+          h.p class: "note", id: "qualite-puce-detail", "Pointe : — · Xruns : 0",
+        h.section class: "qualite", id: "qualite", ["aria-label"]: "Réglages de qualité", ["data-charge-classe-0"]: modele.CHARGE_NIVEAUX[1].classe, ["data-charge-classe-1"]: modele.CHARGE_NIVEAUX[2].classe, ["data-charge-classe-2"]: modele.CHARGE_NIVEAUX[3].classe, ["data-charge-classe-3"]: modele.CHARGE_NIVEAUX[4].classe, ["data-charge-libelle-0"]: modele.CHARGE_NIVEAUX[1].libelle, ["data-charge-libelle-1"]: modele.CHARGE_NIVEAUX[2].libelle, ["data-charge-libelle-2"]: modele.CHARGE_NIVEAUX[3].libelle, ["data-charge-libelle-3"]: modele.CHARGE_NIVEAUX[4].libelle,
           h.p class: "note qualite-indisponible", id: "qualite-indisponible", hidden: true,
             "Réglages de qualité indisponibles sur ce serveur.",
           h.div class: "qualite-corps",

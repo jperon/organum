@@ -239,6 +239,7 @@ texte_calibration = (c) ->
   -- Écran Connexions : liste relue à l'entrée, après une action, par le bouton
   -- « Rafraîchir » et périodiquement (voir rafraichir_ports).
   ports, message_ports, tour_ports = {}, nil, -100
+  tour_qualite = -100
   tour = 0
 
   cibles = {"volume", "reverb", "gain"}
@@ -445,6 +446,12 @@ texte_calibration = (c) ->
       limiteur_impose: false
       audio_repli: ""
       application: base.application == true
+      charge: base.charge or 0
+      charge_pointe: base.charge_pointe or 0
+      charge_evaluee: base.charge_evaluee == true
+      charge_niveau: base.charge_niveau or 0
+      xruns_recents: base.xruns_recents or 0
+      xruns: e.xruns or 0
       niveau: modele.niveau_correspondant base
       calibration: base.calibration
     }
@@ -498,6 +505,11 @@ texte_calibration = (c) ->
     if mode == "connexions" and tour - tour_ports >= 40
       rafraichir_ports!
       tour_ports = tour
+      sale = true
+    -- Panneau Qualité ouvert : les pourcentages sont publiés sans changer
+    -- seq ; on redessine au plus une fois toutes les 2 s. Fermé : rien.
+    if mode == "qualite" and tour - tour_qualite >= 40
+      tour_qualite = tour
       sale = true
     -- canaux_actifs est éphémère et hors seq : c'est la seule comparaison qui
     -- réveille le rendu pour éteindre un canal après 250 ms d'inactivité.
@@ -763,7 +775,7 @@ texte_calibration = (c) ->
       -- période, taux + limiteur, périphérique, puis (tête), (calibration) et
       -- message. Le nombre de cases de la ligne « Niveau » vaut 6 quand le
       -- mode Auto existe (bouton en plus), 5 sinon.
-      rows = 9 + (a_tete and 1 or 0) + (calib and 1 or 0)
+      rows = 11 + (a_tete and 1 or 0) + (calib and 1 or 0)
       colonnes = (type(q.auto) == "boolean") and 6 or 5
       p = disposer_qualite rows, l, h, colonnes
       if p.police != police
@@ -903,6 +915,18 @@ texte_calibration = (c) ->
           ui\texte tronquer texte_calibration(calib), l - 2 * MARGE - ESPACE
 
         ui\ligne ligne, 1
+        -- Puce d'adaptation : le niveau est calculé en C ; modele fournit le
+        -- libellé et la classe. Nuklear n'expose pas de bouton coloré
+        -- arbitraire : le libellé « ! » double toujours la couleur.
+        niveau_charge = modele.charge_niveau q.charge_niveau
+        info_charge = modele.CHARGE_NIVEAUX[niveau_charge + 1]
+        texte_puce = info_charge.libelle
+        if q.charge_evaluee == true
+          texte_puce = texte_puce .. " — pointe #{q.charge_pointe or 0} %"
+        texte_puce = texte_puce .. " · Xruns : #{q.xruns or 0}"
+        ui\texte tronquer(texte_puce, l - 2 * MARGE - ESPACE)
+
+        ui\ligne ligne, 1
         -- Pendant l'application (état explicite publié par le fil audio), le
         -- message le plus important est « Application… » ; une fois terminée,
         -- un échec éventuel reprend la ligne.
@@ -946,7 +970,15 @@ texte_calibration = (c) ->
       organum.reverb r if bouge e.reverb, r
       ui\texte ""
       organum.panique! if ui\bouton "Panique"
-      if ui\bouton "Qualité"
+      -- Accès au panneau Qualité : vert seulement pour « Confortable » ;
+      -- sinon bouton neutre avec marque textuelle pour orange et rouge.
+      niveau_charge = modele.charge_niveau e.charge_niveau
+      marque_charge = if niveau_charge >= 3 then " !!" elseif niveau_charge >= 2 then " !" else ""
+      clique_qualite = if niveau_charge == 1
+        ui\etat("Qualité", false, true) != false
+      else
+        ui\bouton "Qualité#{marque_charge}"
+      if clique_qualite
         mode = "qualite"
         message_qualite = nil
         seq = nil

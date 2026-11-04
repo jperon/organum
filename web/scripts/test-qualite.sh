@@ -217,6 +217,9 @@ effacer_etat() {
 }
 
 unset ORGANUM_QUALITE ORGANUM_REVERB_TETE ORGANUM_CALIBRATION_FACTEUR
+# Active le point d'entrée de diagnostic de la règle C du niveau de charge.
+ORGANUM_DIAGNOSTIC=1
+export ORGANUM_DIAGNOSTIC
 
 echo "== démarrage sur le port $PORT (état temporaire $TMP)"
 effacer_etat
@@ -237,6 +240,43 @@ verifie "polyphonie_max par défaut = 0" '"polyphonie_max":0' "$S"
 verifie "tete_reverb par défaut = true" '"tete_reverb":true' "$S"
 verifie "tete_reverb non imposée par défaut" '"tete_reverb_impose":false' "$S"
 
+echo "== charge : champs exposés et règle du niveau"
+if command -v python3 >/dev/null 2>&1; then
+  if printf '%s' "$S" | python3 -c '
+import json, sys
+q = json.load(sys.stdin)["qualite"]
+for k in ("charge", "charge_pointe", "charge_niveau", "xruns", "xruns_recents"):
+    v = q[k]
+    assert isinstance(v, int) and not isinstance(v, bool), k
+assert isinstance(q["charge_evaluee"], bool)
+assert q["charge_niveau"] in (0, 1, 2, 3)
+' 2>/dev/null; then
+    ok "champs de charge présents et typés"
+  else
+    echec "champs de charge absents ou mal typés"
+  fi
+else
+  for champ in '"charge":' '"charge_pointe":' '"charge_evaluee":' '"charge_niveau":' '"xruns_recents":'; do
+    verifie "champ de charge présent : $champ" "$champ" "$S"
+  done
+fi
+verifie "sans jeu : niveau non évalué (gris)" '"charge_niveau":0' "$S"
+verifie "sans jeu : charge_evaluee faux" '"charge_evaluee":false' "$S"
+
+diag_charge() {
+  curl -s "$URL/api/diagnostic/charge?pointe=$1&xruns=$2&evaluee=$3"
+}
+R=$(diag_charge 50 0 1)
+verifie "règle : pointe 50 %, aucun xrun, évalué = vert (1)" '"niveau":1' "$R"
+R=$(diag_charge 70 0 1)
+verifie "règle : pointe 70 %, aucun xrun = orange (2)" '"niveau":2' "$R"
+R=$(diag_charge 95 0 1)
+verifie "règle : pointe 95 % = rouge (3)" '"niveau":3' "$R"
+R=$(diag_charge 10 3 1)
+verifie "règle : 3 xruns récents = rouge (3)" '"niveau":3' "$R"
+R=$(diag_charge 20 0 0)
+verifie "règle : pas de mesure de jeu = gris (0)" '"niveau":0' "$R"
+
 echo "== pages : /qualite séparée de /"
 CODE=$(curl -s -o "$TMP/qualite.html" -w '%{http_code}' "$URL/qualite")
 if [ "$CODE" = "200" ]; then
@@ -248,6 +288,7 @@ verifie "/qualite contient qualite-niveau" 'qualite-niveau' "$(cat "$TMP/qualite
 curl -s "$URL/" >"$TMP/accueil.html"
 verifie_absent "/ ne contient plus la section Qualité" 'qualite-niveau' "$(cat "$TMP/accueil.html" 2>/dev/null || true)"
 verifie "/ contient un lien vers /qualite" 'href="/qualite"' "$(cat "$TMP/accueil.html" 2>/dev/null || true)"
+verifie "lien Qualité : aria-label présent" 'aria-label="Qualité —' "$(cat "$TMP/accueil.html" 2>/dev/null || true)"
 
 echo "== POST valide : un seul champ"
 R=$(post '{"qualite":{"spatialisation":1}}')
@@ -545,6 +586,50 @@ R=$(post '{"gain":{"division":3,"value":0.61}}')
 verifie "commande acceptée dans un fil de requête" '"ok":true' "$R"
 S=$(get)
 verifie "commande appliquée dans un fil de requête" '"gain":0.61' "$S"
+
+echo "== charge : un accord tenu fait monter la pointe"
+if command -v aplaymidi >/dev/null 2>&1 && command -v aconnect >/dev/null 2>&1 &&
+   command -v python3 >/dev/null 2>&1; then
+  CLIENT_MIDI=$(env -u ALSA_CONFIG_PATH aplaymidi -l 2>/dev/null | awk '/Organum/ { split($1, a, ":"); print a[1]; exit }')
+  if [ -n "$CLIENT_MIDI" ]; then
+    python3 - "$TMP/accord-on.mid" "$TMP/accord-off.mid" <<'PYMIDI'
+import struct, sys
+
+def vlq(n):
+    b = [n & 0x7f]
+    n >>= 7
+    while n:
+        b.insert(0, (n & 0x7f) | 0x80)
+        n >>= 7
+    return bytes(b)
+
+def fichier(chemin, piste):
+    data = (b'MThd' + struct.pack('>IHHH', 6, 0, 1, 480) +
+            b'MTrk' + struct.pack('>I', len(piste)) + piste)
+    open(chemin, 'wb').write(data)
+
+on = b''.join(vlq(0) + bytes([0x90, n, 100]) for n in (60, 64, 67, 72))
+on += vlq(1920) + bytes([0xFF, 0x2F, 0])
+fichier(sys.argv[1], on)
+fichier(sys.argv[2], bytes([0x00, 0xB0, 123, 0, 0x00, 0xFF, 0x2F, 0]))
+PYMIDI
+    env -u ALSA_CONFIG_PATH aplaymidi -p "$CLIENT_MIDI:0" "$TMP/accord-on.mid" >/dev/null 2>&1 || true
+    sleep 1.2
+    CHARGE_POINTE=$(curl -s "$URL/api/orgue" | python3 -c 'import json,sys; print(json.load(sys.stdin)["qualite"]["charge_pointe"])' 2>/dev/null || echo 0)
+    CHARGE_EVALUEE=$(curl -s "$URL/api/orgue" | python3 -c 'import json,sys; print("true" if json.load(sys.stdin)["qualite"]["charge_evaluee"] else "false")' 2>/dev/null || echo false)
+    env -u ALSA_CONFIG_PATH aplaymidi -p "$CLIENT_MIDI:0" "$TMP/accord-off.mid" >/dev/null 2>&1 || true
+    if [ "$CHARGE_EVALUEE" = "true" ] && [ "$CHARGE_POINTE" -gt 0 ] 2>/dev/null; then
+      ok "accord tenu : charge évaluée et pointe = $CHARGE_POINTE %"
+    else
+      echec "accord tenu : charge non évaluée (pointe=$CHARGE_POINTE, évaluée=$CHARGE_EVALUEE)"
+    fi
+  else
+    echo "INFO  : port MIDI Organum introuvable, mesure de charge non jouée"
+    aplaymidi -l 2>&1 | sed 's/^/        /'
+  fi
+else
+  echo "INFO  : aplaymidi/aconnect/python3 absents, mesure de charge non jouée"
+fi
 
 echo "== taux à chaud (recréation silencieuse, moins de 15 s)"
 T0=$(date +%s%N)

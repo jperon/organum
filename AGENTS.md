@@ -79,6 +79,20 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   `ORGANUM_QUALITE=auto`), avec le taux et la période retenus, applique la
   présélection retenue, se replie sur le niveau 3 au-delà de 1,5 s, et expose
   le résultat dans `qualite.calibration`.
+- Puce d'adaptation à la machine : le fil audio mesure le rendu avec deux
+  `clock_gettime(CLOCK_MONOTONIC)` par tampon (vDSO sous Linux, donc sans
+  appel système), hors attente d'écriture. Il publie `qualite.charge` (moyenne
+  ~1 s), `qualite.charge_pointe` (maximum depuis le dernier réglage, seulement
+  quand des voix sonnent), `qualite.charge_evaluee` (1 s de jeu mesurée),
+  `qualite.charge_niveau` (0 gris, 1 vert, 2 orange, 3 rouge, calculé en C au
+  plus une fois par seconde), `qualite.xruns` et `qualite.xruns_recents`
+  (anneau de 60 s, hors `application` et hors seconde suivant une
+  reconfiguration ou une bascule de tête). `seq` ne change que si le niveau ou
+  les xruns changent, jamais pour un pourcentage ; `charge` et `charge_pointe`
+  s'écrivent sans réveiller les attentes. `modele.CHARGE_NIVEAUX` traduit le
+  niveau en libellé et classe CSS pour le web et la fenêtre. Le point
+  d'entrée `organum.charge_niveau(pointe, xruns, evaluee)` et la route
+  `/api/diagnostic/charge` (si `ORGANUM_DIAGNOSTIC=1`) testent la règle C.
 
 - `ui/fenetre.h` : fenêtre sans bibliothèque ; `ui/wayland.c` et `ui/x11.c`
   parlent les protocoles directement sur la socket du serveur (aucun

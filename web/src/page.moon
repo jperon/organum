@@ -73,7 +73,7 @@ division_html = (di, div, divisions) ->
               h.input type: "range", id: "reverb", min: "0", max: "127", step: "1", value: "64",
             h.button type: "button", class: "btn panic", id: "panic", "Panique",
             h.a class: "btn small", href: "/midi", "MIDI",
-            h.a class: "btn small", href: "/qualite", "Qualité",
+            h.a class: "btn small lien-qualite charge-gris", href: "/qualite", id: "lien-qualite", ["aria-label"]: "Qualité — #{escape modele.CHARGE_NIVEAUX[1].libelle}", ["data-charge-classe-0"]: modele.CHARGE_NIVEAUX[1].classe, ["data-charge-classe-1"]: modele.CHARGE_NIVEAUX[2].classe, ["data-charge-classe-2"]: modele.CHARGE_NIVEAUX[3].classe, ["data-charge-classe-3"]: modele.CHARGE_NIVEAUX[4].classe, ["data-charge-libelle-0"]: escape(modele.CHARGE_NIVEAUX[1].libelle), ["data-charge-libelle-1"]: escape(modele.CHARGE_NIVEAUX[2].libelle), ["data-charge-libelle-2"]: escape(modele.CHARGE_NIVEAUX[3].libelle), ["data-charge-libelle-3"]: escape(modele.CHARGE_NIVEAUX[4].libelle), "Qualité",
           h.p class: "note", "L'affichage reflète l'état mémorisé par le serveur ; il peut différer si les jeux sont tirés ailleurs.",
           h.div class: "divisions", table.unpack [division_html di - 1, div, divisions for di, div in ipairs divisions],
           h.p class: "note", h.a(href: "https://github.com/jperon/organum", "Code source (AGPL-3.0)"),
