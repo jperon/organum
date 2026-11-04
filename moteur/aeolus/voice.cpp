@@ -20,6 +20,9 @@
 #include "aeolus/voice.h"
 #include "aeolus/engine.h"
 
+#include <cmath>
+#include <cstring>
+
 using namespace juce;
 
 AEOLUS_NAMESPACE_BEGIN
@@ -41,6 +44,44 @@ void Voice::trigger(const Pipewave::State& state)
 {
     jassert(_state.isIdle());
     _state = state;
+
+    // Clé de redondance (Q1c) : précalculée une seule fois ici, hors du
+    // chemin de choix. Le modèle Addsynth identifie exactement le TUYAU
+    // (ressource) : deux divisions qui tirent le même tuyau partagent le
+    // même modèle ; un même libellé de jeu sur un autre tuyau (Open
+    // Diapason 8 III) a un modèle différent et n'est donc pas un doublon.
+    // La fréquence inclut la transposition fd/fn : deux rangs de mixture
+    // de même tuyau et même note n'ont pas la même hauteur, donc pas la
+    // même clé.
+    _modeleRedondance = nullptr;
+    _cleRedondance = 0;
+    _freqCent = 0;
+    if (_state.pipewave != nullptr) {
+        const auto& modele = _state.pipewave->getModel();
+        const float f = _state.pipewave->getPipeFrequency();
+
+        // Tolérance : quantification au cent (1/100 de demi-ton), très en
+        // dessous du seuil audible de hauteur (~5 cents). Deux tuyaux
+        // réellement identiques donnent exactement le même entier.
+        if (f > 0.0f)
+            _freqCent = (int32_t) std::lround(1200.0 * std::log2((double)f / 440.0));
+
+        _modeleRedondance = &modele;
+
+        const juce::String nom = modele.getStopName();
+        const char* p = nom.toRawUTF8();
+        uint32_t h = 2166136261u; // FNV-1a 32 bits
+        while (*p != 0) {
+            h ^= (uint32_t)(uint8_t)*p++;
+            h *= 16777619u;
+        }
+        h ^= (uint32_t)_freqCent;
+        h *= 16777619u;
+        _cleRedondance = h;
+    }
+
+    _volee = false;
+    _neuve = true;
 
     // Réglages de qualité : recopiés ici (R1), lus une seule fois pour toute
     // la durée de vie de la voix. Les voix déjà sonnantes gardent l'ancien
@@ -126,7 +167,13 @@ void Voice::reset()
 
     _fadeGain = 0.0f;
     _fadeStep = 0.0f;
+    _volee = false;
+    _neuve = false;
     _proprietaire = nullptr;
+
+    _cleRedondance = 0;
+    _freqCent = 0;
+    _modeleRedondance = nullptr;
 }
 
 void Voice::demanderVidageRapide()
@@ -141,12 +188,14 @@ void Voice::demanderVidageRapide()
     // Release normal (sans clic) puis fondu court de la sortie, ~5 ms : la
     // voix est libérée au pool dès que le fondu atteint zéro.
     release();
+    _volee = true;
     _fadeGain = 1.0f;
     _fadeStep = 1.0f / (0.005f * SAMPLE_RATE_F);
 }
 
 void Voice::process(float* outL, float* outR)
 {
+    _neuve = false;
     memset(_buffer, 0, sizeof(float) * SUB_FRAME_LENGTH);
 
     const auto gain = _state.gain;
@@ -261,6 +310,7 @@ VoicePool::VoicePool(Engine& engine, int maxVoices)
     , _idleVoices{}
     , _registre{}
     , _voiceCount{0}
+    , _tableRedondance(TailleTableRedondance)
 {
     _registre.reserve(maxVoices);
 
@@ -323,13 +373,98 @@ void VoicePool::desenregistrer(Voice* voice)
 
 Voice* VoicePool::choisirVictime() noexcept
 {
-    // Le vecteur _registre n'est pas ordonné chronologiquement (les retraits
-    // remplacent l'entrée par la dernière). On choisit donc par balayage
-    // linéaire (registre borné à 512) la voix ACTIVE de plus petit numéro
-    // d'ordre, c'est-à-dire la plus ancienne encore tenue ; à défaut, la
-    // plus ancienne du registre (déjà en release, moins coûteuse à couper).
+    constexpr size_t capacite = (size_t)TailleTableRedondance;
+    constexpr size_t masque = capacite - 1;
+
+    // Table fixe réinitialisée sans allocation (memset sur 2048 entrées).
+    std::memset(_tableRedondance.data(), 0,
+                _tableRedondance.size() * sizeof(EntreeRedondance));
+
+    auto trouver = [this, masque](const Voice* voice) -> EntreeRedondance* {
+        const uint32_t cle = voice->cleRedondance();
+        const int32_t cent = voice->freqCent();
+        const Addsynth* modele = voice->modeleRedondance();
+
+        size_t i = (size_t)cle & masque;
+        for (size_t essai = 0; essai < capacite; ++essai) {
+            auto& e = _tableRedondance[i];
+
+            if (!e.occupe)
+                return nullptr;
+
+            // Égalité réelle, pas seulement la clé de hachage : une
+            // collision entre deux tuyaux différents ne les fusionne jamais.
+            if (e.cle == cle && e.modele == modele && e.freqCent == cent)
+                return &e;
+
+            i = (i + 1) & masque;
+        }
+
+        return nullptr;
+    };
+
+    // Première passe : compter les groupes (tuyau exact, hauteur au cent) et
+    // retenir s'ils mélangent au moins deux divisions.
+    for (auto* voice : _registre) {
+        if (!voice->isActive())
+            continue;
+
+        const Addsynth* modele = voice->modeleRedondance();
+        if (modele == nullptr)
+            continue;
+
+        const uint32_t cle = voice->cleRedondance();
+        const int32_t cent = voice->freqCent();
+
+        size_t i = (size_t)cle & masque;
+        for (size_t essai = 0; essai < capacite; ++essai) {
+            auto& e = _tableRedondance[i];
+
+            if (!e.occupe) {
+                e.occupe = true;
+                e.cle = cle;
+                e.modele = modele;
+                e.freqCent = cent;
+                e.division = voice->proprietaire();
+                e.compte = 1;
+                e.melange = false;
+                break;
+            }
+
+            if (e.cle == cle && e.modele == modele && e.freqCent == cent) {
+                if (e.compte < UINT16_MAX)
+                    ++e.compte;
+                if (e.division != voice->proprietaire())
+                    e.melange = true;
+                break;
+            }
+
+            i = (i + 1) & masque;
+        }
+    }
+
+    // Deuxième passe : la plus ancienne voix ACTIVE dont le groupe est
+    // redondant. Un groupe redondant couvre au moins deux divisions : en
+    // retirer une voix laisse donc toujours au moins un exemplaire.
     Voice* victime = nullptr;
 
+    for (auto* voice : _registre) {
+        if (!voice->isActive() || voice->modeleRedondance() == nullptr)
+            continue;
+
+        const auto* e = trouver(voice);
+        if (e == nullptr || !e->melange)
+            continue;
+
+        if (victime == nullptr || voice->ordre() < victime->ordre())
+            victime = voice;
+    }
+
+    if (victime != nullptr)
+        return victime;
+
+    // À défaut, comportement d'origine : la plus ancienne voix active, puis
+    // la plus ancienne du registre (déjà en release, moins coûteuse à couper).
     for (auto* voice : _registre) {
         if (!voice->isActive())
             continue;
@@ -383,13 +518,30 @@ Voice* VoicePool::trigger(const Pipewave::State& state)
         return victim;
     }
 
-    // Plafond de polyphonie (R3) : voler la voix tenue la plus ancienne, qui
-    // reçoit un release court sans clic. Elle reste dans son registre jusqu'à
-    // sa libération effective par sa division ; la nouvelle note n'est jamais
-    // perdue.
+    // Plafond de polyphonie (R3) : voler une voix. Si la victime n'a pas
+    // encore été traitée (déclenchée plus tôt dans le même bloc audio), elle
+    // n'a produit aucun son : on la réutilise directement pour la nouvelle
+    // note, sans fondu ni nouvelle voix. Cela évite de déclencher puis de
+    // faire se vider 156 voix pour rien quand un accord de 252 rangs tombe
+    // sous un plafond de 96 (pics de démarrage mesurés en Q1c). Sinon, la
+    // victime reçoit un release court sans clic ; la nouvelle note n'est
+    // jamais perdue.
     if (maxVoices > 0 && getNumberOfHeldVoices() >= maxVoices) {
-        if (auto* victim = choisirVictime())
+        if (auto* victim = choisirVictime()) {
+            if (victim->estNeuve()) {
+                for (int i = 0; i < _engine.getDivisionCount(); ++i)
+                    _engine.getDivisionByIndex(i)->detacherVoix(victim);
+
+                desenregistrer(victim);
+                victim->reset();
+                victim->trigger(state);
+                enregistrer(victim);
+
+                return victim;
+            }
+
             victim->demanderVidageRapide();
+        }
     }
 
     _idleVoices.remove(voice);

@@ -758,7 +758,11 @@ bool Division::isAlreadyVoiced(int stopIndex, int note)
     auto* voice = _activeVoices.first();
 
     while (voice != nullptr) {
-        if (voice->isActive() && voice->stopIndex() == stopIndex && voice->isForNote(note)) {
+        // Une voix volée par le plafond reste considérée comme voisant sa
+        // touche jusqu'à son recyclage : sinon le même bloc la re-déclenche
+        // (cascade de vols mesurée en Q1c).
+        if ((voice->isActive() || voice->estVolee())
+            && voice->stopIndex() == stopIndex && voice->isForNote(note)) {
             return true;
         }
 

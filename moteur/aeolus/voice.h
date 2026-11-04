@@ -31,6 +31,10 @@
 #include <atomic>
 #include <cstdint>
 
+/// Marqueur de compilation : le sacrifice prioritaire des doublons (Q1c) est
+/// présent. Sert aux tests qui doivent aussi compiler contre l'état d'origine.
+#define ORGANUM_VOIX_DOUBLONS 1
+
 AEOLUS_NAMESPACE_BEGIN
 
 class Engine;
@@ -68,6 +72,21 @@ public:
     /// polyphonie : fondu sur la sortie puis libération au pool.
     void demanderVidageRapide();
 
+    /// Vrai si la voix a été libérée par un vol de voix du plafond et n'a
+    /// pas encore été recyclée. La touche qu'elle occupait reste considérée
+    /// comme déjà voisée jusqu'au prochain recyclage : sans cela, un second
+    /// événement du même bloc (autre division, autre canal) re-déclenche la
+    /// note volée, qui vole à son tour une autre voix (cascade mesurée en
+    /// Q1c : 504 voix prises au lieu de 252).
+    bool estVolee() const noexcept { return _volee; }
+
+    /// Vrai entre le déclenchement et le premier traitement audio. Une voix
+    /// encore neuve n'a jamais produit d'échantillon : on peut la réutiliser
+    /// pour une nouvelle note sans fondu (aucun clic), au lieu de la laisser
+    /// se vider pendant qu'une autre voix est déclenchée puis traitée pour
+    /// rien. Voir VoicePool::trigger.
+    bool estNeuve() const noexcept { return _neuve; }
+
     /// Index dans le registre du pool (retrait O(1)).
     int registreSlot() const noexcept { return _poolSlot; }
     void setRegistreSlot(int slot) noexcept { _poolSlot = slot; }
@@ -75,6 +94,21 @@ public:
     /// Numéro d'ordre d'activation (voir VoicePool::choisirVictime).
     uint64_t ordre() const noexcept { return _ordre; }
     void setOrdre(uint64_t o) noexcept { _ordre = o; }
+
+    /// Empreinte de redondance (Q1c) : FNV-1a du nom du TUYAU (identité du
+    /// fichier/ressource de tuyau, pas le libellé du jeu) combiné à la
+    /// fréquence du tuyau quantifiée au cent. Calculée au déclenchement.
+    /// Deux jeux de même libellé mais de tuyaux différents (Open Diapason 8
+    /// III vs I/II : 9,27 dB d'écart mesuré) ne sont donc PAS des doublons.
+    uint32_t cleRedondance() const noexcept { return _cleRedondance; }
+    int32_t freqCent() const noexcept { return _freqCent; }
+
+    /// Modèle Addsynth du tuyau. Le modèle est unique par ressource de tuyau
+    /// dans EngineGlobal (addsynth.cpp, _nameToSynthMap) : comparer ce
+    /// pointeur vérifie l'identité EXACTE du tuyau, indépendamment de la clé
+    /// de hachage. I et II partagent `I_principal_8` ; III utilise
+    /// `III_principal_8`, donc un pointeur différent.
+    const Addsynth* modeleRedondance() const noexcept { return _modeleRedondance; }
 
 private:
     Engine& _engine;
@@ -116,6 +150,12 @@ private:
     float _fadeGain{0.0f};
     float _fadeStep{0.0f};
 
+    /// Voix libérée par un vol du plafond, en attente de recyclage.
+    bool _volee{false};
+
+    /// Déclenchée mais pas encore passée dans process().
+    bool _neuve{false};
+
     /// Index dans le registre des voix prises du pool (-1 = non enregistrée).
     int _poolSlot{-1};
 
@@ -127,6 +167,13 @@ private:
     /// Division propriétaire (pour détacher la voix lors d'une réutilisation
     /// forcée quand le pool physique est saturé).
     Division* _proprietaire{nullptr};
+
+    /// Clé de redondance précalculée au déclenchement (Q1c).
+    uint32_t _cleRedondance{0};
+    /// Fréquence du tuyau quantifiée au cent (1200·log2(f/440), arrondi).
+    int32_t _freqCent{0};
+    /// Modèle du tuyau : identité exacte du tuyau entre divisions.
+    const Addsynth* _modeleRedondance{nullptr};
 
 public:
     Division* proprietaire() const noexcept { return _proprietaire; }
@@ -157,7 +204,29 @@ public:
     /// Vrai si au moins une voix tenue joue cette note (diagnostic).
     bool hasHeldVoiceForNote(int note) const noexcept;
 
+    /// Choix de victime exposé pour la mesure de coût des tests (Q1c).
+    /// Aucune allocation : réutilise la table fixe du pool.
+    Voice* choisirVictimePourMesure() noexcept { return choisirVictime(); }
+
 private:
+
+    /// Entrée de la table à adressage ouvert du choix de victime (Q1c).
+    /// `modele` et `freqCent` servent à distinguer deux clés de hachage
+    /// identiques : une collision ne doit jamais fusionner deux jeux.
+    struct EntreeRedondance
+    {
+        uint32_t cle;
+        int32_t freqCent;
+        const Addsynth* modele;     ///< Représentant du groupe (tuyau exact).
+        const Division* division;
+        uint16_t compte;
+        bool occupe;
+        bool melange;   ///< Au moins deux divisions distinctes dans le groupe.
+    };
+
+    /// Taille fixe, puissance de deux, > 2 × DefaultMaxVoices : le sondage
+    /// linéaire s'arrête toujours avant de boucler, sans allocation.
+    constexpr static int TailleTableRedondance = 2048;
 
     void enregistrer(Voice* voice);
     void desenregistrer(Voice* voice);
@@ -170,6 +239,9 @@ private:
     std::vector<Voice*> _registre;  ///< Voix prises (ordre physique quelconque).
     uint64_t _prochainOrdre{1};     ///< Compteur d'ordre d'activation.
     std::atomic<int> _voiceCount;   ///< Number of taken voices.
+
+    /// Table fixe du choix de victime (Q1c), allouée une seule fois.
+    std::vector<EntreeRedondance> _tableRedondance;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(VoicePool)
 };
