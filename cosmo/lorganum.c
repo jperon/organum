@@ -12,6 +12,7 @@
 //
 // Un seul fil touche au moteur : le MIDI, les commandes et le rendu sont
 // traités à la suite dans la boucle audio, sans verrou.
+#include "libc/calls/syscall-sysv.internal.h"
 #include "libc/dce.h"
 #include "third_party/lua/lauxlib.h"
 #include "third_party/lua/lua.h"
@@ -183,43 +184,77 @@ static void fermer_pcm_herites(void) {
   closedir(d);
 }
 
-static void oublier_une_zone(char *ligne) {
+#define MAX_ZONES_PCM 16
+
+struct zone_pcm {
   unsigned long debut, fin;
-  if (sscanf(ligne, "%lx-%lx", &debut, &fin) != 2 || fin <= debut) return;
+  char chemin[64];
+};
+
+static int collecter_zone(char *ligne, struct zone_pcm *zones, int nzones) {
+  unsigned long debut, fin;
+  if (sscanf(ligne, "%lx-%lx", &debut, &fin) != 2 || fin <= debut) return nzones;
   char *chemin = strchr(ligne, '/');
-  if (chemin && commence_par(chemin, "/dev/snd/pcm"))
-    munmap((void *)debut, (size_t)(fin - debut));
+  if (!chemin || !commence_par(chemin, "/dev/snd/pcm")) return nzones;
+  if (nzones >= MAX_ZONES_PCM) {
+    fprintf(stderr, "organum : trop de zones PCM dans /proc/self/maps\n");
+    return nzones;
+  }
+  zones[nzones].debut = debut;
+  zones[nzones].fin = fin;
+  strlcpy(zones[nzones].chemin, chemin, sizeof(zones[nzones].chemin));
+  return nzones + 1;
 }
 
 static void oublier_audio_fils(void) {
   if (!IsLinux()) return;
+
+  // Deux temps : collecter d'abord toutes les zones (la lecture de
+  // /proc/self/maps ne doit pas être perturbée par des munmap), fermer le
+  // fichier, puis libérer.
+  struct zone_pcm zones[MAX_ZONES_PCM];
+  int nzones = 0;
+  int fd = open("/proc/self/maps", O_RDONLY);
+  if (fd >= 0) {
+    char buf[8192];
+    size_t len = 0;
+    for (;;) {
+      ssize_t n = read(fd, buf + len, sizeof(buf) - len - 1);
+      if (n <= 0) break;
+      len += (size_t)n;
+      buf[len] = '\0';
+      char *p = buf, *nl;
+      while ((nl = strchr(p, '\n'))) {
+        *nl = '\0';
+        nzones = collecter_zone(p, zones, nzones);
+        p = nl + 1;
+      }
+      size_t reste = strlen(p);
+      memmove(buf, p, reste);
+      len = reste;
+      if (len == sizeof(buf) - 1) len = 0;  // ligne anormalement longue
+    }
+    if (len) {
+      buf[len] = '\0';
+      nzones = collecter_zone(buf, zones, nzones);
+    }
+    close(fd);
+  }
+
   fermer_pcm_herites();
 
-  int fd = open("/proc/self/maps", O_RDONLY);
-  if (fd < 0) return;
-  char buf[8192];
-  size_t len = 0;
-  for (;;) {
-    ssize_t n = read(fd, buf + len, sizeof(buf) - len - 1);
-    if (n <= 0) break;
-    len += (size_t)n;
-    buf[len] = '\0';
-    char *p = buf, *nl;
-    while ((nl = strchr(p, '\n'))) {
-      *nl = '\0';
-      oublier_une_zone(p);
-      p = nl + 1;
+  // Ces zones ont été créées par libasound via cosmo_dlopen, hors de la
+  // table __maps de cosmopolitan : munmap() passerait par __munmap et ne
+  // les libérerait pas. sys_munmap() (munmap-sysv.c) bypasse memtrack.
+  for (int i = 0; i < nzones; ++i) {
+    int rc = sys_munmap((void *)zones[i].debut,
+                        (size_t)(zones[i].fin - zones[i].debut));
+    if (rc) {
+      int e = rc < 0 ? -rc : errno;
+      fprintf(stderr, "organum : munmap %s (%#lx-%#lx) impossible : errno %d (%s)\n",
+              zones[i].chemin, zones[i].debut, zones[i].fin, e, strerror(e));
     }
-    size_t reste = strlen(p);
-    memmove(buf, p, reste);
-    len = reste;
-    if (len == sizeof(buf) - 1) len = 0;  // ligne anormalement longue
   }
-  if (len) {
-    buf[len] = '\0';
-    oublier_une_zone(buf);
-  }
-  close(fd);
 }
 
 // Libère tout ce que l_demarrer a alloué, pour qu'un second appel puisse
