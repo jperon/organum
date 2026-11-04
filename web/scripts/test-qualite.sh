@@ -87,14 +87,21 @@ done
 
 URL="http://127.0.0.1:$PORT"
 
-# lancer [ORGANUM_QUALITE] [ORGANUM_CALIBRATION_FACTEUR] [ORGANUM_REVERB_TETE] :
+# lancer [ORGANUM_QUALITE] [ORGANUM_CALIBRATION_FACTEUR] [ORGANUM_REVERB_TETE]
+#        [PERIPH] [ORGANUM_PERIODE] [ORGANUM_TAUX] [ORGANUM_LIMITEUR] :
 # démarre l'orgue et attend qu'il réponde. Les variables sont propres à ce
-# lancement.
+# lancement ; PERIPH vaut « null » par défaut, et « - » ne définit pas
+# ORGANUM_PERIPHERIQUE (pour éprouver le repli sans sortie audio réelle).
 lancer() {
   qualite=$1
   facteur=${2:-}
   tete=${3:-}
+  periph=${4:-null}
+  periode=${5:-}
+  taux=${6:-}
+  limiteur=${7:-}
   unset ORGANUM_QUALITE ORGANUM_CALIBRATION_FACTEUR ORGANUM_REVERB_TETE
+  unset ORGANUM_PERIPHERIQUE ORGANUM_PERIODE ORGANUM_TAUX ORGANUM_LIMITEUR
   if [ -n "$qualite" ]; then
     export ORGANUM_QUALITE="$qualite"
   fi
@@ -104,13 +111,25 @@ lancer() {
   if [ -n "$tete" ]; then
     export ORGANUM_REVERB_TETE="$tete"
   fi
+  if [ "$periph" != "-" ]; then
+    export ORGANUM_PERIPHERIQUE="$periph"
+  fi
+  if [ -n "$periode" ]; then
+    export ORGANUM_PERIODE="$periode"
+  fi
+  if [ -n "$taux" ]; then
+    export ORGANUM_TAUX="$taux"
+  fi
+  if [ -n "$limiteur" ]; then
+    export ORGANUM_LIMITEUR="$limiteur"
+  fi
   ORGANUM_ETAT="$ETAT" \
   ORGANUM_CONFIG_MIDI="$CONFIG" \
   ORGANUM_FENETRE=non \
-  ORGANUM_PERIPHERIQUE=null \
   "$BIN" -l 127.0.0.1 -p "$PORT" >"$JOURNAL" 2>&1 &
   PID=$!
   unset ORGANUM_QUALITE ORGANUM_CALIBRATION_FACTEUR ORGANUM_REVERB_TETE
+  unset ORGANUM_PERIPHERIQUE ORGANUM_PERIODE ORGANUM_TAUX ORGANUM_LIMITEUR
   i=0
   # Le moteur charge ses ressources avant d'écouter : jusqu'à ~2 min sur une
   # machine chargée. Chaque essai est borné pour ne jamais bloquer.
@@ -241,7 +260,12 @@ for cas in \
   '{"qualite":{"spatialisation":3}}|valeur hors bornes' \
   '{"qualite":{}}|objet vide' \
   '{"qualite":{"polyphonie_max":513}}|polyphonie hors bornes' \
-  '{"qualite":{"niveau":4}}|niveau hors bornes'
+  '{"qualite":{"niveau":4}}|niveau hors bornes' \
+  '{"qualite":{"periode":1000}}|période invalide' \
+  '{"qualite":{"taux":22050}}|taux invalide' \
+  '{"qualite":{"peripherique":"hw:0\u0001"}}|périphérique avec caractère de contrôle' \
+  '{"qualite":{"peripherique":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}|périphérique trop long' \
+  '{"qualite":{"limiteur":1}}|limiteur non booléen'
 do
   corps=${cas%%|*}
   nom=${cas#*|}
@@ -357,6 +381,103 @@ verifie "ORGANUM_QUALITE=2 : polyphonie_max = 192" '"polyphonie_max":192' "$S"
 verifie "ORGANUM_QUALITE=2 : tete_reverb = true" '"tete_reverb":true' "$S"
 verifie "ORGANUM_QUALITE=2 : auto false" '"auto":false' "$S"
 verifie_absent "ORGANUM_QUALITE=2 : pas de calibration" '"calibration"' "$S"
+
+arreter
+
+echo "== réglages de démarrage : défauts (aucune variable)"
+# Aucune variable, y compris ORGANUM_PERIPHERIQUE : « default » est rendu
+# muet par ALSA_CONFIG_PATH, jamais la sortie audio réelle.
+ALSACONF="$TMP/asound-null.conf"
+cat >"$ALSACONF" <<'EOF'
+pcm.!default {
+    type null
+}
+EOF
+ALSA_CONFIG_PATH="$ALSACONF"
+export ALSA_CONFIG_PATH
+effacer_etat
+lancer "" 1 "" "-" || exit 1
+S=$(get)
+verifie "période effective par défaut = 512" '"periode":512' "$S"
+verifie "période enregistrée par défaut = 512" '"periode_prochain":512' "$S"
+verifie "période non imposée par défaut" '"periode_impose":false' "$S"
+verifie "taux enregistré par défaut = 48000" '"taux_prochain":48000' "$S"
+verifie "taux non imposé par défaut" '"taux_impose":false' "$S"
+verifie "périphérique par défaut = vide" '"peripherique":""' "$S"
+verifie "périphérique non imposé par défaut" '"peripherique_impose":false' "$S"
+verifie "limiteur enregistré par défaut = true" '"limiteur_prochain":true' "$S"
+verifie "limiteur non imposé par défaut" '"limiteur_impose":false' "$S"
+verifie "aucun repli audio au démarrage nominal" '"audio_repli":""' "$S"
+unset ALSA_CONFIG_PATH
+
+echo "== période modifiée : niveau et auto inchangés"
+post '{"qualite":{"niveau":2}}' >/dev/null
+attendre_publication
+R=$(post '{"qualite":{"periode":1024}}')
+verifie "période : redemarrage_requis = true" '"redemarrage_requis":true' "$R"
+verifie "réponse : période enregistrée = 1024" '"periode_prochain":1024' "$R"
+verifie_absent "réponse : période effective reste 512 avant relance" '"periode":1024' "$R"
+S=$(get)
+verifie "état : période enregistrée = 1024" '"periode_prochain":1024' "$S"
+verifie_absent "état : période effective reste 512 avant relance" '"periode":1024' "$S"
+verifie "état : niveau toujours 2" '"niveau":2' "$S"
+verifie "état : auto toujours false" '"auto":false' "$S"
+
+echo "== persistance après relance (période, tête)"
+post '{"qualite":{"tete_reverb":false}}' >/dev/null
+attendre_publication
+attendre_sauvegarde
+verifie "etat.json contient periode" '"periode":1024' "$(cat "$ETAT" 2>/dev/null || true)"
+arreter
+lancer "" 1 || exit 1
+S=$(get)
+verifie "après relance : période effective = 1024" '"periode":1024' "$S"
+verifie "après relance : période enregistrée = 1024" '"periode_prochain":1024' "$S"
+verifie "après relance : tete_reverb effective = false" '"tete_reverb":false' "$S"
+verifie "après relance : tete_reverb_prochain = false" '"tete_reverb_prochain":false' "$S"
+
+echo "== ORGANUM_PERIODE imposé : valeur enregistrée intacte"
+arreter
+lancer "" 1 "" null 256 || exit 1
+S=$(get)
+verifie "période effective = 256 (imposée)" '"periode":256' "$S"
+verifie "periode_impose = true" '"periode_impose":true' "$S"
+verifie "période enregistrée reste 1024" '"periode_prochain":1024' "$S"
+
+echo "== repli : périphérique enregistré absent (sortie par défaut muette)"
+arreter
+# ALSA_CONFIG_PATH fait de « default » un périphérique null : le repli ouvre
+# une sortie muette, jamais la sortie audio réelle.
+ALSACONF="$TMP/asound-null.conf"
+cat >"$ALSACONF" <<'EOF'
+pcm.!default {
+    type null
+}
+EOF
+ALSA_CONFIG_PATH="$ALSACONF"
+export ALSA_CONFIG_PATH
+effacer_etat
+lancer "" 1 "" "-" || exit 1
+R=$(post '{"qualite":{"peripherique":"hw:99,99","periode":1024}}')
+verifie "repli : périphérique enregistré = hw:99,99" '"peripherique_prochain":"hw:99,99"' "$R"
+verifie "repli : redemarrage_requis = true" '"redemarrage_requis":true' "$R"
+attendre_sauvegarde
+arreter
+lancer "" 1 "" "-" || exit 1
+S=$(get)
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$URL/api/orgue")
+if [ "$CODE" = "200" ]; then
+  ok "repli : le serveur répond malgré le périphérique absent"
+else
+  echec "repli : le serveur ne répond pas (HTTP $CODE)"
+fi
+verifie "repli : audio_repli renseigné" '"audio_repli":"r' "$S"
+verifie "repli : périphérique enregistré conservé" '"peripherique_prochain":"hw:99,99"' "$S"
+verifie "repli : période enregistrée conservée" '"periode_prochain":1024' "$S"
+verifie "repli : période effective = 512 (défauts)" '"periode":512' "$S"
+verifie_absent "repli : la période enregistrée n'est pas devenue effective" '"periode":1024' "$S"
+verifie "repli : périphérique effectif = défaut" '"peripherique":""' "$S"
+unset ALSA_CONFIG_PATH
 
 arreter
 

@@ -128,6 +128,38 @@ static int g_dernier[3] = {-1, -1, -1};
 static unsigned long long g_echantillons;
 static unsigned long long g_echeances[16];
 
+// Libère tout ce que l_demarrer a alloué, pour qu'un second appel puisse
+// réessayer avec d'autres réglages (repli de init.moon après un échec
+// d'ouverture audio ou MIDI). Sans cela, g_etat resterait non nul et
+// l_demarrer refuserait de redémarrer.
+static void liberer_demarrage(void) {
+  if (g_midi) {
+    midi_fermer(g_midi);
+    g_midi = NULL;
+  }
+  if (g_audio) {
+    audio_fermer(g_audio);
+    g_audio = NULL;
+  }
+  if (g_moteur) {
+    aeolus_detruire(g_moteur);
+    g_moteur = NULL;
+  }
+  if (g_tube[0] >= 0) {
+    close(g_tube[0]);
+    g_tube[0] = -1;
+  }
+  if (g_tube[1] >= 0) {
+    close(g_tube[1]);
+    g_tube[1] = -1;
+  }
+  if (g_partage) {
+    munmap(g_partage, sizeof(*g_partage));
+    g_partage = NULL;
+  }
+  g_etat = NULL;
+}
+
 static void copier_nom(char *dst, const char *src) {
   if (!src) src = "";
   strlcpy(dst, src, MAX_NOM);
@@ -468,6 +500,7 @@ static int l_demarrer(lua_State *L) {
   memset(g_partage, 0, sizeof(*g_partage));
   g_etat = &g_partage->etat;
   if (pipe(g_tube) < 0) {
+    liberer_demarrage();
     lua_pushnil(L);
     lua_pushstring(L, strerror(errno));
     return 2;
@@ -515,17 +548,17 @@ static int l_demarrer(lua_State *L) {
   if (!(g_audio = audio_ouvrir(peripherique, taux, 2, g_periode, nb_periodes))) {
     const char *detail = audio_derniere_erreur();
     char message[1200];
-    if (detail && detail[0]) {
+    if (detail && detail[0])
       snprintf(message, sizeof(message), "sortie audio indisponible : %s", detail);
-      lua_pushnil(L);
-      lua_pushstring(L, message);
-    } else {
-      lua_pushnil(L);
-      lua_pushstring(L, "sortie audio indisponible");
-    }
+    else
+      snprintf(message, sizeof(message), "sortie audio indisponible");
+    liberer_demarrage();
+    lua_pushnil(L);
+    lua_pushstring(L, message);
     return 2;
   }
   if (!(g_midi = midi_ouvrir("Organum", "entree"))) {
+    liberer_demarrage();
     lua_pushnil(L);
     lua_pushstring(L, "séquenceur MIDI indisponible");
     return 2;
@@ -583,6 +616,7 @@ static int l_demarrer(lua_State *L) {
 
   pthread_t fil;
   if (pthread_create(&fil, NULL, boucle_audio, NULL)) {
+    liberer_demarrage();
     lua_pushnil(L);
     lua_pushstring(L, "fil audio impossible");
     return 2;

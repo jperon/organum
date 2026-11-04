@@ -53,12 +53,21 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   (`CMD_QUALITE`, fonction Lua `organum.qualite`, `organum.demarrer{qualite,
   tete_reverb}`) ; présélections, validation de `POST /api/orgue {qualite}`,
   `ORGANUM_QUALITE` et persistance (clé `qualite` d'`etat.json`) dans
-  `web/src/init.moon`. Calibration automatique : `organum.calibrer` dans
-  `cosmo/lorganum.c` appelle `aeolus_calibrer` (`moteur/api/aeolus_c.h`,
-  micro-banc autonome) ; `init.moon` la lance avant `organum.demarrer` quand
-  `auto` est vrai (premier lancement ou `ORGANUM_QUALITE=auto`), applique la
-  présélection retenue, se replie sur le niveau 3 au-delà de 1,5 s, et expose
-  le résultat dans `qualite.calibration`.
+  `web/src/init.moon`. Les réglages de démarrage (période, taux,
+  périphérique, limiteur) se règlent aussi dans les deux interfaces,
+  persistent avec les autres et sont exposés en `X` (effectif),
+  `X_prochain` (enregistré) et `X_impose` (variable d'environnement
+  prioritaire) ; `ORGANUM_TAUX`, `ORGANUM_PERIODE`, `ORGANUM_PERIPHERIQUE` et
+  `ORGANUM_LIMITEUR` ne sont jamais recopiés dans la valeur enregistrée. Si un
+  réglage enregistré non imposé empêche l'ouverture audio, `init.moon`
+  réessaie une fois avec les défauts et publie `qualite.audio_repli` ; pour
+  cela `l_demarrer` libère tout sur échec audio ou MIDI. Calibration
+  automatique : `organum.calibrer` dans `cosmo/lorganum.c` appelle
+  `aeolus_calibrer` (`moteur/api/aeolus_c.h`, micro-banc autonome) ;
+  `init.moon` la lance avant `organum.demarrer` quand `auto` est vrai
+  (premier lancement ou `ORGANUM_QUALITE=auto`), avec le taux et la période
+  retenus, applique la présélection retenue, se replie sur le niveau 3 au-delà
+  de 1,5 s, et expose le résultat dans `qualite.calibration`.
 
 - `ui/fenetre.h` : fenêtre sans bibliothèque ; `ui/wayland.c` et `ui/x11.c`
   parlent les protocoles directement sur la socket du serveur (aucun

@@ -239,13 +239,36 @@ PRESELECTIONS = {
   {spatialisation: 2, bruit_attaque: true, instabilite: true, polyphonie_max: 0, tete_reverb: true}
 }
 
--- Au premier lancement (etat.json sans clé qualite), le mode automatique est
--- actif : la calibration choisit le niveau. Un réglage manuel sauvegardé met
--- auto à faux et empêche toute recalibration au démarrage suivant.
-qualite_locale = {niveau: -1, auto: false, tete_reverb: true}
+-- Réglages de démarrage (période et taux d'échantillonnage, périphérique
+-- audio, limiteur) : eux aussi mémorisés, mais sans faire partie des
+-- présélections. Les valeurs effectives du lancement en cours sont tenues à
+-- part (EFFECTIF) ; les valeurs enregistrées vivent dans QUALITE_FICHIER.
+TAUX_VALIDES = {[44100]: true, [48000]: true}
+PERIODES_VALIDES = {[128]: true, [256]: true, [512]: true, [1024]: true, [2048]: true}
+DEMARRAGE_DEFAUT = {periode: 512, taux: 48000, peripherique: "", limiteur: true}
 
 entier_borne = (v, min, max) ->
   type(v) == "number" and v == math.floor(v) and v >= min and v <= max
+
+-- Un périphérique audio est un nom ALSA : au plus 200 octets, sans caractère
+-- de contrôle (une chaîne vide désigne le périphérique par défaut).
+peripherique_valide = (s) ->
+  return false unless type(s) == "string" and #s <= 200
+  for i = 1, #s
+    b = s\byte i
+    return false if b < 32 or b == 127
+  true
+
+-- Au premier lancement (etat.json sans clé qualite), le mode automatique est
+-- actif : la calibration choisit le niveau. Un réglage manuel sauvegardé met
+-- auto à faux et empêche toute recalibration au démarrage suivant.
+qualite_locale = {
+  niveau: -1, auto: false, tete_reverb: true
+  periode: DEMARRAGE_DEFAUT.periode
+  taux: DEMARRAGE_DEFAUT.taux
+  peripherique: DEMARRAGE_DEFAUT.peripherique
+  limiteur: DEMARRAGE_DEFAUT.limiteur
+}
 
 niveau_correspondant = (q, tete) ->
   for i, p in ipairs PRESELECTIONS
@@ -285,8 +308,22 @@ qualite_locale_actuelle = ->
     auto = qualite_locale.auto unless type(auto) == "boolean"
     tete = q.tete_reverb
     tete = qualite_locale.tete_reverb unless type(tete) == "boolean"
-    return {niveau: niveau, auto: auto, tete_reverb: tete}
-  {niveau: qualite_locale.niveau, auto: qualite_locale.auto, tete_reverb: qualite_locale.tete_reverb}
+    periode = q.periode
+    periode = qualite_locale.periode unless PERIODES_VALIDES[periode] == true
+    taux = q.taux
+    taux = qualite_locale.taux unless TAUX_VALIDES[taux] == true
+    peripherique = q.peripherique
+    peripherique = qualite_locale.peripherique unless peripherique_valide peripherique
+    limiteur = q.limiteur
+    limiteur = qualite_locale.limiteur unless type(limiteur) == "boolean"
+    return {niveau: niveau, auto: auto, tete_reverb: tete,
+            periode: periode, taux: taux, :peripherique, :limiteur}
+  {
+    niveau: qualite_locale.niveau, auto: qualite_locale.auto,
+    tete_reverb: qualite_locale.tete_reverb,
+    periode: qualite_locale.periode, taux: qualite_locale.taux,
+    peripherique: qualite_locale.peripherique, limiteur: qualite_locale.limiteur
+  }
 
 -- cosmo_dlopen (pour libasound) a besoin d'un petit programme d'aide lié à
 -- la libc du système ; faute de l'y trouver, il le compile avec cc. On
@@ -333,6 +370,18 @@ do
     qualite_locale.tete_reverb = q.tete_reverb if type(q.tete_reverb) == "boolean"
   else
     qualite_locale.auto = true
+  -- QUALITE_FICHIER est écrit à chaque réglage, donc plus frais qu'etat.json
+  -- (recopié seulement au battement) : ses valeurs valides le complètent.
+  locale = qualite_locale_actuelle!
+  qualite_locale.niveau = locale.niveau
+  qualite_locale.auto = locale.auto
+  qualite_locale.tete_reverb = locale.tete_reverb
+  qualite_locale.periode = locale.periode
+  qualite_locale.taux = locale.taux
+  qualite_locale.peripherique = locale.peripherique
+  qualite_locale.limiteur = locale.limiteur
+  if type(locale.niveau) == "number" and locale.niveau >= 0
+    niveau_impose = true
   impose = os.getenv "ORGANUM_QUALITE"
   if impose and impose != ""
     if impose == "auto"
@@ -355,8 +404,49 @@ do
       else
         Log kLogWarn, "organum : ORGANUM_QUALITE invalide (#{impose}), ignoré"
 
-taux_demarrage = entier_env "ORGANUM_TAUX", 48000
-periode_demarrage = entier_env "ORGANUM_PERIODE", 512
+-- Valeurs EFFECTIVES du lancement et variables d'environnement qui les
+-- imposent. Les valeurs enregistrées (qualite_locale) ne sont jamais
+-- remplacées par une valeur imposée : elles restent « prochaines ».
+EFFECTIF = {
+  taux: qualite_locale.taux
+  periode: qualite_locale.periode
+  peripherique: qualite_locale.peripherique
+  limiteur: qualite_locale.limiteur
+}
+IMPOSE = {taux: false, periode: false, peripherique: false, limiteur: false}
+AUDIO_REPLI = ""
+
+do
+  v = os.getenv "ORGANUM_TAUX"
+  if v and v != ""
+    n = math.tointeger tonumber v
+    if n and TAUX_VALIDES[n] == true
+      EFFECTIF.taux = n
+      IMPOSE.taux = true
+    else
+      Log kLogWarn, "organum : ORGANUM_TAUX invalide (#{v}), ignoré"
+  v = os.getenv "ORGANUM_PERIODE"
+  if v and v != ""
+    n = math.tointeger tonumber v
+    if n and PERIODES_VALIDES[n] == true
+      EFFECTIF.periode = n
+      IMPOSE.periode = true
+    else
+      Log kLogWarn, "organum : ORGANUM_PERIODE invalide (#{v}), ignoré"
+  v = os.getenv "ORGANUM_PERIPHERIQUE"
+  if v != nil
+    if peripherique_valide v
+      EFFECTIF.peripherique = v
+      IMPOSE.peripherique = true
+    else
+      Log kLogWarn, "organum : ORGANUM_PERIPHERIQUE invalide, ignoré"
+  v = os.getenv "ORGANUM_LIMITEUR"
+  if v and v != ""
+    EFFECTIF.limiteur = v != "non"
+    IMPOSE.limiteur = true
+
+taux_demarrage = EFFECTIF.taux
+periode_demarrage = EFFECTIF.periode
 calibration_demarrage = nil
 
 -- Calibration automatique, uniquement quand auto est vrai (premier lancement,
@@ -397,18 +487,43 @@ if qualite_locale.auto
     Log kLogWarn, "organum : calibration automatique impossible ou trop longue ; repli sur le niveau 3"
 
 if organum.demarrer
-  ok, err = organum.demarrer {
-    taux: taux_demarrage
-    periode: periode_demarrage
-    peripherique: os.getenv "ORGANUM_PERIPHERIQUE"
-    limiteur: os.getenv("ORGANUM_LIMITEUR") != "non"
-    etat: type(etat_sauve.moteur) == "string" and etat_sauve.moteur or nil
-    qualite: qualite_demarrage
-    tete_reverb: qualite_locale.tete_reverb
-  }
+  etat_moteur = type(etat_sauve.moteur) == "string" and etat_sauve.moteur or nil
+  demarrer = (taux, periode, peripherique, limiteur) ->
+    organum.demarrer {
+      :taux, :periode, :peripherique, :limiteur
+      etat: etat_moteur
+      qualite: qualite_demarrage
+      tete_reverb: qualite_locale.tete_reverb
+    }
+  periph_effectif = EFFECTIF.peripherique
+  ok, err = demarrer EFFECTIF.taux, EFFECTIF.periode, periph_effectif, EFFECTIF.limiteur
+  -- Repli unique : un réglage enregistré (non imposé) peut désigner un
+  -- périphérique absent (carte USB débranchée) ou un taux que la carte
+  -- refuse. On réessaie avec les défauts, sans toucher aux valeurs
+  -- enregistrées. Les variables d'environnement restent prioritaires.
+  enregistre_utilise = (not IMPOSE.peripherique and qualite_locale.peripherique != "") or
+    (not IMPOSE.taux and qualite_locale.taux != DEMARRAGE_DEFAUT.taux) or
+    (not IMPOSE.periode and qualite_locale.periode != DEMARRAGE_DEFAUT.periode)
+  if not ok and enregistre_utilise
+    Log kLogWarn, "organum : démarrage impossible (#{err}) ; nouvel essai avec les réglages par défaut"
+    rtaux = IMPOSE.taux and EFFECTIF.taux or DEMARRAGE_DEFAUT.taux
+    rperiode = IMPOSE.periode and EFFECTIF.periode or DEMARRAGE_DEFAUT.periode
+    rperiph = IMPOSE.peripherique and EFFECTIF.peripherique or DEMARRAGE_DEFAUT.peripherique
+    ok, err2 = demarrer rtaux, rperiode, rperiph, EFFECTIF.limiteur
+    if ok
+      periph_effectif = rperiph
+      AUDIO_REPLI = "réglages enregistrés indisponibles (#{err}) ; démarré avec les réglages par défaut"
+    else
+      err = err2
   unless ok
     Log kLogFatal, "organum : #{err}"
     unix.exit 1
+  -- Valeurs réellement retenues (l'ouverture audio peut borner) : le fil
+  -- audio les publie dans l'état partagé, hérité par les fils de requête.
+  etat_effectif = organum.etat!
+  EFFECTIF.taux = etat_effectif.taux
+  EFFECTIF.periode = etat_effectif.periode
+  EFFECTIF.peripherique = periph_effectif
   unless niveau_impose
     qualite_locale.niveau = niveau_correspondant organum.etat!.qualite, qualite_locale.tete_reverb
   ecrire_qualite_locale qualite_locale
@@ -424,7 +539,7 @@ seq_sauve = nil
 sauvegarder_etat = ->
   e = organum.etat!
   q = qualite_locale_actuelle!
-  signature = "#{e.seq}|#{q.niveau}|#{q.auto}|#{q.tete_reverb}"
+  signature = "#{e.seq}|#{q.niveau}|#{q.auto}|#{q.tete_reverb}|#{q.periode}|#{q.taux}|#{q.peripherique}|#{q.limiteur}"
   return if signature == seq_sauve
   seq_sauve = signature
   dossier = ETAT_FICHIER\match "^(.*)/[^/]*$"
@@ -441,6 +556,10 @@ sauvegarder_etat = ->
       tete_reverb: q.tete_reverb
       niveau: q.niveau
       auto: q.auto
+      periode: q.periode
+      taux: q.taux
+      peripherique: q.peripherique
+      limiteur: q.limiteur
     }
   }
   -- Fichier temporaire puis renommage : jamais de sauvegarde à moitié écrite.
@@ -528,6 +647,11 @@ do
     else
       Log kLogWarn, "organum : #{CONFIG_MIDI} illisible"
 
+-- Déclarations anticipées : la fenêtre est lancée plus bas, après leur
+-- définition, mais lancer_fenetre les référence dans sa fermeture.
+qualite_etat = nil
+regler_qualite = nil
+
 -- Interface native (Nuklear, voir fenetre.moon) dans un processus fils, à
 -- côté de l'interface web, si un serveur d'affichage local est joignable.
 -- ORGANUM_FENETRE=non la désactive (x11 ou wayland imposent le protocole).
@@ -552,18 +676,25 @@ lancer_fenetre = ->
       appliquer: appliquer_midi
       enregistrer: enregistrer_midi
     }
-    ouvert, raison = lancer organum, nk, {titre: "organum", :volume, :midi, continuer: -> unix.getppid! == maitre}
+    -- Même chemin que POST /api/orgue (regler_qualite) : la fenêtre
+    -- enregistre exactement comme la page web, sans duplication de règles.
+    qualite = {
+      etat: qualite_etat
+      regler: (p) ->
+        res, raison = regler_qualite p
+        error raison unless res
+        res
+    }
+    ouvert, raison = lancer organum, nk, {titre: "organum", :volume, :midi, :qualite, continuer: -> unix.getppid! == maitre}
     Log kLogWarn, "fenêtre : #{raison}" unless ouvert
   Log kLogWarn, "fenêtre : #{err}" unless ok
   unix.exit 0
 
-lancer_fenetre!
-
 -- Qualité exposée : les quatre champs du moteur (valeur réelle), plus les
 -- réglages tenus côté Lua. niveau vaut la présélection correspondante, ou -1
--- si l'utilisateur a modifié un champ à la main. tete_reverb est la valeur
--- EFFECTIVE (ORGANUM_REVERB_TETE compris) ; tete_reverb_impose indique que
--- la variable d'environnement force cette valeur.
+-- si l'utilisateur a modifié un champ à la main. Pour chaque réglage de
+-- démarrage : X = valeur effective du lancement en cours, X_prochain =
+-- valeur enregistrée, X_impose = imposé par une variable d'environnement.
 qualite_etat = ->
   e = organum.etat!
   q = qualite_locale_actuelle!
@@ -573,12 +704,142 @@ qualite_etat = ->
     spatialisation: e.qualite.spatialisation
     polyphonie_max: e.qualite.polyphonie_max
     tete_reverb: e.qualite.tete_reverb == true
+    tete_reverb_prochain: q.tete_reverb == true
     tete_reverb_impose: e.qualite.tete_reverb_impose == true
+    periode: e.periode
+    periode_prochain: q.periode
+    periode_impose: IMPOSE.periode
+    taux: e.taux
+    taux_prochain: q.taux
+    taux_impose: IMPOSE.taux
+    peripherique: EFFECTIF.peripherique or ""
+    peripherique_prochain: q.peripherique or ""
+    peripherique_impose: IMPOSE.peripherique
+    limiteur: EFFECTIF.limiteur == true
+    limiteur_prochain: q.limiteur == true
+    limiteur_impose: IMPOSE.limiteur
+    audio_repli: AUDIO_REPLI
     niveau: q.niveau
     auto: q.auto
   }
   etat_qualite.calibration = calibration_demarrage if calibration_demarrage
   etat_qualite
+
+-- Applique des réglages de qualité (même chemin pour POST /api/orgue et pour
+-- la fenêtre native). Renvoie la réponse, ou nil et un message français.
+-- Les champs à chaud passent par le moteur ; les réglages de démarrage sont
+-- seulement enregistrés dans QUALITE_FICHIER, et redemarrage_requis signale
+-- que la valeur effective ne changera qu'au prochain lancement.
+regler_qualite = (q) ->
+  return nil, "qualite doit être un objet" unless type(q) == "table"
+  connus = {
+    bruit_attaque: true, instabilite: true, spatialisation: true,
+    polyphonie_max: true, tete_reverb: true, niveau: true, auto: true,
+    periode: true, taux: true, peripherique: true, limiteur: true
+  }
+  nq = 0
+  for k in pairs q
+    return nil, "qualite : champ inconnu : #{k}" unless connus[k]
+    nq += 1
+  return nil, "qualite : aucun champ" unless nq > 0
+  if q.bruit_attaque != nil and type(q.bruit_attaque) != "boolean"
+    return nil, "qualite.bruit_attaque doit être un booléen"
+  if q.instabilite != nil and type(q.instabilite) != "boolean"
+    return nil, "qualite.instabilite doit être un booléen"
+  if q.spatialisation != nil and not entier_borne q.spatialisation, 0, 2
+    return nil, "qualite.spatialisation doit être un entier entre 0 et 2"
+  if q.polyphonie_max != nil and not entier_borne q.polyphonie_max, 0, 512
+    return nil, "qualite.polyphonie_max doit être un entier entre 0 et 512"
+  if q.tete_reverb != nil and type(q.tete_reverb) != "boolean"
+    return nil, "qualite.tete_reverb doit être un booléen"
+  if q.niveau != nil and not entier_borne q.niveau, 0, 3
+    return nil, "qualite.niveau doit être un entier entre 0 et 3"
+  if q.auto != nil and type(q.auto) != "boolean"
+    return nil, "qualite.auto doit être un booléen"
+  if q.periode != nil and not (type(q.periode) == "number" and PERIODES_VALIDES[q.periode] == true)
+    return nil, "qualite.periode doit valoir 128, 256, 512, 1024 ou 2048"
+  if q.taux != nil and not (type(q.taux) == "number" and TAUX_VALIDES[q.taux] == true)
+    return nil, "qualite.taux doit valoir 44100 ou 48000"
+  if q.peripherique != nil and not peripherique_valide q.peripherique
+    return nil, "qualite.peripherique doit être une chaîne de 200 octets au plus, sans caractère de contrôle"
+  if q.limiteur != nil and type(q.limiteur) != "boolean"
+    return nil, "qualite.limiteur doit être un booléen"
+
+  impose_tete = organum.etat!.qualite.tete_reverb_impose == true
+  loc = qualite_locale_actuelle!
+  loc.auto = q.auto if q.auto != nil
+  modifie_chaud = false
+  redemarrage = false
+  p = nil
+  if q.bruit_attaque != nil
+    organum.qualite "bruit_attaque", q.bruit_attaque
+    modifie_chaud = true
+  if q.instabilite != nil
+    organum.qualite "instabilite", q.instabilite
+    modifie_chaud = true
+  if q.spatialisation != nil
+    organum.qualite "spatialisation", q.spatialisation
+    modifie_chaud = true
+  if q.polyphonie_max != nil
+    organum.qualite "polyphonie_max", q.polyphonie_max
+    modifie_chaud = true
+  if q.tete_reverb != nil and not impose_tete
+    redemarrage = true if q.tete_reverb != loc.tete_reverb
+    loc.tete_reverb = q.tete_reverb
+  if q.niveau != nil
+    p = PRESELECTIONS[q.niveau + 1]
+    organum.qualite "spatialisation", p.spatialisation
+    organum.qualite "bruit_attaque", p.bruit_attaque
+    organum.qualite "instabilite", p.instabilite
+    organum.qualite "polyphonie_max", p.polyphonie_max
+    unless impose_tete
+      redemarrage = true if p.tete_reverb != loc.tete_reverb
+      loc.tete_reverb = p.tete_reverb
+    loc.niveau = q.niveau
+    loc.auto = false
+  elseif modifie_chaud
+    loc.niveau = -1
+    loc.auto = false
+  -- Réglages de démarrage : jamais écrits quand l'environnement les impose,
+  -- et sans toucher au niveau ni au mode auto (ils ne font pas partie des
+  -- présélections).
+  if q.periode != nil and not IMPOSE.periode
+    redemarrage = true if q.periode != loc.periode
+    loc.periode = q.periode
+  if q.taux != nil and not IMPOSE.taux
+    redemarrage = true if q.taux != loc.taux
+    loc.taux = q.taux
+  if q.peripherique != nil and not IMPOSE.peripherique
+    redemarrage = true if q.peripherique != loc.peripherique
+    loc.peripherique = q.peripherique
+  if q.limiteur != nil and not IMPOSE.limiteur
+    redemarrage = true if q.limiteur != loc.limiteur
+    loc.limiteur = q.limiteur
+  ecrire_qualite_locale loc
+
+  -- La réponse reflète les valeurs DEMANDÉES, pas celles que le fil audio
+  -- n'a pas encore publiées (il reçoit la commande de façon asynchrone).
+  reponse = qualite_etat!
+  if q.niveau != nil
+    reponse.niveau = q.niveau
+    reponse.auto = false
+    reponse.spatialisation = p.spatialisation
+    reponse.bruit_attaque = p.bruit_attaque
+    reponse.instabilite = p.instabilite
+    reponse.polyphonie_max = p.polyphonie_max
+  else
+    reponse.spatialisation = q.spatialisation if q.spatialisation != nil
+    reponse.bruit_attaque = q.bruit_attaque if q.bruit_attaque != nil
+    reponse.instabilite = q.instabilite if q.instabilite != nil
+    reponse.polyphonie_max = q.polyphonie_max if q.polyphonie_max != nil
+    reponse.auto = q.auto if q.auto != nil
+  reponse.ok = true
+  reponse.redemarrage_requis = redemarrage
+  reponse
+
+-- Le processus fils de la fenêtre doit connaître qualite_etat et
+-- regler_qualite : lancer après leur définition.
+lancer_fenetre!
 
 -- État au format du socket d'Aeolus (PROTOCOLE-SOCKET.md), que le client
 -- connaît déjà ; les divisions et jeux y sont indexés à partir de 0.
@@ -781,99 +1042,11 @@ handle_orgue = ->
     organum.gain g.division + 1, g.value
 
   elseif data.qualite != nil
-    q = data.qualite
-    unless type(q) == "table"
-      send_json 400, {error: "qualite doit être un objet"}
-      return
-    connus = {bruit_attaque: true, instabilite: true, spatialisation: true, polyphonie_max: true, tete_reverb: true, niveau: true, auto: true}
-    nq = 0
-    for k in pairs q
-      unless connus[k]
-        send_json 400, {error: "qualite : champ inconnu : #{k}"}
-        return
-      nq += 1
-    unless nq > 0
-      send_json 400, {error: "qualite : aucun champ"}
-      return
-    if q.bruit_attaque != nil and type(q.bruit_attaque) != "boolean"
-      send_json 400, {error: "qualite.bruit_attaque doit être un booléen"}
-      return
-    if q.instabilite != nil and type(q.instabilite) != "boolean"
-      send_json 400, {error: "qualite.instabilite doit être un booléen"}
-      return
-    if q.spatialisation != nil and not entier_borne q.spatialisation, 0, 2
-      send_json 400, {error: "qualite.spatialisation doit être un entier entre 0 et 2"}
-      return
-    if q.polyphonie_max != nil and not entier_borne q.polyphonie_max, 0, 512
-      send_json 400, {error: "qualite.polyphonie_max doit être un entier entre 0 et 512"}
-      return
-    if q.tete_reverb != nil and type(q.tete_reverb) != "boolean"
-      send_json 400, {error: "qualite.tete_reverb doit être un booléen"}
-      return
-    if q.niveau != nil and not entier_borne q.niveau, 0, 3
-      send_json 400, {error: "qualite.niveau doit être un entier entre 0 et 3"}
-      return
-    if q.auto != nil and type(q.auto) != "boolean"
-      send_json 400, {error: "qualite.auto doit être un booléen"}
-      return
-
-    loc = qualite_locale_actuelle!
-    loc.auto = q.auto if q.auto != nil
-    modifie = false
-    redemarrage = false
-    p = nil
-    if q.bruit_attaque != nil
-      organum.qualite "bruit_attaque", q.bruit_attaque
-      modifie = true
-    if q.instabilite != nil
-      organum.qualite "instabilite", q.instabilite
-      modifie = true
-    if q.spatialisation != nil
-      organum.qualite "spatialisation", q.spatialisation
-      modifie = true
-    if q.polyphonie_max != nil
-      organum.qualite "polyphonie_max", q.polyphonie_max
-      modifie = true
-    if q.tete_reverb != nil
-      redemarrage = true if q.tete_reverb != loc.tete_reverb
-      loc.tete_reverb = q.tete_reverb
-      modifie = true
-    if q.niveau != nil
-      p = PRESELECTIONS[q.niveau + 1]
-      organum.qualite "spatialisation", p.spatialisation
-      organum.qualite "bruit_attaque", p.bruit_attaque
-      organum.qualite "instabilite", p.instabilite
-      organum.qualite "polyphonie_max", p.polyphonie_max
-      redemarrage = true if p.tete_reverb != loc.tete_reverb
-      loc.tete_reverb = p.tete_reverb
-      loc.niveau = q.niveau
-      loc.auto = false
-    elseif modifie
-      loc.niveau = -1
-      loc.auto = false
-    ecrire_qualite_locale loc
-
-    -- La réponse reflète les valeurs DEMANDÉES, pas celles que le fil audio
-    -- n'a pas encore publiées (il reçoit la commande de façon asynchrone).
-    -- tete_reverb reste la valeur effective : elle ne change qu'au
-    -- redémarrage, et ORGANUM_REVERB_TETE peut l'imposer.
-    reponse = qualite_etat!
-    if q.niveau != nil
-      reponse.niveau = q.niveau
-      reponse.auto = false
-      reponse.spatialisation = p.spatialisation
-      reponse.bruit_attaque = p.bruit_attaque
-      reponse.instabilite = p.instabilite
-      reponse.polyphonie_max = p.polyphonie_max
+    reponse, err = regler_qualite data.qualite
+    if reponse
+      send_json 200, reponse
     else
-      reponse.spatialisation = q.spatialisation if q.spatialisation != nil
-      reponse.bruit_attaque = q.bruit_attaque if q.bruit_attaque != nil
-      reponse.instabilite = q.instabilite if q.instabilite != nil
-      reponse.polyphonie_max = q.polyphonie_max if q.polyphonie_max != nil
-      reponse.auto = q.auto if q.auto != nil
-    reponse.ok = true
-    reponse.redemarrage_requis = redemarrage
-    send_json 200, reponse
+      send_json 400, {error: err}
     return
 
   elseif data.panic == true
