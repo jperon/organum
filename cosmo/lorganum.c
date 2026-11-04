@@ -173,10 +173,18 @@ static unsigned long long g_echeances[16];
 // aucun flottant : deux lectures d'horloge et de l'arithmétique entière par
 // tampon. Les xruns récents tiennent dans un anneau fixe de 60 secondes.
 #define XRUNS_ANNEAU 60
+// Moyennes de charge par seconde de jeu, sur les 60 dernières secondes : la
+// pointe est leur maximum. Un tampon préempté seul ne suffit donc plus à
+// passer la puce au rouge.
+#define MESURE_MOYENNES 60
 static unsigned long long g_mesure_prochaine_seconde;
 static unsigned long long g_mesure_echantillons_joues;
 static unsigned g_mesure_somme;
 static unsigned g_mesure_tampons_seconde;
+static unsigned g_mesure_somme_jeu;
+static unsigned g_mesure_tampons_jeu;
+static unsigned g_mesure_moyennes[MESURE_MOYENNES];
+static int g_mesure_moyennes_pos;
 static unsigned g_mesure_pointe;
 static int g_mesure_evaluee;
 static int g_xruns_vus;
@@ -199,6 +207,13 @@ static void mesure_reinitialiser(void) {
   g_mesure_pointe = 0;
   g_mesure_echantillons_joues = 0;
   g_mesure_evaluee = 0;
+  g_mesure_somme_jeu = 0;
+  g_mesure_tampons_jeu = 0;
+  memset(g_mesure_moyennes, 0, sizeof(g_mesure_moyennes));
+  g_mesure_moyennes_pos = 0;
+  // La première moyenne ne comptera qu'une seconde pleine après ce réglage.
+  g_mesure_prochaine_seconde =
+      g_echantillons + (unsigned long long)g_taux;
   g_etat->charge_pointe = 0;
   g_etat->charge_evaluee = 0;
 }
@@ -209,6 +224,10 @@ static void mesure_init(void) {
   g_mesure_echantillons_joues = 0;
   g_mesure_somme = 0;
   g_mesure_tampons_seconde = 0;
+  g_mesure_somme_jeu = 0;
+  g_mesure_tampons_jeu = 0;
+  memset(g_mesure_moyennes, 0, sizeof(g_mesure_moyennes));
+  g_mesure_moyennes_pos = 0;
   g_mesure_pointe = 0;
   g_mesure_evaluee = 0;
   g_xruns_vus = 0;
@@ -765,6 +784,9 @@ static void *boucle_audio(void *arg) {
   midi_msg_t msgs[64];
   struct commande cmds[32];
   int tours = 0;
+  // Première moyenne à une seconde pleine : la seconde en cours au démarrage
+  // est partielle et ne compte pas.
+  g_mesure_prochaine_seconde = g_taux;
 
   for (;;) {
     int n;
@@ -853,9 +875,12 @@ static void *boucle_audio(void *arg) {
                        : 0;
     g_mesure_somme += pct;
     ++g_mesure_tampons_seconde;
-    // Pointe et évaluation seulement quand des voix sonnent.
+    // Moyenne et évaluation seulement quand des voix sonnent. Les deux
+    // additions sont dans cette branche, déjà présente : aucun coût ajouté
+    // par tampon hors jeu.
     if (aeolus_nb_voix(g_moteur) > 0) {
-      if (pct > g_mesure_pointe) g_mesure_pointe = pct;
+      g_mesure_somme_jeu += pct;
+      ++g_mesure_tampons_jeu;
       g_mesure_echantillons_joues += g_periode;
       if (g_mesure_echantillons_joues >= (unsigned long long)g_taux)
         g_mesure_evaluee = 1;
@@ -884,6 +909,21 @@ static void *boucle_audio(void *arg) {
       g_xruns_recents -= g_xruns_anneau[g_xruns_anneau_pos];
       g_xruns_anneau[g_xruns_anneau_pos] = 0;
       if (g_xruns_recents < 0) g_xruns_recents = 0;
+      // Seconde pleine écoulée : sa moyenne rejoint l'anneau, puis la pointe
+      // est le maximum des 60 dernières (arithmétique entière). Une seconde
+      // sans voix vaut 0 et fait redescendre l'anneau.
+      g_mesure_moyennes[g_mesure_moyennes_pos] =
+          g_mesure_tampons_jeu
+              ? g_mesure_somme_jeu / g_mesure_tampons_jeu
+              : 0;
+      g_mesure_moyennes_pos =
+          (g_mesure_moyennes_pos + 1) % MESURE_MOYENNES;
+      g_mesure_pointe = 0;
+      for (int i = 0; i < MESURE_MOYENNES; ++i)
+        if (g_mesure_moyennes[i] > g_mesure_pointe)
+          g_mesure_pointe = g_mesure_moyennes[i];
+      g_mesure_somme_jeu = 0;
+      g_mesure_tampons_jeu = 0;
       g_etat->charge = g_mesure_tampons_seconde
                            ? (int)(g_mesure_somme / g_mesure_tampons_seconde)
                            : 0;
