@@ -90,8 +90,10 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   (1 s de jeu mesurée), la seconde partielle en cours n'étant jamais comptée,
   `qualite.charge_niveau` (0 gris, 1 vert, 2 orange, 3 rouge, calculé en C au
   plus une fois par seconde), `qualite.xruns` et `qualite.xruns_recents`
-  (anneau de 60 s, hors `application` et hors seconde suivant une
-  reconfiguration ou une bascule de tête). `seq` ne change que si le niveau ou
+  (anneau de 60 s, hors `application` et hors trois secondes suivant une
+  reconfiguration ou une bascule de tête). Un réglage remet à zéro la mesure,
+  les xruns récents et le niveau publié (avec avance de `seq` si le niveau
+  change), toujours dans le fil audio. `seq` ne change que si le niveau ou
   les xruns changent, jamais pour un pourcentage ; `charge` et `charge_pointe`
   s'écrivent sans réveiller les attentes. `modele.CHARGE_NIVEAUX` traduit le
   niveau en libellé et classe CSS pour le web et la fenêtre. Le point
