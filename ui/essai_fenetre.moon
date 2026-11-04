@@ -9,6 +9,8 @@ modele = require "modele"
 -- état factice
 etat = {
   seq: 0
+  -- Niveau de la puce, pour exercer le bouton Qualité orange (2) ou rouge (3).
+  charge_niveau: tonumber(os.getenv "CHARGE_NIVEAU") or 1
   volume: 0.5
   reverb: 0.3
   etape: 0
@@ -34,6 +36,7 @@ etat = {
     tete_reverb: true
     niveau: 3
     auto: false
+    charge_niveau: tonumber(os.getenv "CHARGE_NIVEAU") or 1
     calibration: {
       niveau: 2
       tete_reverb: true
