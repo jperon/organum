@@ -957,13 +957,20 @@ texte_calibration = (c) ->
     ligne = p.ligne
 
     if ui\debut "", 0, 0, l, h
-      -- Réglages généraux (le bouton Qualité s'ajoute toujours, MIDI si fourni)
-      ui\ligne ligne, (midi and 8 or 7)
-      ui\texte "Volume", "droite"
-      if systeme and vol_sys
+      -- Réglages généraux (le bouton Qualité s'ajoute toujours, MIDI si fourni).
+      -- Avec un volume système, deux curseurs : le système et la pédale (volume
+      -- du moteur, distinct) ; sans lui, le curseur unique règle déjà le moteur.
+      deux = systeme and vol_sys
+      ui\ligne ligne, (midi and 8 or 7) + (deux and 2 or 0)
+      if deux
+        ui\texte "Volume #{math.floor(vol_sys * 100 + 0.5)} %", "droite"
         v = ui\curseur vol_sys, 0, 1, 0.01
         vol_sys, a_envoyer = v, v if bouge vol_sys, v
+        ui\texte "Pédale #{math.floor(e.volume * 100 + 0.5)} %", "droite"
+        vp = ui\curseur e.volume, 0, 1, 0.01
+        organum.volume vp if bouge e.volume, vp
       else
+        ui\texte "Volume", "droite"
         v = ui\curseur e.volume, 0, 1, 0.01
         organum.volume v if bouge e.volume, v
       ui\texte "Réverb.", "droite"
