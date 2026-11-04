@@ -251,6 +251,85 @@ JS = [[
     send({ muted: !state.muted });
   });
 
+  // --- Volume de la pédale (volume du moteur, distinct du volume système) ---
+  var PEDALE_API = '/api/orgue';
+  var pedalSlider = document.getElementById('volume-pedale');
+  var pedalValueDisplay = document.getElementById('value-pedale');
+  var pedalManip = false;
+  var pedalPending = null;
+  var pedalThrottleTimer = null;
+  var lastPedalPost = 0;
+
+  function paintPedale(percent) {
+    if (!pedalSlider || !pedalValueDisplay) { return; }
+    pedalValueDisplay.textContent = percent + '\u00a0%';
+    pedalSlider.setAttribute('aria-valuetext', percent + '\u00a0%');
+    pedalSlider.style.setProperty('--fill', percent + '%');
+    if (!pedalManip) { pedalSlider.value = String(percent); }
+  }
+
+  function sendPedale(percent) {
+    return fetch(PEDALE_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ volume: percent / 100 })
+    }).catch(function () {});
+  }
+
+  function flushPedale() {
+    if (pedalPending === null) { return; }
+    var percent = pedalPending;
+    pedalPending = null;
+    lastPedalPost = Date.now();
+    sendPedale(percent);
+  }
+
+  function queuePedale(percent) {
+    pedalPending = percent;
+    if (pedalThrottleTimer !== null) { return; }
+    var wait = Math.max(0, THROTTLE_DELAY - (Date.now() - lastPedalPost));
+    if (wait === 0) {
+      flushPedale();
+      return;
+    }
+    pedalThrottleTimer = window.setTimeout(function () {
+      pedalThrottleTimer = null;
+      flushPedale();
+    }, wait);
+  }
+
+  function finishPedale() {
+    if (!pedalManip) { return; }
+    var percent = clampVolume(pedalSlider.value);
+    pedalManip = false;
+    if (pedalThrottleTimer !== null) {
+      window.clearTimeout(pedalThrottleTimer);
+      pedalThrottleTimer = null;
+    }
+    pedalPending = null;
+    if (percent === null) { return; }
+    paintPedale(percent);
+    sendPedale(percent);
+  }
+
+  if (pedalSlider) {
+    pedalSlider.addEventListener('pointerdown', function () { pedalManip = true; });
+    pedalSlider.addEventListener('input', function () {
+      var percent = clampVolume(pedalSlider.value);
+      if (percent === null) { return; }
+      pedalManip = true;
+      paintPedale(percent);
+      queuePedale(percent);
+    });
+    pedalSlider.addEventListener('change', finishPedale);
+    pedalSlider.addEventListener('blur', finishPedale);
+    window.addEventListener('pointerup', finishPedale);
+    window.addEventListener('touchend', finishPedale, { passive: true });
+    window.addEventListener('pointercancel', finishPedale);
+    var initial = clampVolume(pedalSlider.value);
+    paintPedale(initial === null ? 50 : initial);
+  }
+
   document.addEventListener('visibilitychange', function () {
     if (!document.hidden) { refresh(); }
   });
@@ -371,6 +450,10 @@ JS = [[
 
     function applyOrgueData(data) {
       majLienQualite(data && typeof data === 'object' ? data.qualite : null);
+      if (data && typeof data === 'object' && typeof data.volume === 'number' && isFinite(data.volume)) {
+        var pourcent = Math.round(Math.max(0, Math.min(1, data.volume)) * 100);
+        if (!pedalManip) { paintPedale(pourcent); }
+      }
       if (data && typeof data === 'object' && data.source === 'aeolus') {
         aeolusMode = true;
         if (typeof data.instance === 'string') { aeolusInstance = data.instance; }
