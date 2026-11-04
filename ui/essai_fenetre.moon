@@ -216,6 +216,19 @@ qualite = {
 largeur = tonumber(os.getenv "LARGEUR") or 800
 hauteur = tonumber(os.getenv "HAUTEUR") or 600
 
-ok, err = lancer organum, nk, {titre: "essai organum", largeur: largeur, hauteur: hauteur, :midi, :qualite}
+-- Volume système factice : exerce les deux curseurs (système et pédale).
+-- SANS_VOLUME_SYS=1 reproduit le cas sans volume système (curseur unique).
+volume_sys = tonumber(os.getenv "VOLUME_SYS") or 70
+systeme = {
+  lire: -> volume_sys
+  regler: (v) ->
+    volume_sys = v
+    print "volume_systeme v=#{v}"
+    bump!
+}
+options = {titre: "essai organum", largeur: largeur, hauteur: hauteur, :midi, :qualite}
+options.volume = systeme unless os.getenv("SANS_VOLUME_SYS") == "1"
+
+ok, err = lancer organum, nk, options
 print err if err
 print "fin"
