@@ -530,8 +530,10 @@ CSS = [[
     display: flex;
     align-items: center;
     gap: 8px;
-    flex: 1 1 100%;
+    flex: 1 1 220px;
+    min-width: 0;
   }
+  .volume-general input[type="range"] { min-width: 0; }
   .volume-general .value {
     font-size: 1.1rem;
     min-width: 3.5em;
@@ -550,7 +552,7 @@ CSS = [[
   .division-tete .gain { flex: 1 1 auto; min-width: 60px; }
 
   @media (min-width: 900px) {
-    .volume-general { flex: 2 1 320px; }
+    .volume-general { flex: 1 1 260px; }
     .barre .btn.mute,
     .barre .btn.panic { flex: 0 0 auto; padding: 0 24px; margin: 0; }
   }
