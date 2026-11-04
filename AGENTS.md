@@ -47,7 +47,10 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   Les fichiers `cosmo/plateforme_*.c` incluent ces sources ; make ne suit pas
   ces inclusions (faire `touch` après modification).
 - `web/src/init.moon` : démarrage, API HTTP (`/api/orgue`, `/api/midi`,
-  `/api/volume`), persistance. `page.moon` (orgue), `page_midi.moon`
+  `/api/volume`), persistance. `POST /api/orgue {"volume":0..1}` règle le
+  volume du moteur (pédale), distinct de `/api/volume` (volume système), déjà
+  persisté et pilotable par une association MIDI de cible « volume ».
+  `page.moon` (orgue), `page_midi.moon`
   (`/midi`), `page_qualite.moon` (`/qualite`), `client.moon` (JS de la page
   orgue), `style.moon` : interface. `web/src/.lua/html.moon` : générateur
   HTML.
@@ -105,8 +108,11 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   dlopen). `cosmo/lnuklear.c` : module Lua `nk` (Nuklear, rendu logiciel
   rawfb, police recuite à la taille voulue). `web/src/fenetre.moon` :
   console d'orgue, lancée par `init.moon` dans un processus fils
-  (`ORGANUM_FENETRE=non` pour s'en passer). Exigence : tout doit tenir dans
-  la fenêtre, sans défilement, et grossir quand elle est agrandie.
+  (`ORGANUM_FENETRE=non` pour s'en passer). Avec un volume système, deux
+  curseurs distincts : « Volume » (système) et « Pédale » (volume du moteur,
+  avec sa valeur en %) ; sans lui, le curseur unique règle déjà le moteur.
+  Exigence : tout doit tenir dans la fenêtre, sans défilement, et grossir
+  quand elle est agrandie.
   Essai hors moteur : `ui/essai_fenetre.moon` (état factice). X11 : socket
   Unix pour `:n`, TCP (port 6000+n) pour `hôte:n` ; testable sans
   rien ouvrir sur le bureau avec `Xvfb :2 -listen tcp -ac` et `DISPLAY=localhost:2`
