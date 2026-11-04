@@ -317,9 +317,10 @@ script = [[
     if (puceDetail) {
       var pointe = q && typeof q.charge_pointe === 'number' ? q.charge_pointe : 0;
       var mesure = q && q.charge_evaluee === true;
+      var xrunsRecents = q && typeof q.xruns_recents === 'number' ? q.xruns_recents : 0;
       var xruns = q && typeof q.xruns === 'number' ? q.xruns : 0;
-      puceDetail.textContent = (mesure ? 'Pointe : ' + pointe + ' %' : 'Pointe : —') +
-        ' · Xruns : ' + xruns;
+      puceDetail.textContent = (mesure || pointe > 0 ? 'Pointe : ' + pointe + ' %' : 'Pointe : —') +
+        ' · Xruns récents : ' + xrunsRecents + ' · total : ' + xruns;
     }
   }
 
@@ -665,7 +666,7 @@ script = [[
           h.h2 "Qualité",
         h.div class: "puce-bloc",
           h.span class: "puce-charge charge-gris", id: "qualite-puce", role: "status", ["aria-live"]: "polite", "Pas encore évalué — jouez quelques accords",
-          h.p class: "note", id: "qualite-puce-detail", "Pointe : — · Xruns : 0",
+          h.p class: "note", id: "qualite-puce-detail", "Pointe : — · Xruns récents : 0 · total : 0",
         h.section class: "qualite", id: "qualite", ["aria-label"]: "Réglages de qualité", ["data-charge-classe-0"]: modele.CHARGE_NIVEAUX[1].classe, ["data-charge-classe-1"]: modele.CHARGE_NIVEAUX[2].classe, ["data-charge-classe-2"]: modele.CHARGE_NIVEAUX[3].classe, ["data-charge-classe-3"]: modele.CHARGE_NIVEAUX[4].classe, ["data-charge-libelle-0"]: modele.CHARGE_NIVEAUX[1].libelle, ["data-charge-libelle-1"]: modele.CHARGE_NIVEAUX[2].libelle, ["data-charge-libelle-2"]: modele.CHARGE_NIVEAUX[3].libelle, ["data-charge-libelle-3"]: modele.CHARGE_NIVEAUX[4].libelle,
           h.p class: "note qualite-indisponible", id: "qualite-indisponible", hidden: true,
             "Réglages de qualité indisponibles sur ce serveur.",
