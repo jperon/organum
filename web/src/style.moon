@@ -609,8 +609,8 @@ CSS = [[
     font: inherit;
     font-size: 0.82rem;
   }
-  /* Les notes (valeur imposée, écart au prochain démarrage) occupent leur
-     propre ligne, sous le libellé et le contrôle. */
+  /* Les notes (valeur imposée, écart avec la valeur effective) occupent
+     leur propre ligne, sous le libellé et le contrôle. */
   .qualite-note {
     display: block;
     font-size: 0.72rem;

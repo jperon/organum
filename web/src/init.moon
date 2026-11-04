@@ -692,9 +692,9 @@ lancer_fenetre = ->
 
 -- Qualité exposée : les quatre champs du moteur (valeur réelle), plus les
 -- réglages tenus côté Lua. niveau vaut la présélection correspondante, ou -1
--- si l'utilisateur a modifié un champ à la main. Pour chaque réglage de
--- démarrage : X = valeur effective du lancement en cours, X_prochain =
--- valeur enregistrée, X_impose = imposé par une variable d'environnement.
+-- si l'utilisateur a modifié un champ à la main. X est la valeur effective
+-- publiée par le fil audio (donc à jour après un réglage à chaud), X_prochain
+-- la valeur enregistrée, X_impose une variable d'environnement prioritaire.
 qualite_etat = ->
   e = organum.etat!
   q = qualite_locale_actuelle!
@@ -712,13 +712,14 @@ qualite_etat = ->
     taux: e.taux
     taux_prochain: q.taux
     taux_impose: IMPOSE.taux
-    peripherique: EFFECTIF.peripherique or ""
+    peripherique: e.qualite.peripherique or ""
     peripherique_prochain: q.peripherique or ""
     peripherique_impose: IMPOSE.peripherique
-    limiteur: EFFECTIF.limiteur == true
+    limiteur: e.qualite.limiteur == true
     limiteur_prochain: q.limiteur == true
     limiteur_impose: IMPOSE.limiteur
     audio_repli: AUDIO_REPLI
+    audio_erreur: e.qualite.audio_erreur or ""
     niveau: q.niveau
     auto: q.auto
   }
@@ -727,9 +728,9 @@ qualite_etat = ->
 
 -- Applique des réglages de qualité (même chemin pour POST /api/orgue et pour
 -- la fenêtre native). Renvoie la réponse, ou nil et un message français.
--- Les champs à chaud passent par le moteur ; les réglages de démarrage sont
--- seulement enregistrés dans QUALITE_FICHIER, et redemarrage_requis signale
--- que la valeur effective ne changera qu'au prochain lancement.
+-- Tous les réglages s'appliquent à chaud : les champs à hot passent par le
+-- moteur, les réglages audio par une demande de reconfiguration unique. Un
+-- échec audio est publié de façon asynchrone dans audio_erreur.
 regler_qualite = (q) ->
   return nil, "qualite doit être un objet" unless type(q) == "table"
   connus = {
@@ -769,7 +770,8 @@ regler_qualite = (q) ->
   loc = qualite_locale_actuelle!
   loc.auto = q.auto if q.auto != nil
   modifie = false
-  redemarrage = false
+  tete_a_appliquer = nil
+  limiteur_a_appliquer = nil
   p = nil
   if q.bruit_attaque != nil
     organum.qualite "bruit_attaque", q.bruit_attaque
@@ -784,8 +786,8 @@ regler_qualite = (q) ->
     organum.qualite "polyphonie_max", q.polyphonie_max
     modifie = true
   if q.tete_reverb != nil and not impose_tete
-    redemarrage = true if q.tete_reverb != loc.tete_reverb
     loc.tete_reverb = q.tete_reverb
+    tete_a_appliquer = q.tete_reverb
     modifie = true
   if q.niveau != nil
     p = PRESELECTIONS[q.niveau + 1]
@@ -794,8 +796,8 @@ regler_qualite = (q) ->
     organum.qualite "instabilite", p.instabilite
     organum.qualite "polyphonie_max", p.polyphonie_max
     unless impose_tete
-      redemarrage = true if p.tete_reverb != loc.tete_reverb
       loc.tete_reverb = p.tete_reverb
+      tete_a_appliquer = p.tete_reverb
     loc.niveau = q.niveau
     loc.auto = false
   elseif modifie
@@ -805,21 +807,31 @@ regler_qualite = (q) ->
   -- et sans toucher au niveau ni au mode auto (ils ne font pas partie des
   -- présélections).
   if q.periode != nil and not IMPOSE.periode
-    redemarrage = true if q.periode != loc.periode
     loc.periode = q.periode
   if q.taux != nil and not IMPOSE.taux
-    redemarrage = true if q.taux != loc.taux
     loc.taux = q.taux
   if q.peripherique != nil and not IMPOSE.peripherique
-    redemarrage = true if q.peripherique != loc.peripherique
     loc.peripherique = q.peripherique
   if q.limiteur != nil and not IMPOSE.limiteur
-    redemarrage = true if q.limiteur != loc.limiteur
     loc.limiteur = q.limiteur
+    limiteur_a_appliquer = q.limiteur
   ecrire_qualite_locale loc
 
+  -- Une seule demande de reconfiguration par POST, portant les valeurs
+  -- voulues ; les dimensions imposées gardent leur valeur effective.
+  if q.periode != nil or q.taux != nil or q.peripherique != nil
+    e = organum.etat!
+    cible = {
+      taux: IMPOSE.taux and e.taux or loc.taux
+      periode: IMPOSE.periode and e.periode or loc.periode
+      peripherique: IMPOSE.peripherique and (e.qualite.peripherique or "") or loc.peripherique
+    }
+    organum.reconfigurer_audio cible
+  organum.limiteur limiteur_a_appliquer if limiteur_a_appliquer != nil
+  organum.tete_reverb tete_a_appliquer if tete_a_appliquer != nil
+
   -- La réponse reflète les valeurs DEMANDÉES, pas celles que le fil audio
-  -- n'a pas encore publiées (il reçoit la commande de façon asynchrone).
+  -- n'a pas encore publiées (il reçoit les commandes de façon asynchrone).
   reponse = qualite_etat!
   if q.niveau != nil
     reponse.niveau = q.niveau
@@ -835,7 +847,6 @@ regler_qualite = (q) ->
     reponse.polyphonie_max = q.polyphonie_max if q.polyphonie_max != nil
     reponse.auto = q.auto if q.auto != nil
   reponse.ok = true
-  reponse.redemarrage_requis = redemarrage
   reponse
 
 -- Le processus fils de la fenêtre doit connaître qualite_etat et

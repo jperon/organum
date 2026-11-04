@@ -154,6 +154,13 @@ extern "C" void aeolus_limiteur(void* moteur, int actif)
     static_cast<Handle*>(moteur)->engine->enableLimiter(actif != 0);
 }
 
+extern "C" int aeolus_lire_limiteur(void* moteur)
+{
+    return moteur && static_cast<Handle*>(moteur)->engine->isLimiterEnabled()
+               ? 1
+               : 0;
+}
+
 extern "C" void aeolus_reverb(void* moteur, float v)
 {
     if (!moteur) return;

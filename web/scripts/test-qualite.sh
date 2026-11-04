@@ -174,6 +174,30 @@ attendre_sauvegarde() {
   sleep 3
 }
 
+# Attend qu'une motif littéral apparaisse dans GET /api/orgue (max dixièmes
+# de seconde) ; imprime le dernier état lu.
+attendre_etat() {
+  motif=$1
+  max=${2:-30}
+  i=0
+  while [ "$i" -lt "$max" ]; do
+    S=$(get)
+    if printf '%s' "$S" | grep -qF -- "$motif"; then
+      printf '%s' "$S"
+      return 0
+    fi
+    sleep 0.1
+    i=$((i + 1))
+  done
+  printf '%s' "$S"
+  return 1
+}
+
+# Extrait un champ numérique simple (première occurrence).
+champ_num() {
+  printf '%s' "$1" | grep -o "\"$2\":[0-9.]*" | head -n 1 | cut -d: -f2
+}
+
 # Vérifie qu'une chaîne ne contient pas un motif littéral.
 verifie_absent() {
   desc=$1
@@ -239,7 +263,7 @@ verifie "polyphonie_max appliquée = 128" '"polyphonie_max":128' "$S"
 echo "== POST valide : niveau 1 (présélection d'un coup)"
 R=$(post '{"qualite":{"niveau":1}}')
 verifie "réponse 200 avec ok" '"ok":true' "$R"
-verifie "changement de tete_reverb : redemarrage_requis = true" '"redemarrage_requis":true' "$R"
+verifie_absent "changement de tête : plus de redemarrage_requis" '"redemarrage_requis"' "$R"
 verifie "réponse : niveau demandé = 1" '"niveau":1' "$R"
 verifie "réponse : spatialisation demandée = 1" '"spatialisation":1' "$R"
 verifie "réponse : polyphonie_max demandée = 128" '"polyphonie_max":128' "$R"
@@ -249,7 +273,7 @@ verifie "niveau 1 : spatialisation = 1" '"spatialisation":1' "$S"
 verifie "niveau 1 : bruit_attaque = false" '"bruit_attaque":false' "$S"
 verifie "niveau 1 : instabilite = false" '"instabilite":false' "$S"
 verifie "niveau 1 : polyphonie_max = 128" '"polyphonie_max":128' "$S"
-verifie "niveau 1 : tete_reverb effective reste true avant redémarrage" '"tete_reverb":true' "$S"
+verifie "niveau 1 : tete_reverb effective appliquée à chaud = false" '"tete_reverb":false' "$S"
 verifie "niveau 1 : tete_reverb_impose = false" '"tete_reverb_impose":false' "$S"
 verifie "niveau 1 : niveau = 1" '"niveau":1' "$S"
 
@@ -384,7 +408,7 @@ verifie_absent "ORGANUM_QUALITE=2 : pas de calibration" '"calibration"' "$S"
 
 arreter
 
-echo "== réglages de démarrage : défauts (aucune variable)"
+echo "== réglages à chaud : préparation (aucune variable)"
 # Aucune variable, y compris ORGANUM_PERIPHERIQUE : « default » est rendu
 # muet par ALSA_CONFIG_PATH, jamais la sortie audio réelle.
 ALSACONF="$TMP/asound-null.conf"
@@ -396,6 +420,9 @@ EOF
 ALSA_CONFIG_PATH="$ALSACONF"
 export ALSA_CONFIG_PATH
 effacer_etat
+# Volume, réverbération et gains non défaut : ils doivent survivre à la
+# recréation du moteur lors d'un changement de taux.
+printf '%s\n' '{"volume":0.37,"reverb":0.11,"gains":[0.25,0.35,0.45,0.55]}' >"$ETAT"
 lancer "" 1 "" "-" || exit 1
 S=$(get)
 verifie "période effective par défaut = 512" '"periode":512' "$S"
@@ -408,28 +435,159 @@ verifie "périphérique non imposé par défaut" '"peripherique_impose":false' "
 verifie "limiteur enregistré par défaut = true" '"limiteur_prochain":true' "$S"
 verifie "limiteur non imposé par défaut" '"limiteur_impose":false' "$S"
 verifie "aucun repli audio au démarrage nominal" '"audio_repli":""' "$S"
-unset ALSA_CONFIG_PATH
+verifie "volume initial non défaut" '"volume":0.37' "$S"
+verifie "réverbération initiale non défaut" '"reverb":0.1' "$S"
 
-echo "== période modifiée : niveau et auto inchangés"
-post '{"qualite":{"niveau":2}}' >/dev/null
+# Prépare un état à préserver : jeu, gain, réverbération, qualité.
+post '{"qualite":{"spatialisation":2,"polyphonie_max":123}}' >/dev/null
+post '{"stop":{"division":0,"index":0,"on":true}}' >/dev/null
+post '{"gain":{"division":0,"value":0.33}}' >/dev/null
+post '{"reverb":77}' >/dev/null
 attendre_publication
-R=$(post '{"qualite":{"periode":1024}}')
-verifie "période : redemarrage_requis = true" '"redemarrage_requis":true' "$R"
-verifie "réponse : période enregistrée = 1024" '"periode_prochain":1024' "$R"
-verifie_absent "réponse : période effective reste 512 avant relance" '"periode":1024' "$R"
 S=$(get)
-verifie "état : période enregistrée = 1024" '"periode_prochain":1024' "$S"
-verifie_absent "état : période effective reste 512 avant relance" '"periode":1024' "$S"
-verifie "état : niveau toujours 2" '"niveau":2' "$S"
-verifie "état : auto toujours false" '"auto":false' "$S"
+REV0=$(champ_num "$S" reverb)
+XR0=$(champ_num "$S" xruns)
+EQ0=$(champ_num "$S" erreurs_ecriture)
+
+echo "== période à chaud, sans relance (moins de 3 s)"
+T0=$(date +%s%N)
+R=$(post '{"qualite":{"periode":1024}}')
+verifie_absent "période : pas de redemarrage_requis" '"redemarrage_requis"' "$R"
+S=$(attendre_etat '"periode":1024' 30) || true
+T1=$(date +%s%N)
+verifie "période effective = 1024 sans relance" '"periode":1024' "$S"
+verifie "période enregistrée = 1024" '"periode_prochain":1024' "$S"
+verifie "niveau inchangé par la période = -1" '"niveau":-1' "$S"
+verifie "auto inchangé par la période = false" '"auto":false' "$S"
+echo "durée reconfiguration de période : $(( (T1 - T0) / 1000000 )) ms"
+XR1=$(champ_num "$S" xruns)
+EQ1=$(champ_num "$S" erreurs_ecriture)
+if [ -n "$XR0" ] && [ -n "$XR1" ] && [ -n "$EQ0" ] && [ -n "$EQ1" ] &&
+   [ "$XR1" -ge "$XR0" ] && [ "$EQ1" -ge "$EQ0" ]; then
+  ok "xruns et erreurs d'écriture cohérents (croissants) après la période"
+else
+  echec "xruns/erreurs d'écriture incohérents ($XR0→$XR1, $EQ0→$EQ1)"
+fi
+
+echo "== taux à chaud (recréation silencieuse, moins de 15 s)"
+T0=$(date +%s%N)
+post '{"qualite":{"taux":44100}}' >/dev/null
+S=$(attendre_etat '"taux":44100' 150) || true
+T1=$(date +%s%N)
+verifie "taux effectif = 44100 sans relance" '"taux":44100' "$S"
+verifie "taux enregistré = 44100" '"taux_prochain":44100' "$S"
+echo "durée changement de taux : $(( (T1 - T0) / 1000000 )) ms"
+verifie "après taux : jeu activé conservé" '"name":"Open Diapason 8","on":true' "$S"
+verifie "après taux : volume conservé (0,37)" '"volume":0.37' "$S"
+verifie "après taux : réverbération conservée" "\"reverb\":$REV0" "$S"
+verifie "après taux : gain de division conservé (0,33)" '"gain":0.33' "$S"
+verifie "après taux : spatialisation conservée = 2" '"spatialisation":2' "$S"
+verifie "après taux : plafond de polyphonie conservé = 123" '"polyphonie_max":123' "$S"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$URL/api/orgue")
+if [ "$CODE" = "200" ]; then
+  ok "serveur joignable pendant/après le changement de taux"
+else
+  echec "serveur muet après le changement de taux (HTTP $CODE)"
+fi
+XR2=$(champ_num "$S" xruns)
+if [ -n "$XR1" ] && [ -n "$XR2" ] && [ "$XR2" -ge "$XR1" ]; then
+  ok "xruns restent croissants après le changement de taux"
+else
+  echec "xruns non croissants après le changement de taux ($XR1→$XR2)"
+fi
+post '{"qualite":{"taux":48000}}' >/dev/null
+S=$(attendre_etat '"taux":48000' 150) || true
+verifie "retour au taux 48000 effectif" '"taux":48000' "$S"
+
+echo "== limiteur et tête à chaud"
+post '{"qualite":{"limiteur":false,"tete_reverb":false}}' >/dev/null
+S=$(attendre_etat '"limiteur":false' 30) || true
+verifie "limiteur effectif = false sans relance" '"limiteur":false' "$S"
+verifie "limiteur enregistré = false" '"limiteur_prochain":false' "$S"
+verifie "tête effective = false sans relance" '"tete_reverb":false' "$S"
+verifie "tête enregistrée = false" '"tete_reverb_prochain":false' "$S"
+
+echo "== périphérique à chaud : échec signalé, puis succès"
+post '{"qualite":{"peripherique":"hw:99,99"}}' >/dev/null
+S=$(attendre_etat '"audio_erreur":"p' 30) || true
+verifie "périphérique absent : audio_erreur renseigné" '"audio_erreur":"p' "$S"
+verifie "périphérique absent : valeur effective conservée" '"peripherique":""' "$S"
+verifie "périphérique absent : valeur enregistrée = hw:99,99" '"peripherique_prochain":"hw:99,99"' "$S"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$URL/api/orgue")
+if [ "$CODE" = "200" ]; then
+  ok "serveur joignable malgré le périphérique absent"
+else
+  echec "serveur muet après le périphérique absent (HTTP $CODE)"
+fi
+post '{"qualite":{"peripherique":""}}' >/dev/null
+S=$(attendre_etat '"audio_erreur":""' 30) || true
+verifie "périphérique valide : effectif = défaut" '"peripherique":""' "$S"
+verifie "périphérique valide : audio_erreur vidé" '"audio_erreur":""' "$S"
+
+echo "== boucle de 10 changements de période"
+for p in 256 512 1024 128 2048 256 512 128 1024 512; do
+  post "{\"qualite\":{\"periode\":$p}}" >/dev/null
+  sleep 0.1
+done
+S=$(attendre_etat '"periode":512' 50) || true
+verifie "après la boucle : période effective = 512" '"periode":512' "$S"
+verifie "après la boucle : pas d'erreur audio" '"audio_erreur":""' "$S"
+SEQ1=$(champ_num "$S" seq)
+# seq ne s'incrémente qu'au changement : une petite modification prouve que
+# le fil audio traite encore les commandes et publie.
+post '{"gain":{"division":2,"value":0.61}}' >/dev/null
+sleep 0.3
+S2=$(get)
+SEQ2=$(champ_num "$S2" seq)
+if [ -n "$SEQ1" ] && [ -n "$SEQ2" ] && [ "$SEQ2" -gt "$SEQ1" ]; then
+  ok "le fil audio tourne encore (seq $SEQ1→$SEQ2)"
+else
+  echec "le fil audio semble arrêté (seq $SEQ1→$SEQ2)"
+fi
+
+echo "== sauvegarde pendant des changements de taux"
+(
+  for j in 1 2 3 4 5; do
+    post "{\"gain\":{\"division\":0,\"value\":0.$((j + 3))}}" >/dev/null
+    post "{\"reverb\":$((60 + j))}" >/dev/null
+    sleep 0.2
+  done
+) &
+BG=$!
+for i in 1 2 3 4 5; do
+  if [ $((i % 2)) -eq 1 ]; then T=44100; else T=48000; fi
+  post "{\"qualite\":{\"taux\":$T}}" >/dev/null
+  post "{\"gain\":{\"division\":1,\"value\":0.$((i + 2))}}" >/dev/null
+  sleep 0.1
+done
+wait "$BG"
+post '{"qualite":{"taux":48000}}' >/dev/null
+S=$(attendre_etat '"taux":48000' 150) || true
+verifie "alternances de taux : taux final = 48000" '"taux":48000' "$S"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$URL/api/orgue")
+if [ "$CODE" = "200" ]; then
+  ok "alternances de taux : serveur joignable"
+else
+  echec "alternances de taux : serveur muet (HTTP $CODE)"
+fi
+attendre_sauvegarde
+if command -v python3 >/dev/null 2>&1; then
+  if python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$ETAT" 2>/dev/null; then
+    ok "etat.json valide après les alternances"
+  else
+    echec "etat.json invalide après les alternances"
+  fi
+else
+  verifie "etat.json présent après les alternances" '"qualite"' "$(cat "$ETAT" 2>/dev/null || true)"
+fi
 
 echo "== persistance après relance (période, tête)"
-post '{"qualite":{"tete_reverb":false}}' >/dev/null
-attendre_publication
+post '{"qualite":{"periode":1024,"tete_reverb":false}}' >/dev/null
+S=$(attendre_etat '"periode":1024' 30) || true
 attendre_sauvegarde
 verifie "etat.json contient periode" '"periode":1024' "$(cat "$ETAT" 2>/dev/null || true)"
 arreter
-lancer "" 1 || exit 1
+lancer "" 1 "" "-" || exit 1
 S=$(get)
 verifie "après relance : période effective = 1024" '"periode":1024' "$S"
 verifie "après relance : période enregistrée = 1024" '"periode_prochain":1024' "$S"
@@ -438,17 +596,18 @@ verifie "après relance : tete_reverb_prochain = false" '"tete_reverb_prochain":
 
 echo "== tête modifiée en mode auto : le choix survit à la relance"
 effacer_etat
-lancer "" 1 || exit 1
+lancer "" 1 "" "-" || exit 1
 S=$(get)
 verifie "tête en auto : auto true au premier lancement" '"auto":true' "$S"
 verifie "tête en auto : tête enregistrée true" '"tete_reverb_prochain":true' "$S"
 R=$(post '{"qualite":{"tete_reverb":false}}')
-verifie "tête en auto : redemarrage_requis = true" '"redemarrage_requis":true' "$R"
+verifie_absent "tête en auto : pas de redemarrage_requis" '"redemarrage_requis"' "$R"
 verifie "tête en auto : tête enregistrée false" '"tete_reverb_prochain":false' "$R"
-attendre_publication
+S=$(attendre_etat '"tete_reverb":false' 30) || true
+verifie "tête en auto : tête effective false à chaud" '"tete_reverb":false' "$S"
 attendre_sauvegarde
 arreter
-lancer "" 1 || exit 1
+lancer "" 1 "" "-" || exit 1
 S=$(get)
 verifie "tête en auto : après relance auto = false" '"auto":false' "$S"
 verifie "tête en auto : après relance niveau = -1" '"niveau":-1' "$S"
@@ -461,7 +620,7 @@ attendre_sauvegarde
 
 echo "== ORGANUM_PERIODE imposé : valeur enregistrée intacte"
 arreter
-lancer "" 1 "" null 256 || exit 1
+lancer "" 1 "" "-" 256 || exit 1
 S=$(get)
 verifie "période effective = 256 (imposée)" '"periode":256' "$S"
 verifie "periode_impose = true" '"periode_impose":true' "$S"
@@ -483,7 +642,7 @@ effacer_etat
 lancer "" 1 "" "-" || exit 1
 R=$(post '{"qualite":{"peripherique":"hw:99,99","periode":1024}}')
 verifie "repli : périphérique enregistré = hw:99,99" '"peripherique_prochain":"hw:99,99"' "$R"
-verifie "repli : redemarrage_requis = true" '"redemarrage_requis":true' "$R"
+verifie_absent "repli : pas de redemarrage_requis" '"redemarrage_requis"' "$R"
 attendre_sauvegarde
 arreter
 lancer "" 1 "" "-" || exit 1

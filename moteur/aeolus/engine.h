@@ -270,7 +270,8 @@ public:
 
     /**
      * Active ou coupe la tête de convolution zéro latence de la réverbération.
-     * @note Réservé au démarrage, avant que le fil audio ne tourne : cela
+     * @note Appelable depuis le fil audio entre deux tampons, comme le
+     * changement d'IR déjà traité par processPendingIRSwitchEvents() ; cela
      * reconstruit le convolveur.
      */
     void setReverbZeroDelay(bool actif);

@@ -529,8 +529,9 @@ void Engine::setReverbIR(int num)
 
 void Engine::setReverbZeroDelay(bool actif)
 {
-    // Réservé au démarrage, avant que le fil audio ne tourne : la
-    // ré-application de l'IR reconstruit le convolveur.
+    // Appelable depuis le fil audio entre deux tampons : la ré-application
+    // de l'IR reconstruit le convolveur, comme le changement d'IR traité par
+    // processPendingIRSwitchEvents().
     _reverbZeroDelay = actif;
     setReverbIR(_selectedIR);
 }

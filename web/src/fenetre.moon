@@ -449,17 +449,14 @@ texte_calibration = (c) ->
     }
 
   -- Applique un ou plusieurs réglages. Avec options.qualite, c'est lui qui
-  -- enregistre et renvoie éventuellement {redemarrage_requis: true} ; sinon
-  -- on écrit directement les champs à chaud du moteur et une présélection
-  -- est décomposée en ses quatre champs.
+  -- enregistre et applique à chaud ; sinon on écrit directement les champs
+  -- à chaud du moteur et une présélection est décomposée en ses quatre
+  -- champs.
   regler_qualite = (payload) ->
     message_qualite = nil
     if qualite_opt and qualite_opt.regler
       ok, res = pcall qualite_opt.regler, payload
-      if ok
-        if type(res) == "table" and res.redemarrage_requis
-          message_qualite = "Réglage enregistré : au prochain démarrage"
-      else
+      if not ok then
         message_qualite = "Échec de l'enregistrement des réglages"
         Log kLogWarn, "fenêtre : qualité : #{res}" if Log
       seq = nil
@@ -840,7 +837,7 @@ texte_calibration = (c) ->
         if q.periode_impose == true
           etiquette_periode = "Période (imposée)"
         elseif q.periode_prochain != q.periode
-          etiquette_periode = "Période (au démarrage)"
+          etiquette_periode = "Période (en cours)"
         ui\texte tronquer(etiquette_periode, (l - 2 * MARGE) / 6 - ESPACE)
         for valeur in *{128, 256, 512, 1024, 2048}
           actif = q.periode_prochain == valeur
@@ -854,7 +851,7 @@ texte_calibration = (c) ->
         if q.taux_impose == true
           etiquette_taux = "Taux (imposé)"
         elseif q.taux_prochain != q.taux
-          etiquette_taux = "Taux (au démarrage)"
+          etiquette_taux = "Taux (en cours)"
         ui\texte tronquer(etiquette_taux, (l - 2 * MARGE) / 4 - ESPACE)
         for valeur in *{44100, 48000}
           actif = q.taux_prochain == valeur
@@ -879,16 +876,14 @@ texte_calibration = (c) ->
         elseif q.peripherique_prochain != q.peripherique
           actuel = if type(q.peripherique) == "string" and q.peripherique != ""
             q.peripherique else "défaut"
-          texte_periph = texte_periph .. " (au démarrage ; en cours : #{actuel})"
-        else
-          texte_periph = texte_periph .. " (au prochain démarrage)"
+          texte_periph = texte_periph .. " (en cours : #{actuel})"
         ui\texte tronquer(texte_periph, l - 2 * MARGE - ESPACE)
 
         if a_tete
           ui\ligne ligne, 1
           if q.tete_reverb_impose == true
             -- ORGANUM_REVERB_TETE force la valeur : l'afficher, sans
-            -- proposer un réglage que le prochain démarrage ignorerait.
+            -- proposer un réglage que la variable ignorerait.
             texte_tete = if q.tete_reverb == true
               "Tête de réverbération zéro latence : imposée par ORGANUM_REVERB_TETE"
             else
@@ -896,7 +891,7 @@ texte_calibration = (c) ->
             ui\texte tronquer(texte_tete, l - 2 * MARGE - ESPACE)
           else
             actif_tete = q.tete_reverb_prochain == true
-            etiquette_tete = "Tête de réverbération zéro latence (prochain démarrage)"
+            etiquette_tete = "Tête de réverbération zéro latence"
             if q.tete_reverb_prochain != q.tete_reverb
               etiquette_tete = etiquette_tete .. if q.tete_reverb == true then " — en cours : active" else " — en cours : coupée"
             nouveau = ui\choix etiquette_tete, actif_tete
@@ -908,11 +903,11 @@ texte_calibration = (c) ->
 
         ui\ligne ligne, 1
         message_affiche = message_qualite
+        if not message_affiche and type(q.audio_erreur) == "string" and q.audio_erreur != ""
+          message_affiche = "Reconfiguration audio : #{q.audio_erreur}"
         if not message_affiche and type(q.audio_repli) == "string" and q.audio_repli != ""
           message_affiche = "Repli audio : #{q.audio_repli}"
-        if not message_affiche
-          message_affiche = "Période, taux, périphérique, limiteur et tête : au prochain démarrage"
-        ui\texte tronquer(message_affiche, l - 2 * MARGE - ESPACE)
+        ui\texte tronquer(message_affiche or "", l - 2 * MARGE - ESPACE)
         ui\fin!
         ui\dessiner 30, 30, 30
       continue

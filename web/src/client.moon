@@ -269,6 +269,7 @@ JS = [[
     var caseLimiteur = document.getElementById('qualite-limiteur');
     var noteLimiteur = document.getElementById('qualite-limiteur-note');
     var ligneRepli = document.getElementById('qualite-repli');
+    var ligneErreur = document.getElementById('qualite-audio-erreur');
     var ligneCalibration = document.getElementById('qualite-calibration');
     var message = document.getElementById('qualite-message');
     var indisponible = document.getElementById('qualite-indisponible');
@@ -381,8 +382,7 @@ JS = [[
         if (curseurPolyphonie) { curseurPolyphonie.value = String(q.polyphonie_max); }
         if (valeurPolyphonie) { valeurPolyphonie.textContent = textePolyphonie(q.polyphonie_max); }
       }
-      // Tête de réverbération : le contrôle montre la valeur ENREGISTRÉE
-      // (prochain démarrage), pas seulement la valeur effective en cours.
+      // Tête de réverbération : le contrôle montre la valeur ENREGISTRÉE.
       if (caseTete && typeof q.tete_reverb_prochain === 'boolean') { caseTete.checked = q.tete_reverb_prochain; }
       if (caseTete) { caseTete.disabled = q.tete_reverb_impose === true; }
       if (noteTeteImpose) { noteTeteImpose.hidden = q.tete_reverb_impose !== true; }
@@ -452,6 +452,11 @@ JS = [[
         ligneRepli.textContent = repli ? ('Repli audio : ' + repli) : '';
         ligneRepli.hidden = !repli;
       }
+      if (ligneErreur) {
+        var erreur = typeof q.audio_erreur === 'string' ? q.audio_erreur : '';
+        ligneErreur.textContent = erreur ? ('Reconfiguration audio impossible : ' + erreur) : '';
+        ligneErreur.hidden = !erreur;
+      }
       if (ligneCalibration) {
         var texte = texteCalibration(q.calibration);
         ligneCalibration.textContent = texte;
@@ -481,9 +486,6 @@ JS = [[
         })
         .then(function (data) {
           enAttente -= 1;
-          if (data && data.redemarrage_requis) {
-            afficherMessage('Réglage enregistré : il s’appliquera au prochain démarrage.');
-          }
           maj(data);
         })
         .catch(function (err) {

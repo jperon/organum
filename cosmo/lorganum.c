@@ -38,11 +38,22 @@
 #define MAX_ASSOCIATIONS 16
 #define MAX_LIENS 8
 #define TOUS_CANAUX 16
+#define PERIPH_MAX 200
+#define ERREUR_MAX 256
 
 enum {
   CMD_JEU, CMD_GAIN, CMD_VOLUME, CMD_REVERB, CMD_MIDI, CMD_PANIQUE,
   CMD_CANAUX_DIVISION, CMD_CANAUX_CONTROLE, CMD_CANAUX_EXPRESSION,
   CMD_ASSOCIATION, CMD_NB_ASSOCIATIONS, CMD_LIEN, CMD_QUALITE,
+  CMD_LIMITEUR, CMD_TETE, CMD_RECONFIG,
+};
+
+// Demande de reconfiguration audio : le tube ne transporte que des
+// commandes de taille fixe, le nom du périphérique passe donc par le mmap
+// partagé, sous verrou atomique.
+struct demande_audio {
+  int taux, periode;
+  char peripherique[PERIPH_MAX + 1];
 };
 
 struct commande {
@@ -96,7 +107,10 @@ struct etat {
   int etape, netapes;  // combinaison courante (séquenceur), à partir de 0
   int midi_client, midi_port;
   int taux;
-  int periode, nb_periodes;  // demandés à l'ouverture (diagnostic)
+  int periode, nb_periodes;  // effectifs de l'ouverture courante
+  char peripherique[PERIPH_MAX + 1];  // effectif ("" = défaut)
+  int limiteur;  // effectif
+  char audio_erreur[ERREUR_MAX];  // dernier échec de reconfiguration
   unsigned erreurs_ecriture;  // audio_ecrire() a renvoyé une erreur
 };
 
@@ -107,6 +121,8 @@ struct etat {
 struct etat_partage {
   struct etat etat;
   atomic_uint canaux_actifs;  // bit n = canal n+1, éphémère
+  struct demande_audio demande_audio;
+  atomic_int verrou_demande;
 };
 
 static struct etat_partage *g_partage;
@@ -117,8 +133,18 @@ static audio_t *g_audio;
 static midi_t *g_midi;
 static int g_periode;
 static int g_taux;
+static char g_peripherique[PERIPH_MAX + 1];
+static int g_limiteur = 1;
+static char g_audio_erreur[ERREUR_MAX];
+static int g_xruns_base;  // xruns cumulés des descripteurs déjà fermés
+static struct demande_audio g_demande_pendante;
+static int g_demande_pendante_valide;
+static long g_dernier_essai_audio;
 static unsigned g_erreurs_ecriture;  // fil audio uniquement, publié par publier()
 static int g_maitre;  // processus qui fait tourner le moteur
+// Protège g_moteur entre le fil audio (recréation au changement de taux) et
+// le processus principal qui le sérialise (l_sauvegarder).
+static pthread_mutex_t g_moteur_verrou = PTHREAD_MUTEX_INITIALIZER;
 // Propres au fil audio ; publiées dans g_etat.
 static struct association g_associations[MAX_ASSOCIATIONS];
 static int g_nassociations;
@@ -187,10 +213,21 @@ static void publier(void) {
     }
   }
   float v = aeolus_lire_volume(g_moteur), r = aeolus_lire_reverb(g_moteur);
-  int x = audio_xruns(g_audio);
+  int x = g_xruns_base + (g_audio ? audio_xruns(g_audio) : 0);
   if (v != e->volume) e->volume = v, change = 1;
   if (r != e->reverb) e->reverb = r, change = 1;
   if (x != e->xruns) e->xruns = x, change = 1;
+  if (g_taux != e->taux) e->taux = g_taux, change = 1;
+  if (g_periode != e->periode) e->periode = g_periode, change = 1;
+  if (g_limiteur != e->limiteur) e->limiteur = g_limiteur, change = 1;
+  if (strcmp(g_peripherique, e->peripherique) != 0) {
+    strlcpy(e->peripherique, g_peripherique, sizeof(e->peripherique));
+    change = 1;
+  }
+  if (strcmp(g_audio_erreur, e->audio_erreur) != 0) {
+    strlcpy(e->audio_erreur, g_audio_erreur, sizeof(e->audio_erreur));
+    change = 1;
+  }
   {
     int qualite[4] = {
         aeolus_lire_qualite(g_moteur, 0), aeolus_lire_qualite(g_moteur, 1),
@@ -294,6 +331,18 @@ static void appliquer(const struct commande *c) {
       // que le champ b (8 bits) tronquerait.
       aeolus_qualite(g_moteur, c->a, c->masque);
       break;
+    case CMD_LIMITEUR:
+      g_limiteur = c->a != 0;
+      aeolus_limiteur(g_moteur, g_limiteur);
+      break;
+    case CMD_TETE:
+      // ORGANUM_REVERB_TETE reste prioritaire.
+      if (!g_etat->tete_reverb_impose)
+        aeolus_reverb_tete(g_moteur, c->a != 0);
+      break;
+    case CMD_RECONFIG:
+      // Traité par boucle_audio, qui possède les tampons de rendu.
+      break;
   }
 }
 
@@ -313,6 +362,198 @@ static int associer(unsigned char statut, unsigned char cc, unsigned char v) {
     }
   }
   return pris;
+}
+
+
+// --- Reconfiguration audio à chaud, dans le fil audio uniquement ----------
+
+static void verrou_prendre(atomic_int *v) {
+  int attendu = 0;
+  while (!atomic_compare_exchange_weak_explicit(
+      v, &attendu, 1, memory_order_acquire, memory_order_relaxed))
+    attendu = 0;
+}
+
+static void verrou_rendre(atomic_int *v) {
+  atomic_store_explicit(v, 0, memory_order_release);
+}
+
+static void copier_demande(struct demande_audio *d) {
+  if (!g_partage) {
+    memset(d, 0, sizeof(*d));
+    return;
+  }
+  verrou_prendre(&g_partage->verrou_demande);
+  *d = g_partage->demande_audio;
+  verrou_rendre(&g_partage->verrou_demande);
+}
+
+static void fermer_audio_cumuler(void) {
+  if (g_audio) {
+    g_xruns_base += audio_xruns(g_audio);
+    audio_fermer(g_audio);
+    g_audio = NULL;
+  }
+}
+
+static int ouvrir_audio_cfg(const struct demande_audio *d) {
+  if (d->taux <= 0 || d->periode <= 0) return 0;
+  g_audio = audio_ouvrir(d->peripherique[0] ? d->peripherique : NULL, d->taux, 2,
+                         d->periode, 3);
+  return g_audio != NULL;
+}
+
+static void erreur_audio(const struct demande_audio *d) {
+  const char *detail = audio_derniere_erreur();
+  snprintf(g_audio_erreur, sizeof(g_audio_erreur),
+           "périphérique %s : %s",
+           d->peripherique[0] ? d->peripherique : "par défaut",
+           (detail && detail[0]) ? detail : "ouverture impossible");
+}
+
+struct sauvegarde_moteur {
+  char *json;
+  float volume, reverb;
+  float gains[MAX_DIVISIONS];
+  int ndiv;
+  int qualite[4];
+  int limiteur, tete;
+};
+
+static void capturer_moteur(struct sauvegarde_moteur *s) {
+  memset(s, 0, sizeof(*s));
+  // Une combinaison n'est mémorisée qu'en la quittant : capture explicite
+  // avant de sérialiser.
+  aeolus_capturer_etape(g_moteur);
+  s->json = aeolus_sauvegarder(g_moteur);
+  s->volume = aeolus_lire_volume(g_moteur);
+  s->reverb = aeolus_lire_reverb(g_moteur);
+  s->ndiv = aeolus_nb_divisions(g_moteur);
+  if (s->ndiv > MAX_DIVISIONS) s->ndiv = MAX_DIVISIONS;
+  for (int d = 0; d < s->ndiv; ++d) s->gains[d] = aeolus_lire_gain(g_moteur, d);
+  for (int q = 0; q < 4; ++q) s->qualite[q] = aeolus_lire_qualite(g_moteur, q);
+  s->limiteur = aeolus_lire_limiteur(g_moteur);
+  s->tete = aeolus_lire_reverb_tete(g_moteur);
+}
+
+static void appliquer_sauvegarde(void *moteur, struct sauvegarde_moteur *s) {
+  if (s->json) aeolus_restaurer(moteur, s->json);
+  aeolus_volume(moteur, s->volume);
+  aeolus_reverb(moteur, s->reverb);
+  for (int d = 0; d < s->ndiv; ++d) aeolus_gain(moteur, d, s->gains[d]);
+  for (int q = 0; q < 4; ++q) aeolus_qualite(moteur, q, s->qualite[q]);
+  aeolus_limiteur(moteur, s->limiteur);
+  aeolus_reverb_tete(moteur, s->tete);
+}
+
+// Recrée le moteur à un nouveau taux externe. Le verrou empêche
+// l_sauvegarder (processus principal) de lire un moteur en cours de
+// destruction ; il n'est posé que pendant la recréation, jamais à chaque
+// tampon. L'ancien moteur n'est détruit qu'après la réussite du nouveau.
+static int recreer_moteur(int taux) {
+  int ok = 0;
+  pthread_mutex_lock(&g_moteur_verrou);
+  struct sauvegarde_moteur s;
+  capturer_moteur(&s);
+  void *nouveau = aeolus_creer(taux);
+  if (nouveau) {
+    appliquer_sauvegarde(nouveau, &s);
+    void *ancien = g_moteur;
+    g_moteur = nouveau;
+    aeolus_detruire(ancien);
+    ok = 1;
+  }
+  free(s.json);
+  pthread_mutex_unlock(&g_moteur_verrou);
+  return ok;
+}
+
+static long maintenant_ms(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+// Applique une demande : ferme, ouvre la nouvelle sortie, réalloue les
+// tampons et recrée le moteur si le taux change. En cas d'échec, rouvre
+// l'ancienne configuration ; si elle ne s'ouvre pas non plus, la demande
+// reste en attente et sera réessayée par la boucle.
+static int appliquer_demande(struct demande_audio *dem, float **bg,
+                             float **bd, float **be) {
+  // Rien à changer : la configuration demandée est déjà effective. On
+  // efface seulement une erreur précédente (elle est résolue).
+  if (g_audio && dem->taux == g_taux && dem->periode == g_periode &&
+      strcmp(dem->peripherique, g_peripherique) == 0) {
+    g_audio_erreur[0] = '\0';
+    g_demande_pendante_valide = 0;
+    return 1;
+  }
+  int ancien_taux = g_taux, ancien_periode = g_periode;
+  char ancien_periph[PERIPH_MAX + 1];
+  strlcpy(ancien_periph, g_peripherique, sizeof(ancien_periph));
+  int etait_ouvert = g_audio != NULL;
+
+  if (etait_ouvert) fermer_audio_cumuler();
+
+  if (!ouvrir_audio_cfg(dem)) {
+    struct demande_audio echec = *dem;
+    erreur_audio(&echec);
+    struct demande_audio ancienne = {ancien_taux, ancien_periode, {0}};
+    strlcpy(ancienne.peripherique, ancien_periph, sizeof(ancienne.peripherique));
+    if (!ouvrir_audio_cfg(&ancienne)) {
+      g_demande_pendante = *dem;
+      g_demande_pendante_valide = 1;
+    }
+    return 0;
+  }
+
+  // Nouvelle sortie ouverte : préparer les tampons avant de toucher au
+  // moteur, pour pouvoir revenir en arrière sans état à moitié changé.
+  float *ng = *bg, *nd = *bd, *ne = *be;
+  int nouveaux_tampons = dem->periode != ancien_periode;
+  if (nouveaux_tampons) {
+    ng = malloc((size_t)dem->periode * sizeof(float));
+    nd = malloc((size_t)dem->periode * sizeof(float));
+    ne = malloc((size_t)dem->periode * 2 * sizeof(float));
+    if (!ng || !nd || !ne) {
+      free(ng); free(nd); free(ne);
+      struct demande_audio ancienne = {ancien_taux, ancien_periode, {0}};
+      strlcpy(ancienne.peripherique, ancien_periph, sizeof(ancienne.peripherique));
+      fermer_audio_cumuler();
+      if (!ouvrir_audio_cfg(&ancienne)) {
+        g_demande_pendante = *dem;
+        g_demande_pendante_valide = 1;
+      }
+      snprintf(g_audio_erreur, sizeof(g_audio_erreur),
+               "mémoire insuffisante pour la période %d", dem->periode);
+      return 0;
+    }
+  }
+
+  if (dem->taux != ancien_taux && !recreer_moteur(dem->taux)) {
+    if (nouveaux_tampons) { free(ng); free(nd); free(ne); }
+    struct demande_audio ancienne = {ancien_taux, ancien_periode, {0}};
+    strlcpy(ancienne.peripherique, ancien_periph, sizeof(ancienne.peripherique));
+    fermer_audio_cumuler();
+    if (!ouvrir_audio_cfg(&ancienne)) {
+      g_demande_pendante = *dem;
+      g_demande_pendante_valide = 1;
+    }
+    snprintf(g_audio_erreur, sizeof(g_audio_erreur),
+             "recréation du moteur impossible au taux %d", dem->taux);
+    return 0;
+  }
+
+  if (nouveaux_tampons) {
+    free(*bg); free(*bd); free(*be);
+    *bg = ng; *bd = nd; *be = ne;
+  }
+  g_taux = dem->taux;
+  g_periode = dem->periode;
+  strlcpy(g_peripherique, dem->peripherique, sizeof(g_peripherique));
+  g_audio_erreur[0] = '\0';
+  g_demande_pendante_valide = 0;
+  return 1;
 }
 
 static void *boucle_audio(void *arg) {
@@ -355,8 +596,39 @@ static void *boucle_audio(void *arg) {
       }
     ssize_t lu;
     while ((lu = read(g_tube[0], cmds, sizeof(cmds))) > 0)
-      for (size_t i = 0; i < lu / sizeof(struct commande); ++i)
-        appliquer(&cmds[i]);
+      for (size_t i = 0; i < lu / sizeof(struct commande); ++i) {
+        if (cmds[i].type == CMD_RECONFIG) {
+          struct demande_audio dem;
+          copier_demande(&dem);
+          appliquer_demande(&dem, &g, &d, &entrelace);
+        } else {
+          appliquer(&cmds[i]);
+        }
+      }
+
+    if (!g_audio) {
+      // Sortie fermée après un échec : réessai espacé, sans rendre ni
+      // quitter le processus, jusqu'à réussite ou nouvelle demande.
+      long t = maintenant_ms();
+      if (t - g_dernier_essai_audio >= 1000) {
+        g_dernier_essai_audio = t;
+        struct demande_audio dem;
+        if (g_demande_pendante_valide) {
+          dem = g_demande_pendante;
+        } else {
+          dem.taux = g_taux;
+          dem.periode = g_periode;
+          strlcpy(dem.peripherique, g_peripherique, sizeof(dem.peripherique));
+        }
+        appliquer_demande(&dem, &g, &d, &entrelace);
+      }
+      if (!g_audio) {
+        struct timespec pause = {0, 20 * 1000 * 1000};
+        nanosleep(&pause, NULL);
+        if (++tours % 4 == 0) publier();
+        continue;
+      }
+    }
 
     aeolus_rendre(g_moteur, g, d, g_periode);
     for (int i = 0; i < g_periode; ++i) {
@@ -499,6 +771,7 @@ static int l_demarrer(lua_State *L) {
   }
   memset(g_partage, 0, sizeof(*g_partage));
   g_etat = &g_partage->etat;
+  atomic_init(&g_partage->verrou_demande, 0);
   if (pipe(g_tube) < 0) {
     liberer_demarrage();
     lua_pushnil(L);
@@ -508,6 +781,13 @@ static int l_demarrer(lua_State *L) {
   fcntl(g_tube[0], F_SETFL, O_NONBLOCK);
 
   g_moteur = aeolus_creer(taux);
+  g_limiteur = limiteur;
+  g_taux = taux;
+  g_xruns_base = 0;
+  g_audio_erreur[0] = '\0';
+  g_demande_pendante_valide = 0;
+  strlcpy(g_peripherique, peripherique ? peripherique : "",
+          sizeof(g_peripherique));
   // Le limiteur est actif par défaut dans aeolus_creer ; l'option ne sert
   // qu'à le couper (mesure, diagnostic).
   aeolus_limiteur(g_moteur, limiteur);
@@ -585,6 +865,8 @@ static int l_demarrer(lua_State *L) {
   e->taux = taux;
   e->periode = g_periode;
   e->nb_periodes = nb_periodes;
+  e->limiteur = limiteur;
+  strlcpy(e->peripherique, g_peripherique, sizeof(e->peripherique));
   e->netapes = aeolus_nb_etapes(g_moteur);
   midi_adresse(g_midi, &e->midi_client, &e->midi_port);
   e->ndivisions = aeolus_nb_divisions(g_moteur);
@@ -626,6 +908,48 @@ static int l_demarrer(lua_State *L) {
   return 1;
 }
 
+// organum.limiteur(actif) : applique à chaud, dans le fil audio.
+static int l_limiteur(lua_State *L) {
+  envoyer(L, (struct commande){CMD_LIMITEUR, .a = lua_toboolean(L, 1) ? 1 : 0});
+  return 0;
+}
+
+// organum.tete_reverb(actif) : applique à chaud, sauf ORGANUM_REVERB_TETE.
+static int l_tete_reverb(lua_State *L) {
+  envoyer(L, (struct commande){CMD_TETE, .a = lua_toboolean(L, 1) ? 1 : 0});
+  return 0;
+}
+
+// organum.reconfigurer_audio{taux=, periode=, peripherique=} : dépose la
+// demande complète dans le mmap partagé, puis réveille le fil audio par le
+// tube. Le nom du périphérique ne tient pas dans struct commande.
+static int l_reconfigurer_audio(lua_State *L) {
+  if (!g_etat || !g_partage)
+    return luaL_error(L, "organum non démarré (organum.demarrer dans .init.lua)");
+  struct demande_audio d;
+  memset(&d, 0, sizeof(d));
+  d.taux = g_etat->taux;
+  d.periode = g_etat->periode;
+  strlcpy(d.peripherique, g_etat->peripherique, sizeof(d.peripherique));
+  if (lua_istable(L, 1)) {
+    lua_getfield(L, 1, "taux");
+    if (lua_isinteger(L, -1)) d.taux = (int)lua_tointeger(L, -1);
+    lua_getfield(L, 1, "periode");
+    if (lua_isinteger(L, -1)) d.periode = (int)lua_tointeger(L, -1);
+    lua_getfield(L, 1, "peripherique");
+    if (lua_isstring(L, -1))
+      strlcpy(d.peripherique, lua_tostring(L, -1), sizeof(d.peripherique));
+    lua_pop(L, 3);
+  }
+  if (d.taux <= 0 || d.periode <= 0)
+    return luaL_error(L, "reconfigurer_audio : taux ou période invalide");
+  verrou_prendre(&g_partage->verrou_demande);
+  g_partage->demande_audio = d;
+  verrou_rendre(&g_partage->verrou_demande);
+  envoyer(L, (struct commande){CMD_RECONFIG});
+  return 0;
+}
+
 static struct etat *etat_ou_erreur(lua_State *L) {
   if (!g_etat) luaL_error(L, "organum non démarré (organum.demarrer dans .init.lua)");
   return g_etat;
@@ -642,7 +966,9 @@ static void envoyer(lua_State *L, struct commande c) {
 //                   canaux_controle, canaux_expression, canaux_actifs,
 //                   qualite={bruit_attaque, instabilite, spatialisation,
 //                            polyphonie_max, tete_reverb (effectif),
-//                            tete_reverb_impose},
+//                            tete_reverb_impose, peripherique (effectif,
+//                            "" = défaut), limiteur (effectif),
+//                            audio_erreur (dernier échec de reconfiguration)},
 //                   divisions={{nom, gain, jeux={{nom, actif}, …}}, …}}
 // canaux_actifs est éphémère (activité des 250 dernières ms) et hors de seq.
 static int l_etat(lua_State *L) {
@@ -683,6 +1009,12 @@ static int l_etat(lua_State *L) {
   lua_pushboolean(L, copie.tete_reverb), lua_setfield(L, -2, "tete_reverb");
   lua_pushboolean(L, copie.tete_reverb_impose),
       lua_setfield(L, -2, "tete_reverb_impose");
+  lua_pushstring(L, copie.peripherique);
+  lua_setfield(L, -2, "peripherique");
+  lua_pushboolean(L, copie.limiteur);
+  lua_setfield(L, -2, "limiteur");
+  lua_pushstring(L, copie.audio_erreur);
+  lua_setfield(L, -2, "audio_erreur");
   lua_setfield(L, -2, "qualite");
   lua_createtable(L, copie.nassociations, 0);
   for (int i = 0; i < copie.nassociations; ++i) {
@@ -791,7 +1123,9 @@ static int l_panique(lua_State *L) {
 static int l_sauvegarder(lua_State *L) {
   if (!g_moteur || getpid() != g_maitre)
     return luaL_error(L, "organum.sauvegarder : processus principal seulement");
+  pthread_mutex_lock(&g_moteur_verrou);
   char *json = aeolus_sauvegarder(g_moteur);
+  pthread_mutex_unlock(&g_moteur_verrou);
   if (!json) return 0;
   lua_pushstring(L, json);
   free(json);
@@ -936,6 +1270,8 @@ static const luaL_Reg kFonctions[] = {
     {"jeu", l_jeu},           {"gain", l_gain},     {"volume", l_volume},
     {"reverb", l_reverb},     {"midi", l_midi},     {"panique", l_panique},
     {"qualite", l_qualite}, {"calibrer", l_calibrer},
+    {"limiteur", l_limiteur}, {"tete_reverb", l_tete_reverb},
+    {"reconfigurer_audio", l_reconfigurer_audio},
     {"canaux_division", l_canaux_division},
     {"canaux_controle", l_canaux_controle},
     {"canaux_expression", l_canaux_expression},
