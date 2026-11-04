@@ -47,13 +47,16 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   Les fichiers `cosmo/plateforme_*.c` incluent ces sources ; make ne suit pas
   ces inclusions (faire `touch` après modification).
 - `web/src/init.moon` : démarrage, API HTTP (`/api/orgue`, `/api/midi`,
-  `/api/volume`), persistance. `page.moon`, `page_midi.moon`, `client.moon`,
-  `style.moon` : interface. `web/src/.lua/html.moon` : générateur HTML.
+  `/api/volume`), persistance. `page.moon` (orgue), `page_midi.moon`
+  (`/midi`), `page_qualite.moon` (`/qualite`), `client.moon` (JS de la page
+  orgue), `style.moon` : interface. `web/src/.lua/html.moon` : générateur
+  HTML.
 - Réglages de qualité : champs du moteur dans `cosmo/lorganum.c`
   (`CMD_QUALITE`, fonction Lua `organum.qualite`, `organum.demarrer{qualite,
   tete_reverb}`) ; présélections, validation de `POST /api/orgue {qualite}`,
   `ORGANUM_QUALITE` et persistance (clé `qualite` d'`etat.json`) dans
-  `web/src/init.moon`. Tous les réglages s'appliquent à chaud, sans bouton
+  `web/src/init.moon`, panneau dédié `web/src/page_qualite.moon`. Tous les
+  réglages s'appliquent à chaud, sans bouton
   de redémarrage : limiteur (`CMD_LIMITEUR`) et tête (`CMD_TETE`) par le
   tube, période/taux/périphérique par `organum.reconfigurer_audio{...}`
   (`CMD_RECONFIG`, demande complète dans le mmap partagé). Le fil audio

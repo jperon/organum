@@ -44,92 +44,6 @@ division_html = (di, div, divisions) ->
     #liens > 0 and h.div(class: "links", table.unpack liens) or "",
     h.button class: "btn small cancel-division", ["data-division"]: d, type: "button", "Tout annuler"
 
--- Section « Qualité » : les valeurs initiales reproduisent les réglages par
--- défaut ; client.moon les remplace dès la première lecture de /api/orgue.
--- Tous les contrôles sont nommés par leur identifiant `qualite-…`.
-option_qualite = (valeur, nom, choisi) ->
-  attrs = {value: valeur}
-  attrs.selected = true if choisi
-  attrs.disabled = true if valeur == "-1"
-  h.option attrs, nom
-
-niveaux_qualite = {"auto", "0", "1", "2", "3", "-1"}
-noms_niveaux = {auto: "Auto", "0": "0", "1": "1", "2": "2", "3": "3", "-1": "Personnalisé"}
-
--- Temps d'une période, calculé avec le taux par défaut ; client.moon le
--- recalcule ensuite avec le taux enregistré (X_prochain).
-duree_periode = (periode, taux = 48000) ->
-  texte = string.format "%.1f", tonumber(periode) * 1000 / taux
-  texte\gsub "%.", ","
-
-periodes = {"128", "256", "512", "1024", "2048"}
-option_periode = (valeur) ->
-  attrs = {value: valeur}
-  attrs.selected = true if valeur == "512"
-  h.option attrs, "#{valeur} (#{duree_periode valeur} ms)"
-
-taux_valides = {"44100", "48000"}
-option_taux = (valeur) ->
-  attrs = {value: valeur}
-  attrs.selected = true if valeur == "48000"
-  h.option attrs, valeur
-
-qualite_html = ->
-  h.section class: "qualite", id: "qualite", ["aria-labelledby"]: "qualite-titre",
-    h.h2 class: "qualite-titre", id: "qualite-titre", "Qualité",
-    h.p class: "note qualite-indisponible", id: "qualite-indisponible", hidden: true,
-      "Réglages de qualité indisponibles sur ce serveur.",
-    h.div class: "qualite-corps",
-      h.label class: "qualite-champ",
-        h.span "Niveau",
-        h.select id: "qualite-niveau", ["aria-label"]: "Niveau de qualité",
-          table.unpack [option_qualite v, noms_niveaux[v], v == "3" for v in *niveaux_qualite],
-      h.div class: "qualite-cases",
-        h.label class: "qualite-case",
-          h.input type: "checkbox", id: "qualite-bruit", checked: true,
-          h.span "Bruit d'attaque",
-        h.label class: "qualite-case",
-          h.input type: "checkbox", id: "qualite-instabilite", checked: true,
-          h.span "Instabilité",
-      h.label class: "qualite-champ",
-        h.span "Spatialisation",
-        h.select id: "qualite-spatialisation", ["aria-label"]: "Spatialisation",
-          h.option value: "0", "Coupée",
-          h.option value: "1", "Simplifiée",
-          h.option value: "2", selected: true, "Complète",
-      h.label class: "qualite-champ qualite-polyphonie",
-        h.span "Polyphonie maximale",
-        h.input type: "range", id: "qualite-polyphonie", min: "0", max: "512", step: "1", value: "0", ["aria-label"]: "Polyphonie maximale",
-        h.output id: "qualite-polyphonie-valeur", ["for"]: "qualite-polyphonie", "Illimitée",
-      h.label class: "qualite-champ qualite-demarrage",
-        h.span "Période",
-        h.select id: "qualite-periode", ["aria-label"]: "Période audio",
-          table.unpack [option_periode v for v in *periodes],
-        h.span class: "note qualite-note", id: "qualite-periode-note", hidden: true,
-      h.label class: "qualite-champ qualite-demarrage",
-        h.span "Taux d'échantillonnage",
-        h.select id: "qualite-taux", ["aria-label"]: "Taux d'échantillonnage",
-          table.unpack [option_taux v for v in *taux_valides],
-        h.span class: "note qualite-note", id: "qualite-taux-note", hidden: true,
-      h.label class: "qualite-champ qualite-demarrage",
-        h.span "Périphérique audio",
-        h.input type: "text", id: "qualite-peripherique", maxlength: "200", placeholder: "Défaut", ["aria-label"]: "Périphérique audio",
-        h.span class: "note qualite-note", id: "qualite-peripherique-note", hidden: true,
-      h.label class: "qualite-case qualite-demarrage",
-        h.input type: "checkbox", id: "qualite-limiteur", checked: true,
-        h.span "Limiteur",
-        h.span class: "note qualite-note", id: "qualite-limiteur-note", hidden: true,
-      h.label class: "qualite-case qualite-tete",
-        h.input type: "checkbox", id: "qualite-tete", checked: true,
-        h.span "Tête de réverbération zéro latence",
-        h.span class: "note qualite-note", id: "qualite-tete-etat", hidden: true,
-    h.p class: "note", id: "qualite-tete-impose", hidden: true,
-      "Valeur imposée par ORGANUM_REVERB_TETE : non modifiable ici.",
-    h.p class: "note qualite-repli", id: "qualite-repli", hidden: true,
-    h.p class: "note qualite-erreur", id: "qualite-audio-erreur", hidden: true,
-    h.p class: "note qualite-calibration", id: "qualite-calibration", hidden: true,
-    h.p class: "note qualite-message", id: "qualite-message", role: "status", ["aria-live"]: "polite", hidden: true
-
 (divisions, steps = 32) ->
   page = h.html lang: "fr",
     h.head {},
@@ -159,9 +73,9 @@ qualite_html = ->
               h.input type: "range", id: "reverb", min: "0", max: "127", step: "1", value: "64",
             h.button type: "button", class: "btn panic", id: "panic", "Panique",
             h.a class: "btn small", href: "/midi", "MIDI",
+            h.a class: "btn small", href: "/qualite", "Qualité",
           h.p class: "note", "L'affichage reflète l'état mémorisé par le serveur ; il peut différer si les jeux sont tirés ailleurs.",
           h.div class: "divisions", table.unpack [division_html di - 1, div, divisions for di, div in ipairs divisions],
-          qualite_html!,
           h.p class: "note", h.a(href: "https://github.com/jperon/organum", "Code source (AGPL-3.0)"),
       h.script client
 

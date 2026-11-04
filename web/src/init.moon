@@ -1169,6 +1169,7 @@ handle_midi = ->
     send_json_405 "GET, POST"
 
 page_midi = require "page_midi"
+page_qualite = require "page_qualite"
 
 page = require "page"
 
@@ -1204,6 +1205,10 @@ _G.OnHttpRequest = ->
     SetStatus 200
     SetHeader "Content-Type", "text/html; charset=utf-8"
     Write page_midi!
+  elseif path == "/qualite"
+    SetStatus 200
+    SetHeader "Content-Type", "text/html; charset=utf-8"
+    Write page_qualite!
   elseif path == "/"
     SetStatus 200
     SetHeader "Content-Type", "text/html; charset=utf-8"
