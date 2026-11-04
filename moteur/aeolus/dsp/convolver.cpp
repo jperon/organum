@@ -34,8 +34,7 @@ using ConvHead = dsp::CascadeConvolver<
                       dsp::FFT<128>,
                       dsp::FFT<256>,
                       dsp::FFT<512>,
-                      dsp::FFT<1024>,
-                      dsp::FFT<2048>
+                      dsp::FFT<1024>
                   >;
 
 static_assert(ConvHead::Length == Convolver::BlockSize, "Header block size is wrong");

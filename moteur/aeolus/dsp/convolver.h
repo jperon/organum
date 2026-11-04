@@ -48,7 +48,7 @@ public:
     constexpr static float DefaultGain = 1.0f;
 
     /// Single convolution block size (in number of samples).
-    constexpr static size_t BlockSize = 4096;
+    constexpr static size_t BlockSize = 2048;
 
     Convolver();
     ~Convolver();
