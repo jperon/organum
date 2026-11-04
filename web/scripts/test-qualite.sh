@@ -623,6 +623,22 @@ PYMIDI
     else
       echec "accord tenu : charge non évaluée (pointe=$CHARGE_POINTE, évaluée=$CHARGE_EVALUEE)"
     fi
+    # Point 3 : un réglage remet réellement la mesure à zéro, y compris le
+    # niveau publié (qui fait alors avancer seq) et les xruns récents.
+    NIVEAU_AVANT=$(curl -s "$URL/api/orgue" | python3 -c 'import json,sys; print(json.load(sys.stdin)["qualite"]["charge_niveau"])' 2>/dev/null || echo 0)
+    SEQ_AVANT=$(curl -s "$URL/api/orgue" | python3 -c 'import json,sys; print(json.load(sys.stdin)["seq"])' 2>/dev/null || echo 0)
+    post '{"qualite":{"instabilite":false}}' >/dev/null
+    sleep 0.3
+    S=$(get)
+    NIVEAU_APRES=$(printf '%s' "$S" | python3 -c 'import json,sys; print(json.load(sys.stdin)["qualite"]["charge_niveau"])' 2>/dev/null || echo inconnu)
+    RECENTS_APRES=$(printf '%s' "$S" | python3 -c 'import json,sys; print(json.load(sys.stdin)["qualite"]["xruns_recents"])' 2>/dev/null || echo inconnu)
+    SEQ_APRES=$(printf '%s' "$S" | python3 -c 'import json,sys; print(json.load(sys.stdin)["seq"])' 2>/dev/null || echo 0)
+    if [ "$NIVEAU_AVANT" -gt 0 ] 2>/dev/null && [ "$NIVEAU_APRES" = "0" ] &&
+       [ "$RECENTS_APRES" = "0" ] && [ "$SEQ_APRES" -gt "$SEQ_AVANT" ] 2>/dev/null; then
+      ok "réglage : mesure remise à zéro (niveau $NIVEAU_AVANT→0, seq $SEQ_AVANT→$SEQ_APRES)"
+    else
+      echec "réglage : mesure non remise à zéro (niveau $NIVEAU_AVANT→$NIVEAU_APRES, xruns récents=$RECENTS_APRES, seq $SEQ_AVANT→$SEQ_APRES)"
+    fi
   else
     echo "INFO  : port MIDI Organum introuvable, mesure de charge non jouée"
     aplaymidi -l 2>&1 | sed 's/^/        /'
