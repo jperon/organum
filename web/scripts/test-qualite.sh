@@ -841,6 +841,91 @@ unset ALSA_CONFIG_PATH
 
 arreter
 
+echo "== volume moteur : action POST distincte du volume système"
+effacer_etat
+lancer "" 1 "" "-" || exit 1
+S=$(get)
+verifie "volume moteur présent dans GET" '"volume":' "$S"
+SYS_AVANT=$(curl -s "$URL/api/volume")
+R=$(post '{"volume":0.25}')
+verifie "POST volume 0.25 accepté" '"ok":true' "$R"
+S=$(attendre_etat '"volume":0.25' 30) || true
+verifie "GET : volume moteur = 0.25" '"volume":0.25' "$S"
+SYS_APRES=$(curl -s "$URL/api/volume")
+if [ "$SYS_AVANT" = "$SYS_APRES" ]; then
+  ok "POST /api/orgue volume : /api/volume inchangé"
+else
+  echec "POST /api/orgue volume a modifié /api/volume ($SYS_AVANT → $SYS_APRES)"
+fi
+
+for BAD in '{"volume":"0.5"}' '{"volume":-0.1}' '{"volume":1.1}' '{"volume":null}' \
+           '{"volume":0.25,"reverb":30}'; do
+  CODE=$(code_post "$BAD")
+  if [ "$CODE" = "400" ]; then
+    ok "volume invalide refusé (400) : $BAD"
+  else
+    echec "volume invalide $BAD : HTTP $CODE au lieu de 400"
+  fi
+done
+
+attendre_sauvegarde
+verifie "etat.json contient le volume moteur 0.25" '"volume":0.25' "$(cat "$ETAT" 2>/dev/null || true)"
+arreter
+lancer "" 1 "" "-" || exit 1
+S=$(get)
+verifie "après relance : volume moteur = 0.25" '"volume":0.25' "$S"
+
+echo "== pédale MIDI associée à volume : e.volume évolue, /api/volume intact"
+if command -v python3 >/dev/null 2>&1 &&
+   command -v aplaymidi >/dev/null 2>&1; then
+  CLIENT_MIDI=$(env -u ALSA_CONFIG_PATH aplaymidi -l 2>/dev/null | awk '/Organum/ { split($1, a, ":"); print a[1]; exit }')
+  if [ -n "$CLIENT_MIDI" ]; then
+    R=$(curl -s -X POST -H 'Content-Type: application/json' \
+      -d '{"associations":[{"cc":1,"cible":"volume"}]}' "$URL/api/midi")
+    verifie "association CC1 -> volume enregistrée" '"cible":"volume"' "$R"
+    sleep 0.2
+    if command -v aseqsend >/dev/null 2>&1; then
+      env -u ALSA_CONFIG_PATH aseqsend -p "$CLIENT_MIDI:0" "b0 01 40" >/dev/null 2>&1 || true
+    else
+      python3 - "$TMP/cc-volume.mid" <<'PYCC'
+import struct, sys
+piste = bytes([0x00, 0xB0, 1, 64, 0x00, 0xFF, 0x2F, 0x00])
+data = (b'MThd' + struct.pack('>IHHH', 6, 0, 1, 480) +
+        b'MTrk' + struct.pack('>I', len(piste)) + piste)
+open(sys.argv[1], 'wb').write(data)
+PYCC
+      env -u ALSA_CONFIG_PATH aplaymidi -p "$CLIENT_MIDI:0" "$TMP/cc-volume.mid" >/dev/null 2>&1 || true
+    fi
+    sleep 0.4
+    S=$(get)
+    VOL_MIDI=$(printf '%s' "$S" | python3 -c 'import json,sys; print(json.load(sys.stdin)["volume"])' 2>/dev/null || echo inconnu)
+    if python3 - "$VOL_MIDI" <<'PYVOL'
+import sys
+try:
+    v = float(sys.argv[1])
+except ValueError:
+    sys.exit(1)
+sys.exit(0 if abs(v - 64 / 127.0) < 0.01 else 1)
+PYVOL
+    then
+      ok "CC1=64 : e.volume = $VOL_MIDI"
+    else
+      echec "CC1=64 : e.volume inattendu ($VOL_MIDI)"
+    fi
+    SYS_MIDI=$(curl -s "$URL/api/volume")
+    if [ "$SYS_AVANT" = "$SYS_MIDI" ]; then
+      ok "pédale MIDI : /api/volume inchangé"
+    else
+      echec "pédale MIDI a modifié /api/volume ($SYS_AVANT → $SYS_MIDI)"
+    fi
+  else
+    echo "INFO  : port MIDI Organum introuvable, pédale non simulée"
+  fi
+else
+  echo "INFO  : python3/aplaymidi absents, pédale non simulée"
+fi
+arreter
+
 echo
 if [ "$ECHECS" -eq 0 ]; then
   echo "Tous les contrôles : OK"
