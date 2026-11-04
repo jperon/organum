@@ -971,13 +971,13 @@ texte_calibration = (c) ->
       ui\texte ""
       organum.panique! if ui\bouton "Panique"
       -- Accès au panneau Qualité : vert seulement pour « Confortable » ;
-      -- sinon bouton neutre avec marque textuelle pour orange et rouge.
+      -- orange et rouge colorent le bouton, la marque textuelle restant.
       niveau_charge = modele.charge_niveau e.charge_niveau
       marque_charge = if niveau_charge >= 3 then " !!" elseif niveau_charge >= 2 then " !" else ""
       clique_qualite = if niveau_charge == 1
         ui\etat("Qualité", false, true) != false
       else
-        ui\bouton "Qualité#{marque_charge}"
+        ui\bouton "Qualité#{marque_charge}", niveau_charge
       if clique_qualite
         mode = "qualite"
         message_qualite = nil
