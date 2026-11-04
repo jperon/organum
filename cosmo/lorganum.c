@@ -173,6 +173,10 @@ static unsigned long long g_echeances[16];
 // aucun flottant : deux lectures d'horloge et de l'arithmétique entière par
 // tampon. Les xruns récents tiennent dans un anneau fixe de 60 secondes.
 #define XRUNS_ANNEAU 60
+// Fenêtre d'exclusion après un réglage (période, tête, périphérique, taux) :
+// les xruns de l'ouverture ou de la bascule y sont ignorés. Trois secondes
+// couvrent les mesures réelles, où une seconde laissait encore passer un xrun.
+#define XRUNS_BLOCAGE_SECONDES 3
 // Moyennes de charge par seconde de jeu, sur les 60 dernières secondes : la
 // pointe est leur maximum. Un tampon préempté seul ne suffit donc plus à
 // passer la puce au rouge.
@@ -211,11 +215,21 @@ static void mesure_reinitialiser(void) {
   g_mesure_tampons_jeu = 0;
   memset(g_mesure_moyennes, 0, sizeof(g_mesure_moyennes));
   g_mesure_moyennes_pos = 0;
+  g_mesure_somme = 0;
+  g_mesure_tampons_seconde = 0;
+  memset(g_xruns_anneau, 0, sizeof(g_xruns_anneau));
+  g_xruns_anneau_pos = 0;
+  g_xruns_recents = 0;
+  g_etat->xruns_recents = 0;
   // La première moyenne ne comptera qu'une seconde pleine après ce réglage.
   g_mesure_prochaine_seconde =
       g_echantillons + (unsigned long long)g_taux;
   g_etat->charge_pointe = 0;
   g_etat->charge_evaluee = 0;
+  if (g_etat->charge_niveau != 0) {
+    g_etat->charge_niveau = 0;
+    atomic_fetch_add_explicit(&g_etat->seq, 1, memory_order_release);
+  }
 }
 
 // État de mesure remis à zéro au démarrage (le mmap est déjà remis à zéro).
@@ -525,9 +539,10 @@ static void appliquer(const struct commande *c) {
       // ORGANUM_REVERB_TETE reste prioritaire.
       if (!g_etat->tete_reverb_impose)
         aeolus_reverb_tete(g_moteur, c->a != 0);
-      // Une bascule de tête produit un xrun connu : ignorer ceux de la
-      // seconde qui suit.
-      g_xruns_blocage = g_echantillons + (unsigned long long)g_taux;
+      // Une bascule de tête produit un xrun connu : ignorer ceux des trois
+      // secondes qui suivent.
+      g_xruns_blocage =
+          g_echantillons + (unsigned long long)g_taux * XRUNS_BLOCAGE_SECONDES;
       mesure_reinitialiser();
       break;
     case CMD_RECONFIG:
@@ -809,10 +824,11 @@ static void *boucle_audio(void *arg) {
           struct demande_audio dem;
           copier_demande(&dem);
           appliquer_demande(&dem, &g, &d, &entrelace);
-          // Nouveau réglage audio : la pointe repart de zéro et les xruns de
-          // la seconde qui suit (dont ceux de l'ouverture) sont ignorés.
+          // Nouveau réglage audio : la pointe repart de zéro et les xruns des
+          // trois secondes qui suivent (dont ceux de l'ouverture) sont ignorés.
           mesure_reinitialiser();
-          g_xruns_blocage = g_echantillons + (unsigned long long)g_taux;
+          g_xruns_blocage =
+              g_echantillons + (unsigned long long)g_taux * XRUNS_BLOCAGE_SECONDES;
           // Fin de la demande, succès comme échec : le message « Application… »
           // s'éteint et audio_erreur prend le relais si besoin. Les réessais
           // automatiques (plus bas) ne comptent pas comme de nouvelles demandes.
@@ -840,7 +856,8 @@ static void *boucle_audio(void *arg) {
         }
         appliquer_demande(&dem, &g, &d, &entrelace);
         mesure_reinitialiser();
-        g_xruns_blocage = g_echantillons + (unsigned long long)g_taux;
+        g_xruns_blocage =
+            g_echantillons + (unsigned long long)g_taux * XRUNS_BLOCAGE_SECONDES;
       }
       if (!g_audio) {
         struct timespec pause = {0, 20 * 1000 * 1000};
@@ -887,7 +904,7 @@ static void *boucle_audio(void *arg) {
     }
 
     // Xruns récents : on ignore ceux qui arrivent pendant l'application ou
-    // dans la seconde qui suit une reconfiguration ou une bascule de tête.
+    // dans les trois secondes qui suivent une reconfiguration ou une bascule de tête.
     int total_xruns = g_xruns_base + (g_audio ? audio_xruns(g_audio) : 0);
     int delta_xruns = total_xruns - g_xruns_vus;
     g_xruns_vus = total_xruns;
