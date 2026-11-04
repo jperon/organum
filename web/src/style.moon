@@ -590,7 +590,27 @@ CSS = [[
   }
   .qualite-champ > span { flex: 0 0 auto; }
   .qualite-champ select,
+  .qualite-champ input[type="text"],
   .qualite-champ input[type="range"] { flex: 1 1 auto; min-width: 0; }
+  .qualite-champ input[type="text"] {
+    padding: 3px 5px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--panel-raised);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.82rem;
+  }
+  .qualite-note {
+    flex: 0 0 auto;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    font-style: italic;
+  }
+  .qualite-repli {
+    margin: 3px 0 0;
+    font-size: 0.78rem;
+  }
   .qualite select {
     padding: 3px 5px;
     border: 1px solid var(--border);

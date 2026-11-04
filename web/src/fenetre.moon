@@ -429,7 +429,21 @@ texte_calibration = (c) ->
       spatialisation: base.spatialisation or 0
       polyphonie_max: base.polyphonie_max or 0
       tete_reverb: base.tete_reverb
+      tete_reverb_prochain: base.tete_reverb
       tete_reverb_impose: base.tete_reverb_impose == true
+      periode: e.periode
+      periode_prochain: e.periode
+      periode_impose: false
+      taux: e.taux
+      taux_prochain: e.taux
+      taux_impose: false
+      peripherique: ""
+      peripherique_prochain: ""
+      peripherique_impose: false
+      limiteur: true
+      limiteur_prochain: true
+      limiteur_impose: false
+      audio_repli: ""
       niveau: modele.niveau_correspondant base
       calibration: base.calibration
     }
@@ -444,7 +458,7 @@ texte_calibration = (c) ->
       ok, res = pcall qualite_opt.regler, payload
       if ok
         if type(res) == "table" and res.redemarrage_requis
-          message_qualite = "Tête de réverbération : au prochain démarrage"
+          message_qualite = "Réglage enregistré : au prochain démarrage"
       else
         message_qualite = "Échec de l'enregistrement des réglages"
         Log kLogWarn, "fenêtre : qualité : #{res}" if Log
@@ -745,12 +759,13 @@ texte_calibration = (c) ->
     if mode == "qualite"
       l, h = ui\taille!
       q = etat_qualite e
-      a_tete = type(q.tete_reverb) == "boolean"
+      a_tete = type(q.tete_reverb) == "boolean" and type(q.tete_reverb_prochain) == "boolean"
       calib = type(q.calibration) == "table" and q.calibration or nil
       -- Rangées : en-tête, niveau, deux cases, spatialisation, polyphonie,
-      -- puis (tête), (calibration) et message. Le nombre de cases de la ligne
-      -- « Niveau » vaut 6 quand le mode Auto existe (bouton en plus), 5 sinon.
-      rows = 6 + (a_tete and 1 or 0) + (calib and 1 or 0)
+      -- période, taux + limiteur, périphérique, puis (tête), (calibration) et
+      -- message. Le nombre de cases de la ligne « Niveau » vaut 6 quand le
+      -- mode Auto existe (bouton en plus), 5 sinon.
+      rows = 9 + (a_tete and 1 or 0) + (calib and 1 or 0)
       colonnes = (type(q.auto) == "boolean") and 6 or 5
       p = disposer_qualite rows, l, h, colonnes
       if p.police != police
@@ -819,6 +834,56 @@ texte_calibration = (c) ->
           regler_qualite {polyphonie_max: math.floor poly + 0.5}
         ui\texte (if (q.polyphonie_max or 0) == 0 then "Illimitée" else "#{q.polyphonie_max} voix"), "droite"
 
+        -- Période : cinq valeurs, plus le libellé (6 cases).
+        ui\ligne ligne, 6
+        etiquette_periode = "Période"
+        if q.periode_impose == true
+          etiquette_periode = "Période (imposée)"
+        elseif q.periode_prochain != q.periode
+          etiquette_periode = "Période (au démarrage)"
+        ui\texte tronquer(etiquette_periode, (l - 2 * MARGE) / 6 - ESPACE)
+        for valeur in *{128, 256, 512, 1024, 2048}
+          actif = q.periode_prochain == valeur
+          change = ui\choix(tostring(valeur), actif) != actif
+          if change and q.periode_impose != true
+            regler_qualite {periode: valeur}
+
+        -- Taux d'échantillonnage et limiteur (4 cases).
+        ui\ligne ligne, 4
+        etiquette_taux = "Taux"
+        if q.taux_impose == true
+          etiquette_taux = "Taux (imposé)"
+        elseif q.taux_prochain != q.taux
+          etiquette_taux = "Taux (au démarrage)"
+        ui\texte tronquer(etiquette_taux, (l - 2 * MARGE) / 4 - ESPACE)
+        for valeur in *{44100, 48000}
+          actif = q.taux_prochain == valeur
+          change = ui\choix(tostring(valeur), actif) != actif
+          if change and q.taux_impose != true
+            regler_qualite {taux: valeur}
+        if q.limiteur_impose == true
+          ui\texte (if q.limiteur == true then "Limiteur actif (imposé)" else "Limiteur coupé (imposé)")
+        else
+          actif_limiteur = q.limiteur_prochain == true
+          nouveau = ui\case "Limiteur", actif_limiteur
+          regler_qualite {limiteur: nouveau} if nouveau != actif_limiteur
+
+        -- Périphérique : lecture seule (le module nk n'expose pas de champ
+        -- de saisie de texte) ; la page web permet de le modifier.
+        ui\ligne ligne, 1
+        valeur_periph = if type(q.peripherique_prochain) == "string" and q.peripherique_prochain != ""
+          q.peripherique_prochain else "défaut"
+        texte_periph = "Périphérique : #{valeur_periph}"
+        if q.peripherique_impose == true
+          texte_periph = texte_periph .. " (imposé par ORGANUM_PERIPHERIQUE)"
+        elseif q.peripherique_prochain != q.peripherique
+          actuel = if type(q.peripherique) == "string" and q.peripherique != ""
+            q.peripherique else "défaut"
+          texte_periph = texte_periph .. " (au démarrage ; en cours : #{actuel})"
+        else
+          texte_periph = texte_periph .. " (au prochain démarrage)"
+        ui\texte tronquer(texte_periph, l - 2 * MARGE - ESPACE)
+
         if a_tete
           ui\ligne ligne, 1
           if q.tete_reverb_impose == true
@@ -830,8 +895,11 @@ texte_calibration = (c) ->
               "Tête de réverbération coupée : imposée par ORGANUM_REVERB_TETE"
             ui\texte tronquer(texte_tete, l - 2 * MARGE - ESPACE)
           else
-            actif_tete = q.tete_reverb == true
-            nouveau = ui\choix "Tête de réverbération zéro latence (prochain démarrage)", actif_tete
+            actif_tete = q.tete_reverb_prochain == true
+            etiquette_tete = "Tête de réverbération zéro latence (prochain démarrage)"
+            if q.tete_reverb_prochain != q.tete_reverb
+              etiquette_tete = etiquette_tete .. if q.tete_reverb == true then " — en cours : active" else " — en cours : coupée"
+            nouveau = ui\choix etiquette_tete, actif_tete
             regler_qualite {tete_reverb: nouveau} if nouveau != actif_tete
 
         if calib
@@ -839,7 +907,12 @@ texte_calibration = (c) ->
           ui\texte tronquer texte_calibration(calib), l - 2 * MARGE - ESPACE
 
         ui\ligne ligne, 1
-        ui\texte message_qualite or ""
+        message_affiche = message_qualite
+        if not message_affiche and type(q.audio_repli) == "string" and q.audio_repli != ""
+          message_affiche = "Repli audio : #{q.audio_repli}"
+        if not message_affiche
+          message_affiche = "Période, taux, périphérique, limiteur et tête : au prochain démarrage"
+        ui\texte tronquer(message_affiche, l - 2 * MARGE - ESPACE)
         ui\fin!
         ui\dessiner 30, 30, 30
       continue

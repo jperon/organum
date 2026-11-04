@@ -259,12 +259,45 @@ JS = [[
     var valeurPolyphonie = document.getElementById('qualite-polyphonie-valeur');
     var caseTete = document.getElementById('qualite-tete');
     var noteTeteImpose = document.getElementById('qualite-tete-impose');
+    var noteTeteEtat = document.getElementById('qualite-tete-etat');
+    var selPeriode = document.getElementById('qualite-periode');
+    var notePeriode = document.getElementById('qualite-periode-note');
+    var selTaux = document.getElementById('qualite-taux');
+    var noteTaux = document.getElementById('qualite-taux-note');
+    var champPeripherique = document.getElementById('qualite-peripherique');
+    var notePeripherique = document.getElementById('qualite-peripherique-note');
+    var caseLimiteur = document.getElementById('qualite-limiteur');
+    var noteLimiteur = document.getElementById('qualite-limiteur-note');
+    var ligneRepli = document.getElementById('qualite-repli');
     var ligneCalibration = document.getElementById('qualite-calibration');
     var message = document.getElementById('qualite-message');
     var indisponible = document.getElementById('qualite-indisponible');
     var enAttente = 0;
     var polyActif = false;
     var polyEnvoye = null;
+
+    function note(el, texte) {
+      if (!el) { return; }
+      el.textContent = texte || '';
+      el.hidden = !texte;
+    }
+
+    function textePeriode(periode, taux) {
+      var p = nombre(periode);
+      var t = nombre(taux);
+      if (p === null) { return String(periode); }
+      if (t === null || t <= 0) { t = 48000; }
+      return p + ' (' + (p * 1000 / t).toFixed(1).replace('.', ',') + ' ms)';
+    }
+
+    function mettreAJourPeriodes(taux) {
+      if (!selPeriode) { return; }
+      for (var i = 0; i < selPeriode.options.length; i += 1) {
+        var option = selPeriode.options[i];
+        var p = nombre(option.value);
+        if (p !== null) { option.textContent = textePeriode(p, taux); }
+      }
+    }
 
     function nombre(valeur) {
       var n = Number(valeur);
@@ -311,7 +344,8 @@ JS = [[
     }
 
     function desactiver(actif) {
-      [selNiveau, caseBruit, caseInstabilite, selSpatialisation, curseurPolyphonie, caseTete].forEach(function (el) {
+      [selNiveau, caseBruit, caseInstabilite, selSpatialisation, curseurPolyphonie, caseTete,
+       selPeriode, selTaux, champPeripherique, caseLimiteur].forEach(function (el) {
         if (el) { el.disabled = actif; }
       });
     }
@@ -347,9 +381,77 @@ JS = [[
         if (curseurPolyphonie) { curseurPolyphonie.value = String(q.polyphonie_max); }
         if (valeurPolyphonie) { valeurPolyphonie.textContent = textePolyphonie(q.polyphonie_max); }
       }
-      if (caseTete && typeof q.tete_reverb === 'boolean') { caseTete.checked = q.tete_reverb; }
+      // Tête de réverbération : le contrôle montre la valeur ENREGISTRÉE
+      // (prochain démarrage), pas seulement la valeur effective en cours.
+      if (caseTete && typeof q.tete_reverb_prochain === 'boolean') { caseTete.checked = q.tete_reverb_prochain; }
       if (caseTete) { caseTete.disabled = q.tete_reverb_impose === true; }
       if (noteTeteImpose) { noteTeteImpose.hidden = q.tete_reverb_impose !== true; }
+      if (noteTeteEtat) {
+        var etatTete = '';
+        if (q.tete_reverb_impose !== true &&
+            typeof q.tete_reverb === 'boolean' &&
+            typeof q.tete_reverb_prochain === 'boolean' &&
+            q.tete_reverb !== q.tete_reverb_prochain) {
+          etatTete = q.tete_reverb ? 'en cours : active' : 'en cours : coupée';
+        }
+        note(noteTeteEtat, etatTete);
+      }
+
+      var tauxProchain = nombre(q.taux_prochain);
+      if (tauxProchain === null) { tauxProchain = 48000; }
+      mettreAJourPeriodes(tauxProchain);
+      var periodeProchain = nombre(q.periode_prochain);
+      if (periodeProchain === null) { periodeProchain = 512; }
+      if (selPeriode) {
+        selPeriode.value = String(periodeProchain);
+        selPeriode.disabled = q.periode_impose === true;
+        var etatPeriode = '';
+        if (q.periode_impose === true) { etatPeriode = 'imposée par ORGANUM_PERIODE'; }
+        else if (nombre(q.periode) !== null && q.periode !== q.periode_prochain) {
+          etatPeriode = 'en cours : ' + textePeriode(q.periode, q.taux);
+        }
+        note(notePeriode, etatPeriode);
+      }
+      if (selTaux) {
+        selTaux.value = String(tauxProchain);
+        selTaux.disabled = q.taux_impose === true;
+        var etatTaux = '';
+        if (q.taux_impose === true) { etatTaux = 'imposé par ORGANUM_TAUX'; }
+        else if (nombre(q.taux) !== null && q.taux !== q.taux_prochain) {
+          etatTaux = 'en cours : ' + q.taux + ' Hz';
+        }
+        note(noteTaux, etatTaux);
+      }
+      if (champPeripherique) {
+        champPeripherique.disabled = q.peripherique_impose === true;
+        // Ne jamais écraser la saisie en cours par la relecture périodique.
+        if (document.activeElement !== champPeripherique) {
+          champPeripherique.value = typeof q.peripherique_prochain === 'string' ? q.peripherique_prochain : '';
+        }
+        var etatPeripherique = '';
+        if (q.peripherique_impose === true) { etatPeripherique = 'imposé par ORGANUM_PERIPHERIQUE'; }
+        else if (typeof q.peripherique === 'string' && q.peripherique !== q.peripherique_prochain) {
+          etatPeripherique = 'en cours : ' + (q.peripherique || 'périphérique par défaut');
+        }
+        note(notePeripherique, etatPeripherique);
+      }
+      if (caseLimiteur) {
+        caseLimiteur.checked = q.limiteur_prochain === true;
+        caseLimiteur.disabled = q.limiteur_impose === true;
+        var etatLimiteur = '';
+        if (q.limiteur_impose === true) { etatLimiteur = 'imposé par ORGANUM_LIMITEUR'; }
+        else if (typeof q.limiteur === 'boolean' &&
+                 typeof q.limiteur_prochain === 'boolean' &&
+                 q.limiteur !== q.limiteur_prochain) {
+          etatLimiteur = q.limiteur ? 'en cours : actif' : 'en cours : coupé';
+        }
+        note(noteLimiteur, etatLimiteur);
+      }
+      if (ligneRepli) {
+        var repli = typeof q.audio_repli === 'string' ? q.audio_repli : '';
+        ligneRepli.textContent = repli ? ('Repli audio : ' + repli) : '';
+        ligneRepli.hidden = !repli;
+      }
       if (ligneCalibration) {
         var texte = texteCalibration(q.calibration);
         ligneCalibration.textContent = texte;
@@ -380,7 +482,7 @@ JS = [[
         .then(function (data) {
           enAttente -= 1;
           if (data && data.redemarrage_requis) {
-            afficherMessage('Tête de réverbération enregistrée : elle change au prochain démarrage.');
+            afficherMessage('Réglage enregistré : il s’appliquera au prochain démarrage.');
           }
           maj(data);
         })
@@ -439,6 +541,28 @@ JS = [[
     if (caseTete) {
       caseTete.addEventListener('change', function () {
         envoyer({ tete_reverb: caseTete.checked });
+      });
+    }
+    if (selPeriode) {
+      selPeriode.addEventListener('change', function () {
+        var n = nombre(selPeriode.value);
+        if (n !== null) { envoyer({ periode: n }); }
+      });
+    }
+    if (selTaux) {
+      selTaux.addEventListener('change', function () {
+        var n = nombre(selTaux.value);
+        if (n !== null) { envoyer({ taux: n }); }
+      });
+    }
+    if (champPeripherique) {
+      champPeripherique.addEventListener('change', function () {
+        envoyer({ peripherique: champPeripherique.value });
+      });
+    }
+    if (caseLimiteur) {
+      caseLimiteur.addEventListener('change', function () {
+        envoyer({ limiteur: caseLimiteur.checked });
       });
     }
     qualiteMaj = maj;

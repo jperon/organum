@@ -56,6 +56,24 @@ option_qualite = (valeur, nom, choisi) ->
 niveaux_qualite = {"auto", "0", "1", "2", "3", "-1"}
 noms_niveaux = {auto: "Auto", "0": "0", "1": "1", "2": "2", "3": "3", "-1": "Personnalisé"}
 
+-- Temps d'une période, calculé avec le taux par défaut ; client.moon le
+-- recalcule ensuite avec le taux enregistré (X_prochain).
+duree_periode = (periode, taux = 48000) ->
+  texte = string.format "%.1f", tonumber(periode) * 1000 / taux
+  texte\gsub "%.", ","
+
+periodes = {"128", "256", "512", "1024", "2048"}
+option_periode = (valeur) ->
+  attrs = {value: valeur}
+  attrs.selected = true if valeur == "512"
+  h.option attrs, "#{valeur} (#{duree_periode valeur} ms)"
+
+taux_valides = {"44100", "48000"}
+option_taux = (valeur) ->
+  attrs = {value: valeur}
+  attrs.selected = true if valeur == "48000"
+  h.option attrs, valeur
+
 qualite_html = ->
   h.section class: "qualite", id: "qualite", ["aria-labelledby"]: "qualite-titre",
     h.h2 class: "qualite-titre", id: "qualite-titre", "Qualité",
@@ -83,11 +101,31 @@ qualite_html = ->
         h.span "Polyphonie maximale",
         h.input type: "range", id: "qualite-polyphonie", min: "0", max: "512", step: "1", value: "0", ["aria-label"]: "Polyphonie maximale",
         h.output id: "qualite-polyphonie-valeur", ["for"]: "qualite-polyphonie", "Illimitée",
+      h.label class: "qualite-champ qualite-demarrage",
+        h.span {}, "Période ", h.em {}, "(au prochain démarrage)",
+        h.select id: "qualite-periode", ["aria-label"]: "Période audio (au prochain démarrage)",
+          table.unpack [option_periode v for v in *periodes],
+        h.span class: "note qualite-note", id: "qualite-periode-note", hidden: true,
+      h.label class: "qualite-champ qualite-demarrage",
+        h.span {}, "Taux d'échantillonnage ", h.em {}, "(au prochain démarrage)",
+        h.select id: "qualite-taux", ["aria-label"]: "Taux d'échantillonnage (au prochain démarrage)",
+          table.unpack [option_taux v for v in *taux_valides],
+        h.span class: "note qualite-note", id: "qualite-taux-note", hidden: true,
+      h.label class: "qualite-champ qualite-demarrage",
+        h.span {}, "Périphérique audio ", h.em {}, "(au prochain démarrage)",
+        h.input type: "text", id: "qualite-peripherique", maxlength: "200", placeholder: "Défaut", ["aria-label"]: "Périphérique audio (au prochain démarrage)",
+        h.span class: "note qualite-note", id: "qualite-peripherique-note", hidden: true,
+      h.label class: "qualite-case qualite-demarrage",
+        h.input type: "checkbox", id: "qualite-limiteur", checked: true,
+        h.span {}, "Limiteur ", h.em {}, "(au prochain démarrage)",
+        h.span class: "note qualite-note", id: "qualite-limiteur-note", hidden: true,
       h.label class: "qualite-case qualite-tete",
         h.input type: "checkbox", id: "qualite-tete", checked: true,
         h.span {}, "Tête de réverbération zéro latence ", h.em {}, "(au prochain démarrage)",
+        h.span class: "note qualite-note", id: "qualite-tete-etat", hidden: true,
     h.p class: "note", id: "qualite-tete-impose", hidden: true,
       "Valeur imposée par ORGANUM_REVERB_TETE : non modifiable ici.",
+    h.p class: "note qualite-repli", id: "qualite-repli", hidden: true,
     h.p class: "note qualite-calibration", id: "qualite-calibration", hidden: true,
     h.p class: "note qualite-message", id: "qualite-message", role: "status", ["aria-live"]: "polite", hidden: true
 
