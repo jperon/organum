@@ -775,7 +775,7 @@ texte_calibration = (c) ->
       -- période, taux + limiteur, périphérique, puis (tête), (calibration) et
       -- message. Le nombre de cases de la ligne « Niveau » vaut 6 quand le
       -- mode Auto existe (bouton en plus), 5 sinon.
-      rows = 11 + (a_tete and 1 or 0) + (calib and 1 or 0)
+      rows = 10 + (a_tete and 1 or 0) + (calib and 1 or 0)
       colonnes = (type(q.auto) == "boolean") and 6 or 5
       p = disposer_qualite rows, l, h, colonnes
       if p.police != police
@@ -921,9 +921,10 @@ texte_calibration = (c) ->
         niveau_charge = modele.charge_niveau q.charge_niveau
         info_charge = modele.CHARGE_NIVEAUX[niveau_charge + 1]
         texte_puce = info_charge.libelle
-        if q.charge_evaluee == true
-          texte_puce = texte_puce .. " — pointe #{q.charge_pointe or 0} %"
-        texte_puce = texte_puce .. " · Xruns : #{q.xruns or 0}"
+        pointe = q.charge_pointe or 0
+        if q.charge_evaluee == true or pointe > 0
+          texte_puce = texte_puce .. " — pointe #{pointe} %"
+        texte_puce = texte_puce .. " · Xruns récents : #{q.xruns_recents or 0} · total : #{q.xruns or 0}"
         ui\texte tronquer(texte_puce, l - 2 * MARGE - ESPACE)
 
         ui\ligne ligne, 1
@@ -972,7 +973,7 @@ texte_calibration = (c) ->
       organum.panique! if ui\bouton "Panique"
       -- Accès au panneau Qualité : vert seulement pour « Confortable » ;
       -- orange et rouge colorent le bouton, la marque textuelle restant.
-      niveau_charge = modele.charge_niveau e.charge_niveau
+      niveau_charge = modele.charge_niveau e.qualite.charge_niveau
       marque_charge = if niveau_charge >= 3 then " !!" elseif niveau_charge >= 2 then " !" else ""
       clique_qualite = if niveau_charge == 1
         ui\etat("Qualité", false, true) != false
