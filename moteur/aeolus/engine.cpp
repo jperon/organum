@@ -181,9 +181,11 @@ void EngineGlobal::updateStops(float sampleRate)
 {
     _sampleRate = sampleRate;
 
-    ThreadPool threadPool;
     std::atomic<int> done((int)_rankwaves.size());
     WaitableEvent wait;
+    // Le pool est détruit le premier : ses fils ont donc fini avant ces deux
+    // objets, que la lambda capture par référence.
+    ThreadPool threadPool;
 
     for (auto* rw : _rankwaves) {
         threadPool.addJob([sampleRate, rw, &done, &wait]() {
