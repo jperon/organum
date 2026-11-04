@@ -768,24 +768,25 @@ regler_qualite = (q) ->
   impose_tete = organum.etat!.qualite.tete_reverb_impose == true
   loc = qualite_locale_actuelle!
   loc.auto = q.auto if q.auto != nil
-  modifie_chaud = false
+  modifie = false
   redemarrage = false
   p = nil
   if q.bruit_attaque != nil
     organum.qualite "bruit_attaque", q.bruit_attaque
-    modifie_chaud = true
+    modifie = true
   if q.instabilite != nil
     organum.qualite "instabilite", q.instabilite
-    modifie_chaud = true
+    modifie = true
   if q.spatialisation != nil
     organum.qualite "spatialisation", q.spatialisation
-    modifie_chaud = true
+    modifie = true
   if q.polyphonie_max != nil
     organum.qualite "polyphonie_max", q.polyphonie_max
-    modifie_chaud = true
+    modifie = true
   if q.tete_reverb != nil and not impose_tete
     redemarrage = true if q.tete_reverb != loc.tete_reverb
     loc.tete_reverb = q.tete_reverb
+    modifie = true
   if q.niveau != nil
     p = PRESELECTIONS[q.niveau + 1]
     organum.qualite "spatialisation", p.spatialisation
@@ -797,7 +798,7 @@ regler_qualite = (q) ->
       loc.tete_reverb = p.tete_reverb
     loc.niveau = q.niveau
     loc.auto = false
-  elseif modifie_chaud
+  elseif modifie
     loc.niveau = -1
     loc.auto = false
   -- Réglages de démarrage : jamais écrits quand l'environnement les impose,

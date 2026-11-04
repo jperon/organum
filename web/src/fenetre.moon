@@ -865,7 +865,7 @@ texte_calibration = (c) ->
           ui\texte (if q.limiteur == true then "Limiteur actif (imposé)" else "Limiteur coupé (imposé)")
         else
           actif_limiteur = q.limiteur_prochain == true
-          nouveau = ui\case "Limiteur", actif_limiteur
+          nouveau = ui\choix "Limiteur", actif_limiteur
           regler_qualite {limiteur: nouveau} if nouveau != actif_limiteur
 
         -- Périphérique : lecture seule (le module nk n'expose pas de champ

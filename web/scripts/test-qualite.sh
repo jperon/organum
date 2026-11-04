@@ -436,6 +436,29 @@ verifie "après relance : période enregistrée = 1024" '"periode_prochain":1024
 verifie "après relance : tete_reverb effective = false" '"tete_reverb":false' "$S"
 verifie "après relance : tete_reverb_prochain = false" '"tete_reverb_prochain":false' "$S"
 
+echo "== tête modifiée en mode auto : le choix survit à la relance"
+effacer_etat
+lancer "" 1 || exit 1
+S=$(get)
+verifie "tête en auto : auto true au premier lancement" '"auto":true' "$S"
+verifie "tête en auto : tête enregistrée true" '"tete_reverb_prochain":true' "$S"
+R=$(post '{"qualite":{"tete_reverb":false}}')
+verifie "tête en auto : redemarrage_requis = true" '"redemarrage_requis":true' "$R"
+verifie "tête en auto : tête enregistrée false" '"tete_reverb_prochain":false' "$R"
+attendre_publication
+attendre_sauvegarde
+arreter
+lancer "" 1 || exit 1
+S=$(get)
+verifie "tête en auto : après relance auto = false" '"auto":false' "$S"
+verifie "tête en auto : après relance niveau = -1" '"niveau":-1' "$S"
+verifie "tête en auto : après relance tête enregistrée false" '"tete_reverb_prochain":false' "$S"
+verifie "tête en auto : après relance tête effective false" '"tete_reverb":false' "$S"
+# Prépare le contrôle suivant : une période enregistrée non imposée à 1024.
+post '{"qualite":{"periode":1024}}' >/dev/null
+attendre_publication
+attendre_sauvegarde
+
 echo "== ORGANUM_PERIODE imposé : valeur enregistrée intacte"
 arreter
 lancer "" 1 "" null 256 || exit 1
