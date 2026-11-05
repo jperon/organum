@@ -1119,14 +1119,14 @@ texte_calibration = (c) ->
           ui\ligne p.jeu, p.sous
           for j, jeu in ipairs div.jeux
             nom = modele.nom_jeu jeu
-            if ui\largeur_texte(nom) <= p.case - 4
-              nouveau = ui\choix nom, jeu.actif
+            nouveau = if ui\largeur_texte(nom) <= p.case - 4
+              ui\choix nom, jeu.actif
             else
               coupe = decoupe ui, nom
               if coupe and coupe.large <= p.case - 2
-                nouveau = ui\choix_deux coupe.a, coupe.b, jeu.actif
+                ui\choix_deux coupe.a, coupe.b, jeu.actif
               else
-                nouveau = ui\choix nom, jeu.actif
+                ui\choix nom, jeu.actif
             organum.jeu d, j, not jeu.actif if nouveau != jeu.actif
           -- Lignes vides : les accouplements s'alignent en bas des colonnes.
           vides = p.rangs * p.sous - #div.jeux
