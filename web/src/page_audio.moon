@@ -7,12 +7,13 @@ modele = require "modele"
 
 css = [[
   .qualite-page {
-    max-width: 900px;
+    width: 100%;
+    max-width: 1200px;
     margin: 0 auto;
     padding: 8px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
     min-width: 0;
   }
   .qualite-page .entete {
@@ -24,128 +25,124 @@ css = [[
   .qualite-page .entete a { color: inherit; }
   .qualite-page .entete h2 { margin: 0; font-size: 1rem; }
 
-  /* Réglages de qualité : section compacte, une colonne au téléphone, deux
-     dès que la largeur le permet ; aucune largeur minimale fixe, donc jamais
-     de défilement horizontal. */
+  /* Réglages de qualité : une rangée par réglage, libellé à gauche et
+     commandes à droite dès que la largeur le permet. Aucune largeur
+     minimale fixe : au téléphone les rangées s'empilent sans débordement. */
   .qualite {
     border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 4px 6px;
+    border-radius: 8px;
+    padding: 8px;
     background: var(--panel);
     min-width: 0;
   }
   .qualite[hidden] { display: none; }
-  .qualite-titre {
-    margin: 0 0 3px;
-    font-size: 0.9rem;
-    font-weight: 700;
-  }
   .qualite-corps {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
-    gap: 6px 12px;
-    align-items: start;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
     min-width: 0;
   }
-  .qualite-champ,
-  .qualite-case,
-  .qualite-tete {
-    min-width: 0;
-    font-size: 0.82rem;
-    color: var(--text-dim);
-  }
-  /* Chaque réglage empile son libellé puis son contrôle : la cellule peut
-     être étroite sans jamais écraser la valeur affichée. */
-  .qualite-champ {
+  .qualite-ligne {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    gap: 3px 6px;
+    gap: 6px;
     align-items: center;
-  }
-  .qualite-champ > span { min-width: 0; }
-  .qualite-champ select,
-  .qualite-champ input[type="text"] {
-    width: 100%;
     min-width: 0;
-    box-sizing: border-box;
   }
-  .qualite-champ input[type="text"] {
-    padding: 3px 5px;
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    background: var(--panel-raised);
-    color: var(--text);
-    font: inherit;
-    font-size: 0.82rem;
+  @media (min-width: 640px) {
+    .qualite-ligne {
+      grid-template-columns: minmax(120px, 0.3fr) minmax(0, 1fr);
+      gap: 6px 16px;
+    }
+    /* Rangée de commandes sans libellé (deux bascules côte à côte). */
+    .qualite-ligne-pleine .qualite-commandes { grid-column: 1 / -1; }
   }
-  /* Les notes (valeur imposée, écart avec la valeur effective) occupent
-     leur propre ligne, sous le libellé et le contrôle. */
-  .qualite-note {
-    display: block;
-    font-size: 0.72rem;
+  .qualite-libelle {
+    font-size: 0.85rem;
+    font-weight: 600;
     color: var(--text-dim);
-    font-style: italic;
+    line-height: 1.2;
+    min-width: 0;
   }
-  .qualite-note[hidden] { display: none; }
-  .qualite-repli {
-    margin: 3px 0 0;
-    font-size: 0.78rem;
-  }
-  .qualite select {
-    padding: 3px 5px;
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    background: var(--panel-raised);
-    color: var(--text);
-    font: inherit;
-    font-size: 0.82rem;
-  }
-  .qualite-cases {
+  .qualite-commandes {
     display: flex;
     flex-wrap: wrap;
-    gap: 2px 12px;
-    min-width: 0;
-  }
-  /* Case et libellé restent solidaires (même ligne de grille) ; le texte
-     peut se replier à droite sans séparer la case. */
-  .qualite-case {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    gap: 2px 6px;
     align-items: center;
+    gap: 6px;
     min-width: 0;
+  }
+  /* Boutons segmentés : une valeur par bouton, l'actif en accent. */
+  .qualite-segments {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 6px;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+  .qualite-segment,
+  .qualite-bascule {
+    min-height: 44px;
+    padding: 4px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel-raised);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.88rem;
+    font-weight: 600;
+    line-height: 1.15;
     cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: var(--transparent);
   }
-  .qualite-case > input { grid-column: 1; }
-  .qualite-case > span:not(.qualite-note) { grid-column: 2; min-width: 0; }
-  .qualite-case > .qualite-note { grid-column: 1 / -1; }
-  .qualite-tete { align-items: start; }
-  .qualite-case input[type="checkbox"] {
-    width: 18px;
-    height: 18px;
-    margin: 0;
-    accent-color: var(--accent);
+  .qualite-segment {
+    flex: 1 1 auto;
+    min-width: 2.6em;
+    text-align: center;
   }
-  /* Polyphonie : le libellé au-dessus, puis le curseur et sa valeur sur une
-     même ligne ; le curseur garde une largeur utile même en colonne étroite. */
-  .qualite-polyphonie {
-    grid-template-columns: minmax(140px, 1fr) auto;
+  .qualite-bascule {
+    flex: 1 1 12em;
+    text-align: left;
   }
-  .qualite-polyphonie > span { grid-column: 1 / -1; }
-  .qualite-polyphonie input[type="range"] {
+  .qualite-segment[aria-pressed="true"],
+  .qualite-bascule[aria-pressed="true"] {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--accent-ink);
+  }
+  .qualite-segment:hover:not(:disabled),
+  .qualite-bascule:hover:not(:disabled) {
+    border-color: var(--accent);
+  }
+  .qualite input[type="text"] {
     width: 100%;
-    min-width: 140px;
+    min-height: 44px;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel-raised);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.9rem;
   }
-  /* Le curseur de polyphonie est horizontal et dans le flux, comme celui de
-     la réverbération ; le style de base est pivoté. */
+  /* Le curseur occupe toute sa zone tactile : 48 px de haut, ce qui contient
+     le pouce de 48 px sans qu'il déborde sur le libellé au-dessus. */
   .qualite input[type="range"] {
     position: static;
     transform: none;
-    width: auto;
-    height: 30px;
+    width: 100%;
+    min-width: 0;
+    height: 48px;
     padding: 0;
     margin: 0;
   }
+  .qualite input#reverb { height: 48px; }
+  /* Polyphonie : curseur et valeur sur la même ligne. */
+  .qualite-commandes-curseur { flex-wrap: nowrap; }
+  .qualite-commandes-curseur input[type="range"] { flex: 1 1 auto; }
   .qualite output {
     flex: 0 0 auto;
     min-width: 4.2em;
@@ -153,42 +150,58 @@ css = [[
     font-variant-numeric: tabular-nums;
     color: var(--text);
   }
-  .qualite select:focus-visible,
+  /* Notes (valeur imposée, écart avec la valeur effective) : leur propre
+     ligne, sous le libellé et les commandes. */
+  .qualite-note {
+    display: block;
+    flex-basis: 100%;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    font-style: italic;
+    margin: 0;
+  }
+  .qualite-note[hidden] { display: none; }
+  .qualite-repli,
+  .qualite-erreur,
+  .qualite-calibration,
+  .qualite-message,
+  .qualite-indisponible {
+    margin: 6px 0 0;
+    font-size: 0.78rem;
+  }
+  .qualite button:focus-visible,
   .qualite input:focus-visible {
     outline: 3px solid var(--focus);
     outline-offset: 2px;
   }
-  .qualite select:disabled,
+  .qualite button:disabled,
   .qualite input:disabled {
     opacity: 0.55;
     cursor: not-allowed;
   }
 ]]
 
-option_qualite = (valeur, nom, choisi) ->
-  attrs = {value: valeur}
-  attrs.selected = true if choisi
-  attrs.disabled = true if valeur == "-1"
-  h.option attrs, nom
-
-niveaux_qualite = {"auto", "0", "1", "2", "3", "-1"}
-noms_niveaux = {auto: "Auto", "0": "0", "1": "1", "2": "2", "3": "3", "-1": "Personnalisé"}
+niveaux_qualite = {"auto", "0", "1", "2", "3"}
+niveaux_segments = {{"auto", "Auto"}, {"0", "0"}, {"1", "1"}, {"2", "2"}, {"3", "3"}}
 
 duree_periode = (periode, taux = 48000) ->
   texte = string.format "%.1f", tonumber(periode) * 1000 / taux
   texte\gsub "%.", ","
 
 periodes = {"128", "256", "512", "1024", "2048"}
-option_periode = (valeur) ->
-  attrs = {value: valeur}
-  attrs.selected = true if valeur == "512"
-  h.option attrs, "#{valeur} (#{duree_periode valeur} ms)"
-
 taux_valides = {"44100", "48000"}
-option_taux = (valeur) ->
-  attrs = {value: valeur}
-  attrs.selected = true if valeur == "48000"
-  h.option attrs, valeur
+
+libelle_periode = (valeur) ->
+  "#{valeur} (#{duree_periode valeur} ms)"
+
+bouton_segment = (valeur, nom, actif, aria) ->
+  attrs =
+    type: "button"
+    class: "qualite-segment"
+    ["data-valeur"]: valeur
+    ["aria-pressed"]: actif and "true" or "false"
+  attrs["aria-label"] = aria if aria
+  h.button attrs, nom
 
 script = [[
 (function () {
@@ -196,23 +209,32 @@ script = [[
 
   var section = document.getElementById('qualite');
   if (!section) { return; }
-  var selNiveau = document.getElementById('qualite-niveau');
-  var caseBruit = document.getElementById('qualite-bruit');
-  var caseInstabilite = document.getElementById('qualite-instabilite');
-  var selSpatialisation = document.getElementById('qualite-spatialisation');
+  var groupeNiveau = document.getElementById('qualite-niveau');
+  var boutonsNiveau = groupeNiveau ?
+    Array.prototype.slice.call(groupeNiveau.querySelectorAll('.qualite-segment')) : [];
+  var basculeBruit = document.getElementById('qualite-bruit');
+  var basculeInstabilite = document.getElementById('qualite-instabilite');
+  var groupeSpatialisation = document.getElementById('qualite-spatialisation');
+  var boutonsSpatialisation = groupeSpatialisation ?
+    Array.prototype.slice.call(groupeSpatialisation.querySelectorAll('.qualite-segment')) : [];
   var curseurPolyphonie = document.getElementById('qualite-polyphonie');
   var valeurPolyphonie = document.getElementById('qualite-polyphonie-valeur');
-  var caseTete = document.getElementById('qualite-tete');
+  var basculeTete = document.getElementById('qualite-tete');
   var noteTeteImpose = document.getElementById('qualite-tete-impose');
   var noteTeteEtat = document.getElementById('qualite-tete-etat');
-  var selPeriode = document.getElementById('qualite-periode');
+  var groupePeriode = document.getElementById('qualite-periode');
+  var boutonsPeriode = groupePeriode ?
+    Array.prototype.slice.call(groupePeriode.querySelectorAll('.qualite-segment')) : [];
   var notePeriode = document.getElementById('qualite-periode-note');
-  var selTaux = document.getElementById('qualite-taux');
+  var groupeTaux = document.getElementById('qualite-taux');
+  var boutonsTaux = groupeTaux ?
+    Array.prototype.slice.call(groupeTaux.querySelectorAll('.qualite-segment')) : [];
   var noteTaux = document.getElementById('qualite-taux-note');
   var champPeripherique = document.getElementById('qualite-peripherique');
   var notePeripherique = document.getElementById('qualite-peripherique-note');
-  var caseLimiteur = document.getElementById('qualite-limiteur');
+  var basculeLimiteur = document.getElementById('qualite-limiteur');
   var noteLimiteur = document.getElementById('qualite-limiteur-note');
+  var noteNiveau = document.getElementById('qualite-niveau-note');
   var curseurReverb = document.getElementById('reverb');
   var reverbManip = false;
   var ligneRepli = document.getElementById('qualite-repli');
@@ -238,21 +260,29 @@ script = [[
     return isFinite(n) ? n : null;
   }
 
+  function actif(el) {
+    return !!el && el.getAttribute('aria-pressed') === 'true';
+  }
+
+  function poser(el, etat) {
+    if (el) { el.setAttribute('aria-pressed', etat ? 'true' : 'false'); }
+  }
+
+  function surGroupe(boutons, action) {
+    boutons.forEach(function (b) {
+      b.addEventListener('click', function () {
+        if (b.disabled) { return; }
+        action(b.getAttribute('data-valeur'), b);
+      });
+    });
+  }
+
   function textePeriode(periode, taux) {
     var p = nombre(periode);
     var t = nombre(taux);
     if (p === null) { return String(periode); }
     if (t === null || t <= 0) { t = 48000; }
     return p + ' (' + (p * 1000 / t).toFixed(1).replace('.', ',') + ' ms)';
-  }
-
-  function mettreAJourPeriodes(taux) {
-    if (!selPeriode) { return; }
-    for (var i = 0; i < selPeriode.options.length; i += 1) {
-      var option = selPeriode.options[i];
-      var p = nombre(option.value);
-      if (p !== null) { option.textContent = textePeriode(p, taux); }
-    }
   }
 
   function textePolyphonie(n) {
@@ -326,10 +356,12 @@ script = [[
     }
   }
 
-  function desactiver(actif) {
-    [selNiveau, caseBruit, caseInstabilite, selSpatialisation, curseurPolyphonie, caseTete,
-     selPeriode, selTaux, champPeripherique, caseLimiteur].forEach(function (el) {
-      if (el) { el.disabled = actif; }
+  function desactiver(etat) {
+    var tous = boutonsNiveau.concat(boutonsSpatialisation, boutonsPeriode, boutonsTaux,
+      [basculeBruit, basculeInstabilite, basculeLimiteur, basculeTete,
+       curseurPolyphonie, champPeripherique]);
+    tous.forEach(function (el) {
+      if (el) { el.disabled = etat; }
     });
   }
 
@@ -359,25 +391,26 @@ script = [[
     section.hidden = false;
     desactiver(false);
     if (indisponible) { indisponible.hidden = true; }
-    if (selNiveau) {
-      var choix = choixNiveau(q);
-      var option = selNiveau.querySelector('option[value="' + choix + '"]');
-      if (!option) { option = selNiveau.querySelector('option[value="-1"]'); }
-      selNiveau.value = option ? option.value : '-1';
-    }
-    if (caseBruit) { caseBruit.checked = q.bruit_attaque === true; }
-    if (caseInstabilite) { caseInstabilite.checked = q.instabilite === true; }
-    if (selSpatialisation && typeof q.spatialisation === 'number') {
-      selSpatialisation.value = String(q.spatialisation);
-    }
+    var choix = choixNiveau(q);
+    boutonsNiveau.forEach(function (b) {
+      poser(b, b.getAttribute('data-valeur') === choix);
+    });
+    note(noteNiveau, choix === '-1' ? 'Personnalisé' : '');
+    poser(basculeBruit, q.bruit_attaque === true);
+    poser(basculeInstabilite, q.instabilite === true);
+    boutonsSpatialisation.forEach(function (b) {
+      poser(b, b.getAttribute('data-valeur') === String(q.spatialisation));
+    });
     if (!polyActif && typeof q.polyphonie_max === 'number') {
       polyEnvoye = null;
       if (curseurPolyphonie) { curseurPolyphonie.value = String(q.polyphonie_max); }
       if (valeurPolyphonie) { valeurPolyphonie.textContent = textePolyphonie(q.polyphonie_max); }
     }
     // Tête de réverbération : le contrôle montre la valeur ENREGISTRÉE.
-    if (caseTete && typeof q.tete_reverb_prochain === 'boolean') { caseTete.checked = q.tete_reverb_prochain; }
-    if (caseTete) { caseTete.disabled = q.tete_reverb_impose === true; }
+    if (typeof q.tete_reverb_prochain === 'boolean') {
+      poser(basculeTete, q.tete_reverb_prochain);
+    }
+    if (basculeTete) { basculeTete.disabled = q.tete_reverb_impose === true; }
     if (noteTeteImpose) { noteTeteImpose.hidden = q.tete_reverb_impose !== true; }
     if (noteTeteEtat) {
       var etatTete = '';
@@ -392,12 +425,16 @@ script = [[
 
     var tauxProchain = nombre(q.taux_prochain);
     if (tauxProchain === null) { tauxProchain = 48000; }
-    mettreAJourPeriodes(tauxProchain);
     var periodeProchain = nombre(q.periode_prochain);
     if (periodeProchain === null) { periodeProchain = 512; }
-    if (selPeriode) {
-      selPeriode.value = String(periodeProchain);
-      selPeriode.disabled = q.periode_impose === true;
+    boutonsPeriode.forEach(function (b) {
+      var p = nombre(b.getAttribute('data-valeur'));
+      b.textContent = p === null ? b.textContent : String(p);
+      b.setAttribute('aria-label', textePeriode(p === null ? b.textContent : p, tauxProchain));
+      poser(b, p === periodeProchain);
+    });
+    if (notePeriode) {
+      notePeriode.hidden = false;
       var etatPeriode = '';
       if (q.periode_impose === true) { etatPeriode = 'imposée par ORGANUM_PERIODE'; }
       else if (nombre(q.periode) !== null && q.periode !== q.periode_prochain) {
@@ -405,9 +442,11 @@ script = [[
       }
       note(notePeriode, etatPeriode);
     }
-    if (selTaux) {
-      selTaux.value = String(tauxProchain);
-      selTaux.disabled = q.taux_impose === true;
+    boutonsPeriode.forEach(function (b) { b.disabled = q.periode_impose === true; });
+    boutonsTaux.forEach(function (b) {
+      poser(b, nombre(b.getAttribute('data-valeur')) === tauxProchain);
+    });
+    if (noteTaux) {
       var etatTaux = '';
       if (q.taux_impose === true) { etatTaux = 'imposé par ORGANUM_TAUX'; }
       else if (nombre(q.taux) !== null && q.taux !== q.taux_prochain) {
@@ -415,6 +454,7 @@ script = [[
       }
       note(noteTaux, etatTaux);
     }
+    boutonsTaux.forEach(function (b) { b.disabled = q.taux_impose === true; });
     if (champPeripherique) {
       champPeripherique.disabled = q.peripherique_impose === true;
       // Ne jamais écraser la saisie en cours par la relecture périodique.
@@ -428,9 +468,9 @@ script = [[
       }
       note(notePeripherique, etatPeripherique);
     }
-    if (caseLimiteur) {
-      caseLimiteur.checked = q.limiteur_prochain === true;
-      caseLimiteur.disabled = q.limiteur_impose === true;
+    poser(basculeLimiteur, q.limiteur_prochain === true);
+    if (basculeLimiteur) { basculeLimiteur.disabled = q.limiteur_impose === true; }
+    if (noteLimiteur) {
       var etatLimiteur = '';
       if (q.limiteur_impose === true) { etatLimiteur = 'imposé par ORGANUM_LIMITEUR'; }
       else if (typeof q.limiteur === 'boolean' &&
@@ -491,31 +531,35 @@ script = [[
       });
   }
 
-  if (selNiveau) {
-    selNiveau.addEventListener('change', function () {
-      var valeur = selNiveau.value;
-      if (valeur === 'auto') { envoyer({ auto: true }); return; }
-      if (valeur === '-1') { return; }
-      var n = nombre(valeur);
-      if (n !== null && n >= 0 && n <= 3) { envoyer({ niveau: Math.round(n) }); }
+  surGroupe(boutonsNiveau, function (valeur) {
+    boutonsNiveau.forEach(function (b) {
+      poser(b, b.getAttribute('data-valeur') === valeur);
+    });
+    if (valeur === 'auto') { envoyer({ auto: true }); return; }
+    var n = nombre(valeur);
+    if (n !== null && n >= 0 && n <= 3) { envoyer({ niveau: Math.round(n) }); }
+  });
+  if (basculeBruit) {
+    basculeBruit.addEventListener('click', function () {
+      var nouveau = !actif(basculeBruit);
+      poser(basculeBruit, nouveau);
+      envoyer({ bruit_attaque: nouveau });
     });
   }
-  if (caseBruit) {
-    caseBruit.addEventListener('change', function () {
-      envoyer({ bruit_attaque: caseBruit.checked });
+  if (basculeInstabilite) {
+    basculeInstabilite.addEventListener('click', function () {
+      var nouveau = !actif(basculeInstabilite);
+      poser(basculeInstabilite, nouveau);
+      envoyer({ instabilite: nouveau });
     });
   }
-  if (caseInstabilite) {
-    caseInstabilite.addEventListener('change', function () {
-      envoyer({ instabilite: caseInstabilite.checked });
+  surGroupe(boutonsSpatialisation, function (valeur) {
+    boutonsSpatialisation.forEach(function (b) {
+      poser(b, b.getAttribute('data-valeur') === valeur);
     });
-  }
-  if (selSpatialisation) {
-    selSpatialisation.addEventListener('change', function () {
-      var n = nombre(selSpatialisation.value);
-      if (n !== null && n >= 0 && n <= 2) { envoyer({ spatialisation: Math.round(n) }); }
-    });
-  }
+    var n = nombre(valeur);
+    if (n !== null && n >= 0 && n <= 2) { envoyer({ spatialisation: Math.round(n) }); }
+  });
   if (curseurPolyphonie) {
     curseurPolyphonie.addEventListener('input', function () {
       polyActif = true;
@@ -536,31 +580,37 @@ script = [[
     curseurPolyphonie.addEventListener('change', finPolyphonie);
     curseurPolyphonie.addEventListener('blur', finPolyphonie);
   }
-  if (caseTete) {
-    caseTete.addEventListener('change', function () {
-      envoyer({ tete_reverb: caseTete.checked });
+  if (basculeTete) {
+    basculeTete.addEventListener('click', function () {
+      var nouveau = !actif(basculeTete);
+      poser(basculeTete, nouveau);
+      envoyer({ tete_reverb: nouveau });
     });
   }
-  if (selPeriode) {
-    selPeriode.addEventListener('change', function () {
-      var n = nombre(selPeriode.value);
-      if (n !== null) { envoyer({ periode: n }); }
+  surGroupe(boutonsPeriode, function (valeur) {
+    boutonsPeriode.forEach(function (b) {
+      poser(b, b.getAttribute('data-valeur') === valeur);
     });
-  }
-  if (selTaux) {
-    selTaux.addEventListener('change', function () {
-      var n = nombre(selTaux.value);
-      if (n !== null) { envoyer({ taux: n }); }
+    var n = nombre(valeur);
+    if (n !== null) { envoyer({ periode: n }); }
+  });
+  surGroupe(boutonsTaux, function (valeur) {
+    boutonsTaux.forEach(function (b) {
+      poser(b, b.getAttribute('data-valeur') === valeur);
     });
-  }
+    var n = nombre(valeur);
+    if (n !== null) { envoyer({ taux: n }); }
+  });
   if (champPeripherique) {
     champPeripherique.addEventListener('change', function () {
       envoyer({ peripherique: champPeripherique.value });
     });
   }
-  if (caseLimiteur) {
-    caseLimiteur.addEventListener('change', function () {
-      envoyer({ limiteur: caseLimiteur.checked });
+  if (basculeLimiteur) {
+    basculeLimiteur.addEventListener('click', function () {
+      var nouveau = !actif(basculeLimiteur);
+      poser(basculeLimiteur, nouveau);
+      envoyer({ limiteur: nouveau });
     });
   }
   if (curseurReverb) {
@@ -693,69 +743,124 @@ script = [[
       h.title "Orgue — Audio",
       h.style style .. css,
     h.body {},
-      h.main class: "qualite-page",
-        h.div class: "entete",
-          h.a href: "/", "← Orgue",
-          h.h2 "Audio",
-        h.div class: "puce-bloc",
-          h.span class: "puce-charge charge-gris", id: "qualite-puce", role: "status", ["aria-live"]: "polite", "Pas encore évalué — jouez quelques accords",
-          h.p class: "note", id: "qualite-puce-detail", "Pointe : — · Xruns récents : 0 · total : 0",
-        h.section class: "qualite", id: "qualite", ["aria-label"]: "Réglages audio", ["data-charge-classe-0"]: modele.CHARGE_NIVEAUX[1].classe, ["data-charge-classe-1"]: modele.CHARGE_NIVEAUX[2].classe, ["data-charge-classe-2"]: modele.CHARGE_NIVEAUX[3].classe, ["data-charge-classe-3"]: modele.CHARGE_NIVEAUX[4].classe, ["data-charge-libelle-0"]: modele.CHARGE_NIVEAUX[1].libelle, ["data-charge-libelle-1"]: modele.CHARGE_NIVEAUX[2].libelle, ["data-charge-libelle-2"]: modele.CHARGE_NIVEAUX[3].libelle, ["data-charge-libelle-3"]: modele.CHARGE_NIVEAUX[4].libelle,
-          h.p class: "note qualite-indisponible", id: "qualite-indisponible", hidden: true,
-            "Réglages audio indisponibles sur ce serveur.",
-          h.div class: "qualite-corps",
-            h.label class: "qualite-champ",
-              h.span "Niveau",
-              h.select id: "qualite-niveau", ["aria-label"]: "Niveau de qualité",
-                table.unpack [option_qualite v, noms_niveaux[v], v == "3" for v in *niveaux_qualite],
-            h.div class: "qualite-cases",
-              h.label class: "qualite-case",
-                h.input type: "checkbox", id: "qualite-bruit", checked: true,
-                h.span "Bruit d'attaque",
-              h.label class: "qualite-case",
-                h.input type: "checkbox", id: "qualite-instabilite", checked: true,
-                h.span "Instabilité",
-            h.label class: "qualite-champ",
-              h.span "Spatialisation",
-              h.select id: "qualite-spatialisation", ["aria-label"]: "Spatialisation",
-                h.option value: "0", "Coupée",
-                h.option value: "1", "Simplifiée",
-                h.option value: "2", selected: true, "Complète",
-            h.label class: "qualite-champ",
-              h.span "Réverbération",
-              h.input type: "range", id: "reverb", min: "0", max: "127", step: "1", value: "64", ["aria-label"]: "Réverbération",
-            h.label class: "qualite-champ qualite-polyphonie",
-              h.span "Polyphonie maximale",
-              h.input type: "range", id: "qualite-polyphonie", min: "0", max: "512", step: "1", value: "0", ["aria-label"]: "Polyphonie maximale",
-              h.output id: "qualite-polyphonie-valeur", ["for"]: "qualite-polyphonie", "Illimitée",
-            h.label class: "qualite-champ qualite-demarrage",
-              h.span "Période",
-              h.select id: "qualite-periode", ["aria-label"]: "Période audio",
-                table.unpack [option_periode v for v in *periodes],
-              h.span class: "note qualite-note", id: "qualite-periode-note", hidden: true,
-            h.label class: "qualite-champ qualite-demarrage",
-              h.span "Taux d'échantillonnage",
-              h.select id: "qualite-taux", ["aria-label"]: "Taux d'échantillonnage",
-                table.unpack [option_taux v for v in *taux_valides],
-              h.span class: "note qualite-note", id: "qualite-taux-note", hidden: true,
-            h.label class: "qualite-champ qualite-demarrage",
-              h.span "Périphérique audio",
-              h.input type: "text", id: "qualite-peripherique", maxlength: "200", placeholder: "Défaut", ["aria-label"]: "Périphérique audio",
-              h.span class: "note qualite-note", id: "qualite-peripherique-note", hidden: true,
-            h.label class: "qualite-case qualite-demarrage",
-              h.input type: "checkbox", id: "qualite-limiteur", checked: true,
-              h.span "Limiteur",
-              h.span class: "note qualite-note", id: "qualite-limiteur-note", hidden: true,
-            h.label class: "qualite-case qualite-tete",
-              h.input type: "checkbox", id: "qualite-tete", checked: true,
-              h.span "Tête de réverbération zéro latence",
-              h.span class: "note qualite-note", id: "qualite-tete-etat", hidden: true,
-          h.p class: "note", id: "qualite-tete-impose", hidden: true,
-            "Valeur imposée par ORGANUM_REVERB_TETE : non modifiable ici.",
-          h.p class: "note qualite-repli", id: "qualite-repli", hidden: true,
-          h.p class: "note qualite-erreur", id: "qualite-audio-erreur", hidden: true,
-          h.p class: "note qualite-calibration", id: "qualite-calibration", hidden: true,
-          h.p class: "note qualite-message", id: "qualite-message", role: "status", ["aria-live"]: "polite", hidden: true,
-      h.script script
-
+      h.main(
+        class: "qualite-page"
+        h.div(
+          class: "entete"
+          h.a href: "/", "← Orgue"
+          h.h2 "Audio"
+        )
+        h.div(
+          class: "puce-bloc"
+          h.span class: "puce-charge charge-gris", id: "qualite-puce", role: "status", ["aria-live"]: "polite", "Pas encore évalué — jouez quelques accords"
+          h.p class: "note", id: "qualite-puce-detail", "Pointe : — · Xruns récents : 0 · total : 0"
+        )
+        h.section(
+          class: "qualite", id: "qualite", ["aria-label"]: "Réglages audio", ["data-charge-classe-0"]: modele.CHARGE_NIVEAUX[1].classe, ["data-charge-classe-1"]: modele.CHARGE_NIVEAUX[2].classe, ["data-charge-classe-2"]: modele.CHARGE_NIVEAUX[3].classe, ["data-charge-classe-3"]: modele.CHARGE_NIVEAUX[4].classe, ["data-charge-libelle-0"]: modele.CHARGE_NIVEAUX[1].libelle, ["data-charge-libelle-1"]: modele.CHARGE_NIVEAUX[2].libelle, ["data-charge-libelle-2"]: modele.CHARGE_NIVEAUX[3].libelle, ["data-charge-libelle-3"]: modele.CHARGE_NIVEAUX[4].libelle
+          h.p class: "note qualite-indisponible", id: "qualite-indisponible", hidden: true, "Réglages audio indisponibles sur ce serveur."
+          h.div(
+            class: "qualite-corps"
+            h.div(
+              class: "qualite-ligne"
+              h.span class: "qualite-libelle", "Niveau"
+              h.div(
+                class: "qualite-commandes"
+                h.div(
+                  class: "qualite-segments", id: "qualite-niveau", role: "group", ["aria-label"]: "Niveau de qualité"
+                  table.unpack [bouton_segment(v, nom, v == "3") for {v, nom} in *niveaux_segments]
+                )
+                h.span class: "qualite-note", id: "qualite-niveau-note", hidden: true
+              )
+            )
+            h.div(
+              class: "qualite-ligne qualite-ligne-pleine"
+              h.div(
+                class: "qualite-commandes"
+                h.button type: "button", class: "qualite-bascule", id: "qualite-bruit", ["aria-pressed"]: "true", "Bruit d'attaque"
+                h.button type: "button", class: "qualite-bascule", id: "qualite-instabilite", ["aria-pressed"]: "true", "Instabilité"
+              )
+            )
+            h.div(
+              class: "qualite-ligne"
+              h.span class: "qualite-libelle", "Spatialisation"
+              h.div(
+                class: "qualite-commandes"
+                h.div(
+                  class: "qualite-segments", id: "qualite-spatialisation", role: "group", ["aria-label"]: "Spatialisation"
+                  h.button type: "button", class: "qualite-segment", ["data-valeur"]: "0", ["aria-pressed"]: "false", "Coupée"
+                  h.button type: "button", class: "qualite-segment", ["data-valeur"]: "1", ["aria-pressed"]: "false", "Simplifiée"
+                  h.button type: "button", class: "qualite-segment", ["data-valeur"]: "2", ["aria-pressed"]: "true", "Complète"
+                )
+              )
+            )
+            h.div(
+              class: "qualite-ligne"
+              h.span class: "qualite-libelle", "Réverbération"
+              h.div(
+                class: "qualite-commandes"
+                h.input type: "range", id: "reverb", min: "0", max: "127", step: "1", value: "64", ["aria-label"]: "Réverbération"
+              )
+            )
+            h.div(
+              class: "qualite-ligne"
+              h.span class: "qualite-libelle", "Polyphonie maximale"
+              h.div(
+                class: "qualite-commandes qualite-commandes-curseur"
+                h.input type: "range", id: "qualite-polyphonie", min: "0", max: "512", step: "1", value: "0", ["aria-label"]: "Polyphonie maximale"
+                h.output id: "qualite-polyphonie-valeur", ["for"]: "qualite-polyphonie", "Illimitée"
+              )
+            )
+            h.div(
+              class: "qualite-ligne"
+              h.span class: "qualite-libelle", "Période"
+              h.div(
+                class: "qualite-commandes"
+                h.div(
+                  class: "qualite-segments", id: "qualite-periode", role: "group", ["aria-label"]: "Période audio"
+                  table.unpack [bouton_segment(v, v, v == "512", libelle_periode(v)) for v in *periodes]
+                )
+                h.span class: "qualite-note", id: "qualite-periode-note", hidden: true
+              )
+            )
+            h.div(
+              class: "qualite-ligne"
+              h.span class: "qualite-libelle", "Taux d'échantillonnage"
+              h.div(
+                class: "qualite-commandes"
+                h.div(
+                  class: "qualite-segments", id: "qualite-taux", role: "group", ["aria-label"]: "Taux d'échantillonnage"
+                  table.unpack [bouton_segment(v, v, v == "48000") for v in *taux_valides]
+                )
+                h.button type: "button", class: "qualite-bascule", id: "qualite-limiteur", ["aria-pressed"]: "true", "Limiteur"
+                h.span class: "qualite-note", id: "qualite-taux-note", hidden: true
+                h.span class: "qualite-note", id: "qualite-limiteur-note", hidden: true
+              )
+            )
+            h.div(
+              class: "qualite-ligne"
+              h.span class: "qualite-libelle", "Périphérique audio"
+              h.div(
+                class: "qualite-commandes"
+                h.input type: "text", id: "qualite-peripherique", maxlength: "200", placeholder: "Défaut", ["aria-label"]: "Périphérique audio"
+                h.span class: "qualite-note", id: "qualite-peripherique-note", hidden: true
+              )
+            )
+            h.div(
+              class: "qualite-ligne"
+              h.span class: "qualite-libelle", "Tête"
+              h.div(
+                class: "qualite-commandes"
+                h.button type: "button", class: "qualite-bascule", id: "qualite-tete", ["aria-pressed"]: "true", "Réverbération zéro latence"
+                h.span class: "qualite-note", id: "qualite-tete-etat", hidden: true
+              )
+            )
+          )
+          h.p class: "note", id: "qualite-tete-impose", hidden: true, "Valeur imposée par ORGANUM_REVERB_TETE : non modifiable ici."
+          h.p class: "note qualite-repli", id: "qualite-repli", hidden: true
+          h.p class: "note qualite-erreur", id: "qualite-audio-erreur", hidden: true
+          h.p class: "note qualite-calibration", id: "qualite-calibration", hidden: true
+          h.p class: "note qualite-message", id: "qualite-message", role: "status", ["aria-live"]: "polite", hidden: true
+        )
+        h.script script
+      )
   "<!DOCTYPE html>\n" .. page
