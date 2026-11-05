@@ -387,6 +387,96 @@ async function attendreChamp(nom, lecture, predicat, delai = 12000) {
   return attendre(async () => (predicat(await lecture()) ? true : null), nom, delai);
 }
 
+async function etatTemperamentDom() {
+  return evaluer(`(() => {
+    const groupe = document.getElementById('qualite-temperament');
+    const note = document.getElementById('qualite-temperament-note');
+    if (!groupe || !note) return null;
+    const boutons = Array.prototype.slice.call(
+      groupe.querySelectorAll('.qualite-segment'));
+    const nombres = (filtre) => boutons
+      .filter((b) => filtre(b.getAttribute('aria-busy'), b.getAttribute('aria-pressed')))
+      .map((b) => Number(b.getAttribute('data-valeur')));
+    return {
+      actifs: nombres((busy, pressed) => pressed === 'true'),
+      enCours: nombres((busy) => busy === 'true'),
+      statut: note.hidden ? '' : note.textContent,
+      role: note.getAttribute('role')
+    };
+  })()`);
+}
+
+async function testTemperamentRafale() {
+  const depart = (await api('/api/orgue')).temperament;
+  const a = (depart + 3) % 11;
+  const b = (depart + 7) % 11;
+  const nomA = await evaluer(
+    `document.querySelector('#qualite-temperament [data-valeur="${a}"]').textContent`);
+  const nomB = await evaluer(
+    `document.querySelector('#qualite-temperament [data-valeur="${b}"]').textContent`);
+
+  await clicGroupe('qualite-temperament', String(a));
+  const justeA = await etatTemperamentDom();
+  verifie(
+    justeA && justeA.enCours.includes(a),
+    `web /audio : état « en cours » immédiat sur le tempérament ${a}`
+  );
+  verifie(
+    justeA && justeA.actifs.includes(depart),
+    `web /audio : l'ancien tempérament ${depart} reste marqué en service`
+  );
+  verifie(
+    justeA && justeA.role === 'status' && justeA.statut.includes('Application') &&
+      justeA.statut.includes(nomA),
+    `web /audio : message de statut visible dans la rangée Tempérament (« ${justeA && justeA.statut} »)`
+  );
+
+  await clicGroupe('qualite-temperament', String(b));
+  const justeB = await etatTemperamentDom();
+  verifie(
+    justeB && justeB.enCours.includes(b) && !justeB.enCours.includes(a),
+    `web /audio : la rafale déplace la cible en cours de ${a} à ${b}`
+  );
+  verifie(
+    justeB && justeB.statut.includes(nomB),
+    `web /audio : le message suit la dernière cible (« ${justeB && justeB.statut} »)`
+  );
+
+  const fin = await attendre(
+    async () => {
+      const e = await api('/api/orgue');
+      return (e.temperament === b && e.qualite.application === false) ? e : null;
+    },
+    `web /audio : la dernière demande (${b}) aboutit après la rafale`,
+    30000
+  );
+  if (fin) {
+    const final = await attendre(
+      async () => {
+        const d = await etatTemperamentDom();
+        return (d && d.enCours.length === 0 && d.statut === '' && d.actifs.includes(b)) ? d : null;
+      },
+      `web /audio : état final du tempérament ${b} (bouton actif, plus d'« en cours »)`,
+      5000
+    );
+    verifie(
+      !!final,
+      `web /audio : message effacé et cible ${b} devenue active en fin de calcul`
+    );
+  }
+
+  const avant = await api('/api/orgue');
+  await clicGroupe('qualite-temperament', String(b));
+  await delay(500);
+  const apres = await api('/api/orgue');
+  const domReclic = await etatTemperamentDom();
+  verifie(
+    avant.seq === apres.seq && apres.temperament === b &&
+      domReclic && domReclic.enCours.length === 0,
+    'web /audio : recliquer le tempérament déjà actif n’envoie aucune demande'
+  );
+}
+
 async function testAudio() {
   await viewport(1100);
   await navigate('/audio');
@@ -518,6 +608,9 @@ async function testAudio() {
     verifie(applique, `web /audio : tempérament ${temperament} appliqué par clic (avant ${avant})`);
   }
   verifie(applicationVue, 'web /audio : « Application… » apparaît pendant un changement de tempérament');
+
+  await testTemperamentRafale();
+
   let messageFinal = '';
   for (let i = 0; i < 60; i += 1) {
     messageFinal = await evaluer('document.getElementById("qualite-message").textContent');
