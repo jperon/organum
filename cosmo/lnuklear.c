@@ -302,6 +302,54 @@ static int ui_choix(lua_State *L) {
   return 1;
 }
 
+// Dessine une ligne centrée horizontalement dans le rectangle d'un widget.
+// La chaîne vient de la pile Lua : elle reste valide jusqu'au prochain appel
+// Lua, et nk_draw_text en copie les octets dans le tampon de commandes.
+static void dessiner_ligne_centree(struct nk_command_buffer *out,
+                                   struct nk_rect b, const char *s, size_t n,
+                                   const struct nk_user_font *f,
+                                   struct nk_color couleur, float y) {
+  float w = f->width(f->userdata, f->height, s, (int)n);
+  float x = b.x + (b.w - w) / 2.0f;
+  if (x < b.x + 1.0f) x = b.x + 1.0f;
+  struct nk_rect r = nk_rect(x, y, w, f->height);
+  nk_draw_text(out, r, s, (int)n, f, nk_rgba(0, 0, 0, 0), couleur);
+}
+
+// ui:choix_deux(ligne1, ligne2, actif) → actif après interaction.
+//
+// Même interaction et même fond que ui:choix, mais le libellé est dessiné
+// sur deux lignes centrées verticalement : le rendu rawfb de Nuklear ne
+// gère pas les retours à la ligne, et son texte est toujours sur une seule
+// ligne. `actif` est un booléen, comme pour ui:choix.
+static int ui_choix_deux(lua_State *L) {
+  ui_t *u = luaL_checkudata(L, 1, "nk.ui");
+  size_t n1, n2;
+  const char *l1 = luaL_checklstring(L, 2, &n1);
+  const char *l2 = luaL_checklstring(L, 3, &n2);
+  int actif = lua_toboolean(L, 4);
+  struct nk_context *ctx = u->ctx;
+  // Rectangle du widget : nk_layout_peek donne la prochaine case avant que
+  // nk_selectable_label ne la consomme.
+  struct nk_rect b = nk_widget_bounds(ctx);
+  // Un espace plutôt qu'une chaîne vide : nk_do_selectable ignore les
+  // libellés vides, donc ne dessinerait ni fond ni état de survol.
+  nk_selectable_label(ctx, " ", NK_TEXT_CENTERED, &actif);
+  if (ctx->current && ctx->current->layout) {
+    const struct nk_user_font *f = ctx->style.font;
+    struct nk_color col = actif ? ctx->style.selectable.text_normal_active
+                                : ctx->style.selectable.text_normal;
+    float total = 2.0f * f->height;
+    float y = b.y + (b.h - total) / 2.0f;
+    if (y < b.y) y = b.y;
+    dessiner_ligne_centree(&ctx->current->buffer, b, l1, n1, f, col, y);
+    dessiner_ligne_centree(&ctx->current->buffer, b, l2, n2, f, col,
+                           y + f->height);
+  }
+  lua_pushboolean(L, actif);
+  return 1;
+}
+
 static int ui_case(lua_State *L) {
   ui_t *u = luaL_checkudata(L, 1, "nk.ui");
   const char *s = luaL_checkstring(L, 2);
@@ -409,6 +457,7 @@ static const struct luaL_Reg uifuncs[] = {
   {"texte", ui_texte},
   {"bouton", ui_bouton},
   {"choix", ui_choix},
+  {"choix_deux", ui_choix_deux},
   {"etat", ui_etat},
   {"case", ui_case},
   {"curseur", ui_curseur},
