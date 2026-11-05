@@ -32,6 +32,7 @@ CONFIG="$TMP/midi.json"
 JOURNAL="$TMP/organum.log"
 PID=""
 ECHECS=0
+IGNORES=0
 
 # Arrêt par le PID mémorisé, jamais par nom de processus. SIGKILL est
 # volontaire : sur SIGTERM, organum signale son groupe de processus, ce qui
@@ -59,6 +60,13 @@ ok() {
 echec() {
   echo "ÉCHEC : $1"
   ECHECS=$((ECHECS + 1))
+}
+
+# Contrôle volontairement non exécuté (outil absent) : signalé, jamais compté
+# comme un succès silencieux.
+ignore() {
+  echo "IGNORÉ : $1"
+  IGNORES=$((IGNORES + 1))
 }
 
 # Vérifie qu'une chaîne contient un motif littéral.
@@ -210,6 +218,184 @@ verifie_absent() {
   fi
 }
 
+# Contrôle AVEC fenêtre native, sous Xvfb : l'interface ne doit pas modifier
+# l'état des jeux en boucle. Démarre l'orgue sur une sortie muette, sans
+# ORGANUM_FENETRE=non ; après 3 s, compare /api/orgue à 5 s d'intervalle :
+# seq inchangé et tous les « on » identiques. Une variable locale aux branches
+# (bug de portée MoonScript) inverserait chaque jeu à chaque image et ferait
+# varier seq.
+controle_fenetre() {
+  if ! command -v Xvfb >/dev/null 2>&1; then
+    ignore "contrôle avec fenêtre (Xvfb absent)"
+    return 0
+  fi
+  if ! command -v xdotool >/dev/null 2>&1; then
+    ignore "contrôle avec fenêtre (xdotool absent)"
+    return 0
+  fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    ignore "contrôle avec fenêtre (python3 absent)"
+    return 0
+  fi
+
+  export DISPLAY=localhost:3
+  unset WAYLAND_DISPLAY
+  XVFB_PID=""
+  if ! timeout 2 xdotool getdisplaygeometry >/dev/null 2>&1; then
+    echo "INFO  : Xvfb :3 absent, démarrage"
+    Xvfb :3 -screen 0 1280x800x24 -listen tcp -ac >"$TMP/xvfb.log" 2>&1 &
+    XVFB_PID=$!
+    i=0
+    while [ "$i" -lt 50 ]; do
+      timeout 1 xdotool getdisplaygeometry >/dev/null 2>&1 && break
+      sleep 0.1
+      i=$((i + 1))
+    done
+    if ! timeout 1 xdotool getdisplaygeometry >/dev/null 2>&1; then
+      echec "contrôle avec fenêtre : Xvfb :3 ne démarre pas"
+      kill -KILL "$XVFB_PID" 2>/dev/null || true
+      wait "$XVFB_PID" 2>/dev/null || true
+      unset DISPLAY
+      return 1
+    fi
+  fi
+
+  PORT_FEN=$((PORT + 20))
+  while ! port_libre "$PORT_FEN"; do
+    PORT_FEN=$((PORT_FEN + 1))
+  done
+  URL_FEN="http://127.0.0.1:$PORT_FEN"
+  DIR_FEN="$TMP/fenetre"
+  mkdir -p "$DIR_FEN"
+  PID_FEN=""
+  ENFANTS_FEN=""
+
+  arreter_fenetre() {
+    for e in $ENFANTS_FEN; do
+      kill -KILL "$e" 2>/dev/null || true
+    done
+    if [ -n "$PID_FEN" ]; then
+      kill -KILL "$PID_FEN" 2>/dev/null || true
+      wait "$PID_FEN" 2>/dev/null || true
+      PID_FEN=""
+    fi
+    if [ -n "$XVFB_PID" ]; then
+      kill -KILL "$XVFB_PID" 2>/dev/null || true
+      wait "$XVFB_PID" 2>/dev/null || true
+      XVFB_PID=""
+    fi
+  }
+
+  unset ORGANUM_QUALITE ORGANUM_CALIBRATION_FACTEUR ORGANUM_REVERB_TETE
+  unset ORGANUM_PERIPHERIQUE ORGANUM_PERIODE ORGANUM_TAUX ORGANUM_LIMITEUR
+  unset ORGANUM_FENETRE ORGANUM_ETAT ORGANUM_CONFIG_MIDI
+  ORGANUM_ETAT="$DIR_FEN/etat.json" \
+  ORGANUM_CONFIG_MIDI="$DIR_FEN/midi.json" \
+  ORGANUM_PERIPHERIQUE=null \
+  "$BIN" -l 127.0.0.1 -p "$PORT_FEN" >"$DIR_FEN/journal.log" 2>&1 &
+  PID_FEN=$!
+
+  i=0
+  while [ "$i" -lt 200 ]; do
+    if curl -s --connect-timeout 1 --max-time 1 -o /dev/null "$URL_FEN/api/orgue"; then
+      break
+    fi
+    if ! kill -0 "$PID_FEN" 2>/dev/null; then
+      echec "contrôle avec fenêtre : organum s'est arrêté au démarrage"
+      sed 's/^/        /' "$DIR_FEN/journal.log" >&2
+      arreter_fenetre
+      unset DISPLAY
+      return 1
+    fi
+    sleep 0.1
+    i=$((i + 1))
+  done
+  if [ "$i" -ge 200 ]; then
+    echec "contrôle avec fenêtre : organum ne répond pas sur $URL_FEN"
+    sed 's/^/        /' "$DIR_FEN/journal.log" >&2
+    arreter_fenetre
+    unset DISPLAY
+    return 1
+  fi
+
+  # Laisse la fenêtre se créer, puis vérifie que le processus fils tourne bien.
+  sleep 3
+  ENFANTS_FEN=$(pgrep -P "$PID_FEN" 2>/dev/null || true)
+  if [ -z "$ENFANTS_FEN" ]; then
+    echec "contrôle avec fenêtre : aucun processus de fenêtre lancé"
+    sed 's/^/        /' "$DIR_FEN/journal.log" >&2
+    arreter_fenetre
+    unset DISPLAY
+    return 1
+  fi
+
+  S1=$(curl -s "$URL_FEN/api/orgue")
+  sleep 5
+  S2=$(curl -s "$URL_FEN/api/orgue")
+  printf '%s' "$S1" >"$DIR_FEN/etat1.json"
+  printf '%s' "$S2" >"$DIR_FEN/etat2.json"
+
+  if MESSAGE=$(python3 - "$DIR_FEN/etat1.json" "$DIR_FEN/etat2.json" <<'PY'
+import json, sys
+
+a = json.load(open(sys.argv[1]))
+b = json.load(open(sys.argv[2]))
+
+def jeux(d):
+    return [(i, j, bool(jeu.get("on")))
+            for i, div in enumerate(d.get("divisions", []))
+            for j, jeu in enumerate(div.get("jeux", []))]
+
+ja, jb = jeux(a), jeux(b)
+erreurs = []
+if a.get("seq") != b.get("seq"):
+    erreurs.append("seq %s -> %s" % (a.get("seq"), b.get("seq")))
+if ja != jb:
+    diffs = [(x, y) for x, y in zip(ja, jb) if x != y]
+    erreurs.append("%d jeu(x) inversé(s) : %s" % (len(diffs), diffs[:5]))
+if erreurs:
+    print("; ".join(erreurs))
+    sys.exit(1)
+print("seq=%s, %d jeux identiques" % (a.get("seq"), len(ja)))
+PY
+  ); then
+    ok "fenêtre : état stable ($MESSAGE)"
+  else
+    echec "fenêtre : état instable ($MESSAGE)"
+  fi
+
+  arreter_fenetre
+  unset DISPLAY
+  return 0
+}
+
+# Lint des globales MoonScript : le bug était une variable non déclarée,
+# locale à ses branches et donc globale à la lecture. moonc -l signale aussi
+# les globales fournies par redbean (Slurp, utf8) et le journal (Log,
+# kLogWarn) : la liste explicite ci-dessous les autorise. Toute autre globale
+# (nouvelle) fait échouer le contrôle.
+controle_globales() {
+  if ! command -v moonc >/dev/null 2>&1; then
+    ignore "lint des globales MoonScript (moonc absent)"
+    return 0
+  fi
+  SORTIE=$(moonc -l --lint-stage global_access "$RACINE/src/fenetre.moon" 2>&1 || true)
+  GLOBALES=$(printf '%s\n' "$SORTIE" |
+    sed -n 's/.*accessing global `\([^`]*\)`.*/\1/p' | sort -u)
+  NOUVELLES=""
+  for g in $GLOBALES; do
+    case " Slurp utf8 Log kLogWarn " in
+      *" $g "*) ;;
+      *) NOUVELLES="$NOUVELLES $g" ;;
+    esac
+  done
+  if [ -n "$NOUVELLES" ]; then
+    echec "fenetre.moon : globale(s) non déclarée(s) :$NOUVELLES"
+  else
+    ok "fenetre.moon : aucune globale nouvelle (autorisées : Slurp, utf8, Log, kLogWarn)"
+  fi
+}
+
 # Repart d'un premier lancement : ni etat.json ni son fichier de qualité.
 effacer_etat() {
   arreter
@@ -220,6 +406,26 @@ unset ORGANUM_QUALITE ORGANUM_REVERB_TETE ORGANUM_CALIBRATION_FACTEUR
 # Active le point d'entrée de diagnostic de la règle C du niveau de charge.
 ORGANUM_DIAGNOSTIC=1
 export ORGANUM_DIAGNOSTIC
+
+# Permet de ne lancer que le contrôle avec fenêtre (démonstration ou mise au
+# point, sans attendre toute la suite).
+if [ "${TEST_FENETRE_SEUL:-0}" = 1 ]; then
+  controle_fenetre
+  echo
+  if [ "$ECHECS" -eq 0 ]; then
+    if [ "$IGNORES" -gt 0 ]; then
+      echo "Tous les contrôles exécutés : OK ($IGNORES ignoré(s))"
+    else
+      echo "Tous les contrôles : OK"
+    fi
+    exit 0
+  fi
+  echo "$ECHECS contrôle(s) en échec"
+  exit 1
+fi
+
+echo "== lint des globales MoonScript (fenetre.moon)"
+controle_globales
 
 echo "== démarrage sur le port $PORT (état temporaire $TMP)"
 effacer_etat
@@ -1041,9 +1247,16 @@ else
 fi
 arreter
 
+echo "== fenêtre native : état stable sous Xvfb"
+controle_fenetre
+
 echo
 if [ "$ECHECS" -eq 0 ]; then
-  echo "Tous les contrôles : OK"
+  if [ "$IGNORES" -gt 0 ]; then
+    echo "Tous les contrôles exécutés : OK ($IGNORES ignoré(s))"
+  else
+    echo "Tous les contrôles : OK"
+  fi
   exit 0
 fi
 echo "$ECHECS contrôle(s) en échec"
