@@ -51,14 +51,15 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   volume du moteur (pédale), distinct de `/api/volume` (volume système), déjà
   persisté et pilotable par une association MIDI de cible « volume ».
   `page.moon` (orgue), `page_midi.moon`
-  (`/midi`), `page_qualite.moon` (`/qualite`), `client.moon` (JS de la page
-  orgue), `style.moon` : interface. `web/src/.lua/html.moon` : générateur
+  (`/midi`), `page_audio.moon` (`/audio`, panneau « Audio » ; `/qualite`
+  redirige vers `/audio`), `client.moon` (JS de la page orgue),
+  `style.moon` : interface. `web/src/.lua/html.moon` : générateur
   HTML.
 - Réglages de qualité : champs du moteur dans `cosmo/lorganum.c`
   (`CMD_QUALITE`, fonction Lua `organum.qualite`, `organum.demarrer{qualite,
   tete_reverb}`) ; présélections, validation de `POST /api/orgue {qualite}`,
   `ORGANUM_QUALITE` et persistance (clé `qualite` d'`etat.json`) dans
-  `web/src/init.moon`, panneau dédié `web/src/page_qualite.moon`. Tous les
+  `web/src/init.moon`, panneau dédié `web/src/page_audio.moon`. Tous les
   réglages s'appliquent à chaud, sans bouton
   de redémarrage : limiteur (`CMD_LIMITEUR`) et tête (`CMD_TETE`) par le
   tube, période/taux/périphérique par `organum.reconfigurer_audio{...}`
@@ -111,6 +112,8 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   (`ORGANUM_FENETRE=non` pour s'en passer). Avec un volume système, deux
   curseurs distincts : « Volume » (système) et « Pédale » (volume du moteur,
   avec sa valeur en %) ; sans lui, le curseur unique règle déjà le moteur.
+  La réverbération n'est plus sur la console principale : elle est réglée
+  dans le panneau « Audio », comme le curseur de la page web.
   Exigence : tout doit tenir dans la fenêtre, sans défilement, et grossir
   quand elle est agrandie.
   Essai hors moteur : `ui/essai_fenetre.moon` (état factice). X11 : socket

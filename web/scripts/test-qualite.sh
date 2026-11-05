@@ -277,18 +277,28 @@ verifie "règle : 3 xruns récents = rouge (3)" '"niveau":3' "$R"
 R=$(diag_charge 20 0 0)
 verifie "règle : pas de mesure de jeu = gris (0)" '"niveau":0' "$R"
 
-echo "== pages : /qualite séparée de /"
-CODE=$(curl -s -o "$TMP/qualite.html" -w '%{http_code}' "$URL/qualite")
+echo "== pages : /audio séparée de /"
+CODE=$(curl -s -o "$TMP/audio.html" -w '%{http_code}' "$URL/audio")
 if [ "$CODE" = "200" ]; then
-  ok "/qualite répond 200"
+  ok "/audio répond 200"
 else
-  echec "/qualite attendu 200, reçu $CODE"
+  echec "/audio attendu 200, reçu $CODE"
 fi
-verifie "/qualite contient qualite-niveau" 'qualite-niveau' "$(cat "$TMP/qualite.html" 2>/dev/null || true)"
+verifie "/audio contient qualite-niveau" 'qualite-niveau' "$(cat "$TMP/audio.html" 2>/dev/null || true)"
+verifie "/audio contient le curseur de réverbération" 'id="reverb"' "$(cat "$TMP/audio.html" 2>/dev/null || true)"
+LOCATION=$(curl -s -o /dev/null -D - "$URL/qualite" | tr -d '\r' | grep -i '^Location:' | head -n 1)
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$URL/qualite")
+if [ "$CODE" = "302" ]; then
+  ok "/qualite redirige (302)"
+else
+  echec "/qualite attendu 302, reçu $CODE"
+fi
+verifie "/qualite redirige vers /audio" 'Location: /audio' "$LOCATION"
 curl -s "$URL/" >"$TMP/accueil.html"
-verifie_absent "/ ne contient plus la section Qualité" 'qualite-niveau' "$(cat "$TMP/accueil.html" 2>/dev/null || true)"
-verifie "/ contient un lien vers /qualite" 'href="/qualite"' "$(cat "$TMP/accueil.html" 2>/dev/null || true)"
-verifie "lien Qualité : aria-label présent" 'aria-label="Qualité —' "$(cat "$TMP/accueil.html" 2>/dev/null || true)"
+verifie_absent "/ ne contient plus la section Audio" 'qualite-niveau' "$(cat "$TMP/accueil.html" 2>/dev/null || true)"
+verifie_absent "/ ne contient plus le curseur de réverbération" 'id="reverb"' "$(cat "$TMP/accueil.html" 2>/dev/null || true)"
+verifie "/ contient un lien vers /audio" 'href="/audio"' "$(cat "$TMP/accueil.html" 2>/dev/null || true)"
+verifie "lien Audio : aria-label présent" 'aria-label="Audio —' "$(cat "$TMP/accueil.html" 2>/dev/null || true)"
 
 echo "== POST valide : un seul champ"
 R=$(post '{"qualite":{"spatialisation":1}}')
