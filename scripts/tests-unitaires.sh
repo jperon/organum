@@ -57,34 +57,59 @@ export -n WAYLAND_DISPLAY DISPLAY 2>/dev/null || true
 unset WAYLAND_DISPLAY DISPLAY
 
 # --- Compilation de tous les .moon -----------------------------------------
-# Même découpage que web/scripts/build.sh : init -> .init.lua, les autres
-# modules par leur nom de base, y compris .lua/html.moon.
+# Un seul appel à moonc pour l'arborescence (web/src et ui), puis le module
+# caché .lua/html.moon que moonc ne parcourt pas. Chaque fichier attendu est
+# ensuite vérifié un par un, comme le fait web/scripts/build.sh.
+mkdir -p "$TMP/moon" "$LUA"
+if message=$( (cd "$RACINE" && moonc -t "$TMP/moon" web/src ui) 2>&1 ); then
+  :
+else
+  printf '%s\n' "$message" >&2
+fi
+if message=$(moonc -o "$LUA/html.lua" "$RACINE/web/src/.lua/html.moon" 2>&1); then
+  :
+else
+  printf '%s\n' "$message" >&2
+fi
+# Les modules visibles servent aux tests ; init est compilé comme les autres.
+cp "$TMP/moon/src/"*.lua "$LUA/" 2>/dev/null || true
+cp "$LUA/init.lua" "$LUA/.init.lua" 2>/dev/null || true
 while IFS= read -r f; do
   base="$(basename "$f" .moon)"
-  if [ "$base" = "init" ] && [ "$(dirname "$f")" = "$RACINE/web/src" ]; then
-    sortie="$LUA/.init.lua"
-  elif [ "$(dirname "$f")" = "$RACINE/ui" ]; then
-    mkdir -p "$TMP/ui"
-    sortie="$TMP/ui/$base.lua"
-  else
-    sortie="$LUA/$base.lua"
-  fi
-  if message=$(moonc -o "$sortie" "$f" 2>&1); then
+  case "$f" in
+    "$RACINE"/web/src/.lua/*) sortie="$LUA/$base.lua" ;;
+    "$RACINE"/web/src/*) sortie="$TMP/moon/src/$base.lua" ;;
+    "$RACINE"/ui/*) sortie="$TMP/moon/ui/$base.lua" ;;
+    *) sortie="$TMP/moon/$base.lua" ;;
+  esac
+  if [ -f "$sortie" ]; then
     ok "compilation : ${f#"$RACINE/"}"
   else
-    echec "compilation : ${f#"$RACINE/"} ($message)"
+    echec "compilation : ${f#"$RACINE/"} (sortie absente)"
   fi
 done < <(find "$RACINE/web/src" "$RACINE/ui" -name '*.moon' -not -path '*/externe/*' | sort)
 
 # --- Lint des globales -------------------------------------------------------
-# Liste explicite des globales fournies par redbean ou le journal. Toute
-# nouvelle globale (le bug de a498232 était une variable de branche devenue
-# globale à la lecture) fait échouer la suite.
+# Un seul passage de moonc sur les deux arborescences, puis lecture par
+# fichier. Liste explicite des globales fournies par redbean ou le journal :
+# toute nouvelle globale (le bug de a498232 était une variable de branche
+# devenue globale à la lecture) fait échouer la suite.
 GLOBALES_PERMISES=" Slurp utf8 Log kLogWarn kLogInfo kLogFatal DecodeJson EncodeJson Barf SetStatus SetHeader Write GetBody GetMethod GetPath GetParam ProgramHeartbeatInterval GetHostOs unix arg nk organum Route "
+LINT_LOG="$TMP/lint.log"
+(cd "$RACINE" && moonc -l --lint-stage global_access web/src ui) >"$LINT_LOG" 2>&1 || true
+awk -v racine="$RACINE/" '
+  /^[^[:space:]].*\.moon$/ { f = $0; sub("^" racine, "", f); next }
+  /accessing global `[^`]*`/ {
+    s = $0
+    sub(/.*accessing global `/, "", s)
+    sub(/`.*/, "", s)
+    cle = f "|" s
+    if (!(cle in vu)) { vu[cle] = 1; print f "\t" s }
+  }
+' "$LINT_LOG" >"$TMP/globales.tsv"
 while IFS= read -r f; do
-  sortie=$(moonc -l --lint-stage global_access "$f" 2>&1 || true)
-  globales=$(printf '%s\n' "$sortie" |
-    sed -n 's/.*accessing global `\([^`]*\)`.*/\1/p' | sort -u)
+  rel="${f#"$RACINE/"}"
+  globales=$(awk -F '\t' -v f="$rel" '$1 == f { printf " %s", $2 }' "$TMP/globales.tsv")
   nouvelles=""
   for g in $globales; do
     case "$GLOBALES_PERMISES" in
@@ -93,9 +118,9 @@ while IFS= read -r f; do
     esac
   done
   if [ -n "$nouvelles" ]; then
-    echec "globales non déclarées dans ${f#"$RACINE/"}:$nouvelles"
+    echec "globales non déclarées dans $rel:$nouvelles"
   else
-    ok "lint des globales : ${f#"$RACINE/"}"
+    ok "lint des globales : $rel"
   fi
 done < <(find "$RACINE/web/src" "$RACINE/ui" -name '*.moon' -not -path '*/externe/*' | sort)
 
