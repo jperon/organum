@@ -5,6 +5,35 @@
 -- Validations et fusions pures, partagées avec les tests unitaires.
 validation = require "validation"
 
+-- Écoute : redbean, sans adresse explicite (-l), ne programme que 0.0.0.0
+-- (tool/net/redbean.c, Listen) ; on ajoute « :: » pour répondre aussi en
+-- IPv6. Un -l explicite reste seul appliqué : la ligne de commande du
+-- processus est lue dans /proc (absente sous Windows, on garde le défaut).
+-- redbean pose IPV6_V6ONLY, les deux écoutes coexistent sur le même port.
+a_un_l = ->
+  fd = unix.open "/proc/self/cmdline", unix.O_RDONLY
+  return false unless fd
+  contenu = unix.read fd, 65536
+  unix.close fd
+  return false unless type(contenu) == "string"
+  for morceau in contenu\gmatch "[^%z]+"
+    return true if morceau == "-l" or (morceau\sub(1, 2) == "-l" and #morceau > 2)
+  false
+
+-- Créer puis lier une socket IPv6 sur :: (port 0) dit si la pile IPv6 est
+-- utilisable ; la socket est refermée aussitôt. Sinon, on se replie sur IPv4.
+ipv6_disponible = ->
+  fd = unix.socket unix.AF_INET6, unix.SOCK_STREAM
+  return false unless fd
+  possible = unix.bind fd, 0, 0
+  unix.close fd
+  possible and true or false
+
+do
+  unless a_un_l!
+    ProgramAddr "::" if ipv6_disponible!
+    ProgramAddr "0.0.0.0"
+
 -- Horloge monotone, en secondes (pour les délais de run).
 maintenant = ->
   secondes, nanos = unix.clock_gettime unix.CLOCK_MONOTONIC
