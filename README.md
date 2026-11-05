@@ -42,6 +42,22 @@ Ouvrir <http://localhost:8080> (ou l'adresse de la machine depuis une
 tablette). Les options de redbean s'appliquent, par exemple `-p 9000` pour
 changer de port ou `-l 127.0.0.1` pour n'écouter qu'en local.
 
+### Authentification facultative
+
+Aucun mot de passe n'est demandé par défaut. Il se définit, se change et se
+retire depuis le panneau **Audio** (page web ou fenêtre native) ; seul
+`SHA-256(utilisateur:organum:mot de passe)` est conservé, dans
+`etat.json.authentification.json` (droits `0600`). Les adresses locales
+`127.0.0.1` et `::1` restent exemptées, et la fenêtre native n'emprunte pas
+HTTP.
+
+`ORGANUM_MOT_DE_PASSE` impose le mot de passe (utilisateur enregistré, ou
+`organiste`), n'est jamais recopié sur disque et verrouille le réglage.
+L'authentification est HTTP Digest SHA-256 (RFC 7616, `qop=auth`) : elle
+vérifie les droits, sans chiffrer le contenu. Servie en HTTP, la page
+envoie le mot de passe en clair lors de sa définition ; utiliser HTTPS ou un
+réseau de confiance si cela compte.
+
 ### Craquements et temps réel
 
 Le fil audio demande la priorité temps réel `SCHED_FIFO 70`. Sans ce droit,
