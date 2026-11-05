@@ -166,6 +166,25 @@ ORGANUM_WEB=1 web/scripts/build.sh    # variante sans UI native : web/build/orga
 Test rapide : lancer `web/build/organum.com -p 8099`, puis
 `curl localhost:8099/api/orgue`. Un clavier MIDI virtuel suffit pour le MIDI.
 
+Tests unitaires rapides (sans carte son, affichage, réseau, moteur ni
+`sleep`) :
+
+```bash
+scripts/tests-unitaires.sh            # code 0 si tout passe
+```
+
+Il compile tous les `.moon` avec `moonc`, les exécute avec `redbean -i`
+(Lua 5.4), vérifie la syntaxe JavaScript avec `node --check`, lint les
+globales MoonScript (liste explicite, toute nouvelle globale échoue), et
+éprouve les règles C/C++ pures (`cosmo/charge_niveau.h`,
+`moteur/tests/scale_tables.cpp`). La disposition et les validations ont été
+extraites dans `web/src/fenetre_disposition.moon` et `web/src/validation.moon`
+pour être testables sans Nuklear ni redbean ; `web/src/fenetre.moon` et
+`web/src/init.moon` les requièrent. Les tests Lua sont dans `web/tests/`.
+Les objets C++ sont mis en cache dans `web/build/objets-tests` : la première
+exécution compile `scale.cpp` (quelques secondes), les suivantes restent
+sous 3 s.
+
 ## Licences
 
 Projet sous AGPL-3.0 (JUCE est AGPLv3). Toute ressource ajoutée doit avoir
