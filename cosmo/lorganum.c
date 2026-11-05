@@ -1242,8 +1242,16 @@ static int l_demarrer(lua_State *L) {
       }
       lua_pop(L, 1);
     }
-    aeolus_temperament(g_moteur, temperament);
-    g_etat->temperament = aeolus_lire_temperament(g_moteur);
+    // Ne reconstruire les jeux que si la valeur demandée diffère de celle
+    // que loadRankwaves a déjà construite (l'égal par défaut, ou le réglage
+    // lu dans le fichier utilisateur d'Aeolus s'il existe). La comparaison
+    // porte sur l'effectif, pas sur la constante de l'enum.
+    int effectif = aeolus_lire_temperament(g_moteur);
+    if (effectif != temperament) {
+      aeolus_temperament(g_moteur, temperament);
+      effectif = aeolus_lire_temperament(g_moteur);
+    }
+    g_etat->temperament = effectif;
   }
   // Tête de convolution zéro latence de la réverbération : active par
   // défaut ; l'option tete_reverb=false la coupe, et ORGANUM_REVERB_TETE
