@@ -162,6 +162,24 @@ else
   ignore "C : gcc absent, règle charge_niveau non testée"
 fi
 
+# --- Règle C du cadencement de la sortie « null » ---------------------------
+if command -v gcc >/dev/null 2>&1; then
+  if gcc -O2 -I "$RACINE/cosmo" "$RACINE/cosmo/tests/sortie_null.c" \
+       -o "$TMP/sortie_null" 2>"$TMP/gcc-sortie.log"; then
+    if "$TMP/sortie_null" >"$TMP/sortie.log" 2>&1; then
+      ok "C : règle sortie_null (null seul, défaut inactif)"
+    else
+      cat "$TMP/sortie.log"
+      echec "C : règle sortie_null"
+    fi
+  else
+    cat "$TMP/gcc-sortie.log" >&2
+    echec "C : compilation sortie_null"
+  fi
+else
+  ignore "C : gcc absent, règle sortie_null non testée"
+fi
+
 # --- Tables C++ des tempéraments --------------------------------------------
 # Compilation mise en cache : scale.cpp et le test ne changent pas entre deux
 # exécutions. La première compilation (quelques secondes) est hors du budget
