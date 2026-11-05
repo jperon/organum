@@ -83,6 +83,30 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   `ORGANUM_QUALITE=auto`), avec le taux et la période retenus, applique la
   présélection retenue, se replie sur le niveau 3 au-delà de 1,5 s, et expose
   le résultat dans `qualite.calibration`.
+- Tempérament : `moteur/aeolus/scale.h` définit 11 types (`Scale::Type`,
+  égal par défaut) ; `moteur/api/aeolus_c.{h,cpp}` expose
+  `aeolus_nb_temperaments`, `aeolus_nom_temperament`,
+  `aeolus_temperament` (reconstruit les jeux de tuyaux et bascule) et
+  `aeolus_lire_temperament`. Le recalcul (`retunePipes` dans le jeu de
+  tuyaux parallèle puis `prepareToPlay`, `engine.cpp`) est long (2 à 3 s) :
+  `cosmo/lorganum.c` le fait dans un fil dédié, jamais dans le fil audio,
+  sous `g_moteur_verrou` (aucune course avec `organum.sauvegarder` ni avec
+  une reconfiguration) ; le son tenu continue sur l'ancien jeu et n'est
+  basculé qu'une fois le nouveau prêt. Une petite section de la mmap
+  partagée porte la dernière demande, un compteur demandes/traitées et le
+  verrou associé ; `qualite.application` couvre donc aussi le tempérament.
+  Seule la dernière demande rapprochée compte, les précédentes restant
+  comptées jusqu'au calcul qui les couvre. Lua : `organum.temperament(type)`
+  et option `temperament` de `organum.demarrer`. `POST /api/orgue
+  {"temperament": N}` (entier 0..10, sinon 400) et `GET /api/orgue`
+  (`temperament`) ; clé `temperament` d'`etat.json`, absente ou invalide =
+  égal (5). Libellés français dans `modele.TEMPERAMENTS`, utilisés par
+  `page_audio.moon` et `fenetre.moon` (deux rangées de 11 boutons au
+  panneau Audio). Le changement de taux recrée le moteur : `recreer_moteur`
+  capture et réapplique le tempérament. MTS reste désactivé dans
+  `aeolus_creer`, sans priorité sur notre valeur (le fichier de réglages
+  utilisateur d'Aeolus, `~/.config/Aeolus.settings`, est écrasé par
+  l'application explicite au démarrage).
 - Puce d'adaptation à la machine : le fil audio mesure le rendu avec deux
   `clock_gettime(CLOCK_MONOTONIC)` par tampon (vDSO sous Linux, donc sans
   appel système), hors attente d'écriture. Pour chaque seconde pleine, la
