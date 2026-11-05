@@ -700,18 +700,58 @@ void Division::triggerVoicesOfEnabledStops()
     }
 }
 
-void Division::updateAggregatedKeysState()
+void Division::ajouterTouchesAccouplees(std::bitset<TOTAL_NOTES>& touches,
+                                        Division** vus, int& nbVus) const
 {
-    _aggregatedKeysState = _keysState;
+    touches |= _keysState;
 
-    for (const auto* division : _linkedFromDivisions) {
+    for (auto* division : _linkedFromDivisions) {
+        bool lienActif{ false };
+
         for (const auto& link : division->_linkedDivisions) {
-            if (link.division == this && link.enabled) {
-                _aggregatedKeysState |= division->_aggregatedKeysState;
+            if (link.division == this) {
+                lienActif = link.enabled;
                 break;
             }
         }
+
+        if (!lienActif)
+            continue;
+
+        bool dejaVu{ false };
+        for (int i = 0; i < nbVus; ++i) {
+            if (vus[i] == division) {
+                dejaVu = true;
+                break;
+            }
+        }
+
+        if (dejaVu)
+            continue;
+
+        if (nbVus >= 16)
+            continue;
+
+        vus[nbVus++] = division;
+        division->ajouterTouchesAccouplees(touches, vus, nbVus);
     }
+}
+
+void Division::updateAggregatedKeysState()
+{
+    // Les touches sont lues directement à leur source, pas dans son agrégat
+    // mis en cache : la division source peut passer après celle-ci dans la
+    // boucle audio, si bien que son agrégat du tour précédent ne contient pas
+    // encore une note reçue entre-temps. La note accouplée était alors
+    // relâchée au premier bloc, d'où la polyphonie perdue sur un clavier
+    // accouplé sans jeu.
+    _aggregatedKeysState.reset();
+
+    Division* vus[16] = {};
+    int nbVus{ 0 };
+    vus[nbVus++] = this;
+
+    ajouterTouchesAccouplees(_aggregatedKeysState, vus, nbVus);
 }
 
 bool Division::triggerVoicesForStop(int stopIndex, int note)
