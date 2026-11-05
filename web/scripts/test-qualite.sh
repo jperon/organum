@@ -108,10 +108,11 @@ done
 URL="http://127.0.0.1:$PORT"
 
 # lancer [ORGANUM_QUALITE] [ORGANUM_CALIBRATION_FACTEUR] [ORGANUM_REVERB_TETE]
-#        [PERIPH] [ORGANUM_PERIODE] [ORGANUM_TAUX] [ORGANUM_LIMITEUR] :
+#        [PERIPH] [ORGANUM_PERIODE] [ORGANUM_TAUX] [ORGANUM_LIMITEUR] [ADRESSE] :
 # démarre l'orgue et attend qu'il réponde. Les variables sont propres à ce
 # lancement ; PERIPH vaut « null » par défaut, et « - » ne définit pas
 # ORGANUM_PERIPHERIQUE (pour éprouver le repli sans sortie audio réelle).
+# ADRESSE vaut 127.0.0.1 par défaut ; « - » omet -l (écoute par défaut).
 lancer() {
   qualite=$1
   facteur=${2:-}
@@ -120,6 +121,7 @@ lancer() {
   periode=${5:-}
   taux=${6:-}
   limiteur=${7:-}
+  adresse=${8:-127.0.0.1}
   unset ORGANUM_QUALITE ORGANUM_CALIBRATION_FACTEUR ORGANUM_REVERB_TETE
   unset ORGANUM_PERIPHERIQUE ORGANUM_PERIODE ORGANUM_TAUX ORGANUM_LIMITEUR
   if [ -n "$qualite" ]; then
@@ -143,10 +145,17 @@ lancer() {
   if [ -n "$limiteur" ]; then
     export ORGANUM_LIMITEUR="$limiteur"
   fi
-  ORGANUM_ETAT="$ETAT" \
-  ORGANUM_CONFIG_MIDI="$CONFIG" \
-  ORGANUM_FENETRE=non \
-  "$BIN" -l 127.0.0.1 -p "$PORT" >"$JOURNAL" 2>&1 &
+  if [ "$adresse" = "-" ]; then
+    ORGANUM_ETAT="$ETAT" \
+    ORGANUM_CONFIG_MIDI="$CONFIG" \
+    ORGANUM_FENETRE=non \
+    "$BIN" -p "$PORT" >"$JOURNAL" 2>&1 &
+  else
+    ORGANUM_ETAT="$ETAT" \
+    ORGANUM_CONFIG_MIDI="$CONFIG" \
+    ORGANUM_FENETRE=non \
+    "$BIN" -l "$adresse" -p "$PORT" >"$JOURNAL" 2>&1 &
+  fi
   PID=$!
   unset ORGANUM_QUALITE ORGANUM_CALIBRATION_FACTEUR ORGANUM_REVERB_TETE
   unset ORGANUM_PERIPHERIQUE ORGANUM_PERIODE ORGANUM_TAUX ORGANUM_LIMITEUR
@@ -1270,6 +1279,57 @@ else
   echo "INFO  : python3/aplaymidi absents, pédale non simulée"
 fi
 arreter
+
+# --- Écoute réseau ----------------------------------------------------------
+# Sans -l, organum doit répondre en IPv4 et en IPv6 ; avec -l 127.0.0.1,
+# seule cette adresse est écoutée et IPv6 doit être refusé.
+echo "== écoute par défaut : IPv4 et IPv6 sans -l"
+PORT_SAUV=$PORT
+URL_SAUV=$URL
+PORT=$((PORT + 40))
+while ! port_libre "$PORT"; do
+  PORT=$((PORT + 1))
+done
+URL="http://127.0.0.1:$PORT"
+effacer_etat
+if lancer "" 1 "" null "" "" "" "-"; then
+  CODE4=$(curl -4 -s -o /dev/null -w '%{http_code}' --max-time 3 "$URL/api/orgue" 2>/dev/null || true)
+  if [ "$CODE4" = "200" ]; then
+    ok "sans -l : réponse en IPv4 (curl -4)"
+  else
+    echec "sans -l : IPv4 attendu 200, reçu ${CODE4:-aucune réponse}"
+  fi
+  if [ -s /proc/net/if_inet6 ]; then
+    CODE6=$(curl -6 -s -o /dev/null -w '%{http_code}' --max-time 3 "http://[::1]:$PORT/api/orgue" 2>/dev/null || true)
+    if [ "$CODE6" = "200" ]; then
+      ok "sans -l : réponse en IPv6 (curl -6 sur [::1])"
+    else
+      echec "sans -l : IPv6 attendu 200 sur [::1], reçu ${CODE6:-aucune réponse}"
+    fi
+  else
+    ignore "sans -l : IPv6 (aucune adresse IPv6 sur l'hôte)"
+  fi
+  arreter
+fi
+
+echo "== -l 127.0.0.1 : IPv4 seule, IPv6 refusé"
+if lancer "" 1 "" null "" "" "" "127.0.0.1"; then
+  CODE4=$(curl -4 -s -o /dev/null -w '%{http_code}' --max-time 3 "$URL/api/orgue" 2>/dev/null || true)
+  if [ "$CODE4" = "200" ]; then
+    ok "-l 127.0.0.1 : réponse en IPv4"
+  else
+    echec "-l 127.0.0.1 : IPv4 attendu 200, reçu ${CODE4:-aucune réponse}"
+  fi
+  CODE6=$(curl -6 -s -o /dev/null -w '%{http_code}' --max-time 3 "http://[::1]:$PORT/api/orgue" 2>/dev/null || true)
+  if [ "$CODE6" = "000" ] || [ -z "$CODE6" ]; then
+    ok "-l 127.0.0.1 : IPv6 refusé"
+  else
+    echec "-l 127.0.0.1 : IPv6 inattendu (HTTP $CODE6)"
+  fi
+  arreter
+fi
+PORT=$PORT_SAUV
+URL=$URL_SAUV
 
 echo "== fenêtre native : état stable sous Xvfb"
 controle_fenetre
