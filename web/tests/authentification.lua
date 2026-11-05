@@ -7,6 +7,11 @@ aide.egal(a.sha256_hexa("abc"),
   "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
   "SHA-256 : vecteur abc")
 
+-- HMAC-SHA-256, vecteur de la RFC 4231 (cas 1).
+aide.egal(a.hmac_hexa("key", "The quick brown fox jumps over the lazy dog"),
+  "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8",
+  "HMAC-SHA-256 : vecteur RFC 4231")
+
 -- Vecteur de test de la RFC 7616 §3.9.1 (utilisateur Mufasa, mot de passe
 -- « Circle of Life », royaume http-auth@example.org). Le royaume d'organum
 -- est fixe, mais le calcul de HA1 et de la réponse est le même.
