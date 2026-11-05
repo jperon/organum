@@ -46,16 +46,35 @@ MAX_ASSOCIATIONS = 16
 -- valeur rendue par Nuklear (flottant 32 bits) diffère sinon à peine de l'état.
 bouge = (avant, apres) -> math.abs(apres - avant) > 1e-4
 
+-- Découpe un nom de jeu à un espace, en deux lignes les plus équilibrées
+-- possibles : renvoie {a, b, large} où large est la largeur de la ligne la
+-- plus longue, ou nil si le nom n'a pas d'espace où se couper.
+decoupe = (ui, texte) ->
+  meilleure = nil
+  for i = 2, #texte - 1
+    if texte\sub(i, i) == " "
+      a = texte\sub 1, i - 1
+      b = texte\sub i + 1
+      large = math.max ui\largeur_texte(a), ui\largeur_texte(b)
+      if not meilleure or large < meilleure.large
+        meilleure = {:a, :b, :large}
+  meilleure
+
 -- Disposition qui tient dans l × h : nombre de sous-colonnes de jeux par
--- clavier (1 à 3), lignes de combinaisons, hauteur de ligne, police.
+-- clavier (1 à 3), lignes de combinaisons, police, hauteurs de l'en-tête et
+-- des boutons de jeu.
 -- rapport : largeur du plus long nom de jeu / taille de police.
+-- rapport_deux : largeur de la plus longue moitié du meilleur découpage en
+-- deux lignes / taille de police.
 --
--- Parmi les dispositions qui tiennent à la police plancher, on retient celle
--- dont les boutons de jeu sont les plus hauts : plus de sous-colonnes, moins
--- de lignes, donc des cases plus hautes et plus facilement cliquables. À
--- hauteur de ligne égale, la police la plus grande l'emporte. Si aucune ne
--- tient (fenêtre minuscule), on garde la police la plus grande, comme avant.
-disposer = (e, l, h, rapport) ->
+-- On maximise d'abord la police jusqu'à `cible`, puis, à police égale, la
+-- hauteur des boutons de jeu (donc plutôt plus de sous-colonnes). Les
+-- rangées de réglages, combinaisons, nom et gain prennent une hauteur
+-- confortable (environ 2,2 × police, 36 px si la place le permet) ; toute la
+-- hauteur restante est répartie à parts égales entre les jeux et les
+-- accouplements. Si aucune disposition ne tient, repli sur la plus grande
+-- police possible.
+disposer = (e, l, h, rapport, rapport_deux, cible) ->
   ndiv = math.max 1, #e.divisions
   maxjeux, liens = 0, false
   for d in *e.divisions
@@ -63,30 +82,47 @@ disposer = (e, l, h, rapport) ->
     liens or= #d.liens > 0
   meilleure, repli = nil, nil
   for sous = 1, 3
+    rangs = math.ceil maxjeux / sous
     for lignes_combi = 1, 2
-      -- Lignes : réglages, combinaisons, puis dans chaque colonne le nom, le
-      -- gain, les jeux et les accouplements.
+      -- Rangées : réglages puis combinaisons en haut ; dans chaque colonne,
+      -- le nom, le gain, les jeux et les accouplements.
       haut = 1 + lignes_combi
-      col = 2 + math.ceil(maxjeux / sous) + (liens and 1 or 0)
+      col_jeu = math.max 1, rangs + (liens and 1 or 0)
+      col = 2 + col_jeu
       fixe = 2 * MARGE + ESPACE * (haut + 1) + 2 * MARGE_GROUPE + ESPACE * col
-      ligne = math.floor (h - fixe) / (haut + col)
-      par_hauteur = ligne / LIGNE_POLICE
-      -- Largeur : un nom de jeu par case, et « 32 » par combinaison.
-      case = (l - 2 * MARGE) / ndiv / sous - 2 * MARGE_GROUPE / sous - ESPACE
-      par_largeur = case / (rapport + 1)
+      largeur_case = (l - 2 * MARGE) / ndiv / sous - 2 * MARGE_GROUPE / sous - ESPACE
+      -- Un nom sur deux lignes peut utiliser presque toute la case ; sur une
+      -- ligne, ui:choix garde la marge de Selectable (2 px de chaque côté).
+      dispo_deux = math.max 0, largeur_case - 2
+      dispo_un = math.max 0, largeur_case - 4
       combi = (l - 2 * MARGE) / math.ceil(e.netapes / lignes_combi) - ESPACE
-      par_combi = combi / 1.6
-      taille = math.floor math.min(par_hauteur, par_largeur, par_combi, POLICE_MAX)
-      police = math.max taille, POLICE_MIN
-      if not repli or taille > repli.taille
-        repli = {police: police, :ligne, :sous, :lignes_combi, :taille, rangs: math.ceil(maxjeux / sous)}
-      -- Une disposition « tient » si elle reste lisible à la police
-      -- plancher : le nom le plus long doit y tenir sur une ligne.
-      if taille >= POLICE_MIN and ligne >= 1
-        meilleure_ligne = meilleure and meilleure.ligne or -1
-        gagne = ligne > meilleure_ligne or (ligne == meilleure_ligne and police > (meilleure and meilleure.police or 0))
-        if gagne
-          meilleure = {police: police, :ligne, :sous, :lignes_combi, rangs: math.ceil(maxjeux / sous)}
+      par_largeur = math.floor math.min POLICE_MAX, dispo_deux / math.max(rapport_deux, 0.001), combi / 1.5
+      if par_largeur >= POLICE_MIN
+        debut = math.min cible, par_largeur
+        for police = debut, POLICE_MIN, -1
+          une_ligne = police * rapport <= dispo_un
+          besoin = if une_ligne then police + 4 else 2 * police + 6
+          min_jeu = if h >= 600 then math.max 44, besoin else besoin
+          entete, jeu = nil, nil
+          -- 36 px d'abord ; si la fenêtre ne le permet pas, 2,2 × police,
+          -- puis seulement 2 × police pour ne pas écraser les jeux.
+          for essai in *{math.max(36, math.ceil(2.2 * police)), math.ceil(2.2 * police), math.max(police + 4, 2 * police)}
+            hauteur = (h - fixe - (haut + 2) * essai) / col_jeu
+            if hauteur >= min_jeu
+              entete, jeu = essai, hauteur
+              break
+          if entete
+            score = math.min police, cible
+            if not meilleure or score > meilleure.score or (score == meilleure.score and jeu > meilleure.jeu)
+              meilleure = {police: police, entete: entete, jeu: jeu, case: largeur_case, :sous, :lignes_combi, :rangs, :score}
+            break
+      -- Repli pour une fenêtre trop petite : la plus grande police possible,
+      -- quitte à rogner les rangées d'en-tête.
+      if not repli or par_largeur > repli.police
+        police_repli = math.max POLICE_MIN, par_largeur
+        entete_repli = math.max police_repli + 4, math.ceil(2.2 * police_repli)
+        jeu_repli = math.max 1, (h - fixe - (haut + 2) * entete_repli) / col_jeu
+        repli = {police: police_repli, entete: entete_repli, jeu: jeu_repli, case: largeur_case, :sous, :lignes_combi, :rangs}
   meilleure or repli
 
 -- Disposition du panneau MIDI : en-tête sur deux lignes (navigation, puis
@@ -970,23 +1006,31 @@ texte_calibration = (c) ->
       continue
 
     l, h = ui\taille!
-    -- Rapport largeur/taille du plus long nom de jeu, à la police courante.
-    plus_long = 0
+    -- Rapports largeur/police du plus long nom de jeu, sur une ligne et sur
+    -- la plus longue moitié du meilleur découpage en deux lignes. Ils sont
+    -- indépendants de la police : les mesurer à la police courante suffit.
+    plus_long, plus_long_deux = 0, 0
     for d in *e.divisions
       for j in *d.jeux
-        plus_long = math.max plus_long, ui\largeur_texte modele.nom_jeu j
-    p = disposer e, l, h, plus_long / police
+        nom = modele.nom_jeu j
+        large = ui\largeur_texte nom
+        plus_long = math.max plus_long, large
+        coupe = decoupe ui, nom
+        plus_long_deux = math.max plus_long_deux, (coupe and coupe.large or large)
+    -- Police visée : elle croît avec la largeur de la fenêtre, avec un
+    -- plancher de 13 px pour les toutes petites fenêtres.
+    cible = math.min POLICE_MAX, math.max 13, math.floor l / 64
+    p = disposer e, l, h, plus_long / police, plus_long_deux / police, cible
     if p.police != police
       ui\police p.police
       police = p.police
-    ligne = p.ligne
 
     if ui\debut "", 0, 0, l, h
       -- Réglages généraux (le bouton Qualité s'ajoute toujours, MIDI si fourni).
       -- Avec un volume système, deux curseurs : le système et la pédale (volume
       -- du moteur, distinct) ; sans lui, le curseur unique règle déjà le moteur.
       deux = systeme and vol_sys
-      ui\ligne ligne, (midi and 6 or 5) + (deux and 2 or 0)
+      ui\ligne p.entete, (midi and 6 or 5) + (deux and 2 or 0)
       if deux
         ui\texte "Volume #{math.floor(vol_sys * 100 + 0.5)} %", "droite"
         v = ui\curseur vol_sys, 0, 1, 0.01
@@ -1025,31 +1069,40 @@ texte_calibration = (c) ->
         seq = nil
 
       -- Combinaisons : l'étape courante est enfoncée.
-      ui\ligne ligne, math.ceil(e.netapes / p.lignes_combi)
+      ui\ligne p.entete, math.ceil(e.netapes / p.lignes_combi)
       for n = 1, e.netapes
         actif = e.etape == n - 1
         organum.midi 0xCF, n - 1 if ui\choix(tostring(n), actif) and not actif
 
       -- Claviers, un par colonne, sur toute la hauteur restante.
-      reste = h - 2 * MARGE - (1 + p.lignes_combi) * (ligne + ESPACE) - ESPACE
+      reste = h - 2 * MARGE - (1 + p.lignes_combi) * (p.entete + ESPACE) - ESPACE
       ui\ligne reste, #e.divisions
       for d, div in ipairs e.divisions
         if ui\groupe_debut "clavier #{d}"
-          ui\ligne ligne, 1
+          ui\ligne p.entete, 1
           ui\texte div.nom, "centre"
-          ui\ligne ligne, 2
+          ui\ligne p.entete, 2
           g = ui\curseur div.gain, 0, 1, 0.01
           organum.gain d, g if bouge div.gain, g
           if ui\bouton "Annuler"
             organum.jeu d, j, false for j = 1, #div.jeux
-          ui\ligne ligne, p.sous
+          ui\ligne p.jeu, p.sous
           for j, jeu in ipairs div.jeux
-            organum.jeu d, j, not jeu.actif if ui\choix(modele.nom_jeu(jeu), jeu.actif) != jeu.actif
+            nom = modele.nom_jeu jeu
+            if ui\largeur_texte(nom) <= p.case - 4
+              nouveau = ui\choix nom, jeu.actif
+            else
+              coupe = decoupe ui, nom
+              if coupe and coupe.large <= p.case - 2
+                nouveau = ui\choix_deux coupe.a, coupe.b, jeu.actif
+              else
+                nouveau = ui\choix nom, jeu.actif
+            organum.jeu d, j, not jeu.actif if nouveau != jeu.actif
           -- Lignes vides : les accouplements s'alignent en bas des colonnes.
           vides = p.rangs * p.sous - #div.jeux
           ui\texte "" for _ = 1, vides
           if #div.liens > 0
-            ui\ligne ligne, #div.liens
+            ui\ligne p.jeu, #div.liens
             for i, lien in ipairs div.liens
               cible = e.divisions[lien.division]
               etiquette = "#{modele.abrege div.nom}+#{modele.abrege cible and cible.nom or '?'}"
