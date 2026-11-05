@@ -118,8 +118,11 @@ echo "== dossier temporaire $TMP"
 if [ -x "$RACINE/web/build/organum.com" ]; then
   executer "API qualité (web/scripts/test-qualite.sh)" \
     sh "$RACINE/web/scripts/test-qualite.sh"
+  executer "authentification Digest (web/scripts/test-authentification.sh)" \
+    sh "$RACINE/web/scripts/test-authentification.sh"
 else
   ignore "API qualité (web/build/organum.com absent ; lancer web/scripts/build.sh)"
+  ignore "authentification Digest (web/build/organum.com absent ; lancer web/scripts/build.sh)"
 fi
 
 # --- Couche plate-forme sans carte -----------------------------------------
