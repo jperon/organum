@@ -2,9 +2,12 @@
 -- organum a besoin : algorithme SHA-256, qop=auth, royaume fixe.
 --
 -- Module pur : il n'écrit ni ne lit aucun fichier, et ne connaît ni le
--- moteur ni redbean au-delà de GetCryptoHash, fourni par redbean. Les
--- processus de requête l'utilisent après le fork ; le secret du nonce est
--- tiré au démarrage par init.moon avant le fork.
+-- moteur ni redbean au-delà de GetCryptoHash, fourni par redbean (voir
+-- externe/cosmopolitan/tool/net/help.txt, GetCryptoHash : « Returns value of
+-- the specified cryptographic hash function. If the key is provided, then
+-- HMAC value of the same function is returned »). Les processus de requête
+-- l'utilisent après le fork ; le secret du nonce est tiré au démarrage par
+-- init.moon avant le fork (GetRandomBytes, même fichier d'aide).
 
 M = {}
 

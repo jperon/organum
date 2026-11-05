@@ -56,7 +56,9 @@ HTTP.
 L'authentification est HTTP Digest SHA-256 (RFC 7616, `qop=auth`) : elle
 vérifie les droits, sans chiffrer le contenu. Servie en HTTP, la page
 envoie le mot de passe en clair lors de sa définition ; utiliser HTTPS ou un
-réseau de confiance si cela compte.
+réseau de confiance si cela compte. Le compteur `nc` du client n'est pas
+mémorisé (aucune table de nonces) : une requête capturée peut être rejouée
+tant que son nonce de 5 minutes est valide.
 
 ### Craquements et temps réel
 
