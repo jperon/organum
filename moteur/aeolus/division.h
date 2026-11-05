@@ -179,6 +179,12 @@ private:
      */
     void updateAggregatedKeysState();
 
+    /// Ajoute les touches tenues de cette division et de toutes celles qui
+    /// l'alimentent par un accouplement actif, récursivement. Protégé des
+    /// cycles par la liste des divisions déjà visitées.
+    void ajouterTouchesAccouplees(std::bitset<TOTAL_NOTES>& touches,
+                                  Division** vus, int& nbVus) const;
+
     bool triggerVoicesForStop(int stopIndex, int note);
 
     bool isAlreadyVoiced(int stopIndex, int node);
