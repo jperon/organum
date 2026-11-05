@@ -105,6 +105,18 @@ for _, cfg in ipairs(configs) do
         aide.verifie(utilise <= h + 1e-6, "disposer : hauteur dans la fenêtre " .. nom,
           utilise .. " > " .. h)
         aide.verifie(p.police <= cible, "disposer : police sous la cible " .. nom)
+        -- Cible de AGENTS.md : 36 px d'abord, sinon 2,2 × police, sinon
+        -- seulement 2 × police pour ne pas écraser les jeux.
+        local essais = {
+          math.max(36, math.ceil(2.2 * p.police)),
+          math.ceil(2.2 * p.police),
+          math.max(p.police + 4, 2 * p.police),
+        }
+        local trouve = false
+        for _, e in ipairs(essais) do
+          if p.entete == e then trouve = true end
+        end
+        aide.verifie(trouve, "disposer : hauteur d'en-tête dans les cibles " .. nom, p.entete)
       else
         -- Repli documenté : l'en-tête peut être rogné, mais la police reste
         -- au moins au plancher et une ligne de jeu subsiste.
