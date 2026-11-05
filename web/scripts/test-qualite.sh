@@ -7,9 +7,10 @@
 set -u
 
 # Sûreté : sur l'ALSA null, snd_pcm_writei ne bloque pas (le plugin consomme
-# le tampon immédiatement) ; la boucle audio de cosmo/lorganum.c:985 rend donc
-# aussi vite que possible. Si le fil obtenait SCHED_FIFO 70
-# (cosmo/lorganum.c:887), il affamerait les interruptions Wi-Fi de la machine.
+# le tampon immédiatement, cf. plateforme/linux/audio_alsa.c:729-732) ; la
+# boucle audio de cosmo/lorganum.c:978 rend donc aussi vite que possible. Si
+# le fil obtenait SCHED_FIFO 70 (cosmo/lorganum.c:881), il affamerait les
+# interruptions Wi-Fi de la machine.
 # ulimit -r 0 retire ce droit à tout le sous-arbre (script, organum, Xvfb) ;
 # chaque lancement vérifie ensuite que le serveur publie temps_reel=false.
 ulimit -r 0 2>/dev/null || {
