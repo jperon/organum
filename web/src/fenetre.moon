@@ -65,6 +65,14 @@ MAX_ASSOCIATIONS = 16
   -- publie le moteur. message_qualite affiche un échec ou un redémarrage.
   qualite_opt = options.qualite
   message_qualite = nil
+  -- Authentification facultative : même contrat que la page web. La fenêtre
+  -- ne passe pas par HTTP ; elle règle le mot de passe par le module.
+  auth_opt = options.authentification
+  auth_utilisateur = "organiste"
+  auth_mot_de_passe = ""
+  auth_charge = false
+  auth_courant = nil
+  message_auth = nil
   -- Tempérament demandé : tenu localement tant que le fil audio n'a pas
   -- publié la valeur effective. Il distingue la cible en cours (libellé
   -- suivi de « … ») du tempérament réellement en service (bouton accentué).
@@ -343,6 +351,29 @@ MAX_ASSOCIATIONS = 16
             organum.qualite k, math.floor v
     seq = nil
 
+  -- État de l'authentification : avec options.authentification, c'est le
+  -- module qui répond ; sinon le panneau l'indique indisponible.
+  etat_auth = ->
+    if auth_opt and auth_opt.etat
+      ok, a = pcall auth_opt.etat
+      if ok and type(a) == "table"
+        return a
+    {active: false, utilisateur: "organiste", impose: true, source: "aucune"}
+
+  regler_auth = (payload) ->
+    message_auth = nil
+    unless auth_opt and auth_opt.regler
+      message_auth = "Authentification indisponible"
+      return
+    ok, res = pcall auth_opt.regler, payload
+    unless ok
+      message_auth = "Échec : #{res}"
+      return
+    auth_mot_de_passe = ""
+    auth_charge = false
+    auth_courant = etat_auth!
+    seq = nil
+
   while continuer!
     ouverte, sale = ui\evenements 50
     break unless ouverte
@@ -368,6 +399,7 @@ MAX_ASSOCIATIONS = 16
     -- seq ; on redessine au plus une fois toutes les 2 s. Fermé : rien.
     if mode == "qualite" and tour - tour_qualite >= 40
       tour_qualite = tour
+      auth_courant = etat_auth!
       sale = true
     -- canaux_actifs est éphémère et hors seq : c'est la seule comparaison qui
     -- réveille le rendu pour éteindre un canal après 250 ms d'inactivité.
@@ -643,7 +675,7 @@ MAX_ASSOCIATIONS = 16
       -- puis (tête), (calibration) et message. Le nombre de cases de la
       -- ligne « Niveau » vaut 6 quand le mode Auto existe (bouton en plus),
       -- 5 sinon.
-      rows = 9 + (a_reverb and 1 or 0) + (a_tete and 1 or 0) + (calib and 1 or 0) + 2
+      rows = 9 + (a_reverb and 1 or 0) + (a_tete and 1 or 0) + (calib and 1 or 0) + 2 + 3
       colonnes = (type(q.auto) == "boolean") and 6 or 5
       p = disposer_qualite rows, l, h, colonnes
       if p.police != police
@@ -803,6 +835,46 @@ MAX_ASSOCIATIONS = 16
           texte_periph = texte_periph .. " (en cours : #{actuel})"
         ui\texte tronquer(texte_periph, l - 2 * MARGE - ESPACE)
 
+        -- Authentification facultative. Le mot de passe n'est jamais relu :
+        -- l'état ne porte que le nom d'utilisateur et le verrouillage par
+        -- l'environnement. La saisie est en clair, comme sur la page web
+        -- lorsque celle-ci est servie en HTTP.
+        a_auth = auth_courant or etat_auth!
+        unless auth_charge
+          auth_utilisateur = if type(a_auth.utilisateur) == "string" and a_auth.utilisateur != ""
+            a_auth.utilisateur else "organiste"
+          auth_mot_de_passe = ""
+          auth_charge = true
+        ui\ligne ligne, 1
+        texte_auth = if a_auth.active == true
+          "Authentification : activée pour « #{a_auth.utilisateur} »"
+        else
+          "Authentification : désactivée"
+        ui\texte tronquer(texte_auth, l - 2 * MARGE - ESPACE)
+        if a_auth.impose == true
+          ui\ligne ligne, 1
+          ui\texte tronquer("Mot de passe imposé par ORGANUM_MOT_DE_PASSE", l - 2 * MARGE - ESPACE)
+          ui\ligne ligne, 1
+          ui\texte ""
+        else
+          ui\ligne ligne, 2
+          ui\texte "Utilisateur", "droite"
+          auth_utilisateur = ui\saisie auth_utilisateur, 64, false
+          ui\ligne ligne, 4
+          ui\texte "Mot de passe", "droite"
+          valeur_mot, valide_mot = ui\saisie auth_mot_de_passe, 128, true
+          auth_mot_de_passe = valeur_mot
+          if ui\bouton "Enregistrer"
+            if auth_mot_de_passe == ""
+              message_auth = "Saisir un mot de passe"
+            else
+              regler_auth {utilisateur: auth_utilisateur, mot_de_passe: auth_mot_de_passe}
+          if a_auth.active == true
+            if ui\bouton "Retirer"
+              regler_auth {retirer: true}
+          else
+            ui\texte ""
+
         if a_tete
           ui\ligne ligne, 1
           if q.tete_reverb_impose == true
@@ -846,6 +918,7 @@ MAX_ASSOCIATIONS = 16
         if q.application == true
           message_affiche = "Application…"
         message_affiche or= message_qualite
+        message_affiche or= message_auth
         if not message_affiche and type(q.temperament_erreur) == "string" and q.temperament_erreur != ""
           message_affiche = "Tempérament : #{q.temperament_erreur}"
         if not message_affiche and type(q.audio_erreur) == "string" and q.audio_erreur != ""
@@ -907,6 +980,9 @@ MAX_ASSOCIATIONS = 16
       if clique_qualite
         mode = "qualite"
         message_qualite = nil
+        message_auth = nil
+        auth_charge = false
+        auth_courant = etat_auth!
         seq = nil
       if midi and ui\bouton "MIDI"
         mode = "midi"
