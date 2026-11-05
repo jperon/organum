@@ -115,7 +115,10 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   La réverbération n'est plus sur la console principale : elle est réglée
   dans le panneau « Audio », comme le curseur de la page web.
   Exigence : tout doit tenir dans la fenêtre, sans défilement, et grossir
-  quand elle est agrandie.
+  quand elle est agrandie. Le nombre de sous-colonnes de jeux est choisi
+  pour maximiser la hauteur des boutons à une police lisible (au moins
+  10 px) ; Nuklear n'affichant qu'une ligne, un nom de jeu doit y tenir
+  sans retour à la ligne.
   Essai hors moteur : `ui/essai_fenetre.moon` (état factice). X11 : socket
   Unix pour `:n`, TCP (port 6000+n) pour `hôte:n` ; testable sans
   rien ouvrir sur le bureau avec `Xvfb :2 -listen tcp -ac` et `DISPLAY=localhost:2`

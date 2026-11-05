@@ -49,13 +49,19 @@ bouge = (avant, apres) -> math.abs(apres - avant) > 1e-4
 -- Disposition qui tient dans l × h : nombre de sous-colonnes de jeux par
 -- clavier (1 à 3), lignes de combinaisons, hauteur de ligne, police.
 -- rapport : largeur du plus long nom de jeu / taille de police.
+--
+-- Parmi les dispositions qui tiennent à la police plancher, on retient celle
+-- dont les boutons de jeu sont les plus hauts : plus de sous-colonnes, moins
+-- de lignes, donc des cases plus hautes et plus facilement cliquables. À
+-- hauteur de ligne égale, la police la plus grande l'emporte. Si aucune ne
+-- tient (fenêtre minuscule), on garde la police la plus grande, comme avant.
 disposer = (e, l, h, rapport) ->
   ndiv = math.max 1, #e.divisions
   maxjeux, liens = 0, false
   for d in *e.divisions
     maxjeux = math.max maxjeux, #d.jeux
     liens or= #d.liens > 0
-  meilleure = nil
+  meilleure, repli = nil, nil
   for sous = 1, 3
     for lignes_combi = 1, 2
       -- Lignes : réglages, combinaisons, puis dans chaque colonne le nom, le
@@ -71,9 +77,17 @@ disposer = (e, l, h, rapport) ->
       combi = (l - 2 * MARGE) / math.ceil(e.netapes / lignes_combi) - ESPACE
       par_combi = combi / 1.6
       taille = math.floor math.min(par_hauteur, par_largeur, par_combi, POLICE_MAX)
-      if not meilleure or taille > meilleure.police
-        meilleure = {police: math.max(taille, POLICE_MIN), :ligne, :sous, :lignes_combi, rangs: math.ceil(maxjeux / sous)}
-  meilleure
+      police = math.max taille, POLICE_MIN
+      if not repli or taille > repli.taille
+        repli = {police: police, :ligne, :sous, :lignes_combi, :taille, rangs: math.ceil(maxjeux / sous)}
+      -- Une disposition « tient » si elle reste lisible à la police
+      -- plancher : le nom le plus long doit y tenir sur une ligne.
+      if taille >= POLICE_MIN and ligne >= 1
+        meilleure_ligne = meilleure and meilleure.ligne or -1
+        gagne = ligne > meilleure_ligne or (ligne == meilleure_ligne and police > (meilleure and meilleure.police or 0))
+        if gagne
+          meilleure = {police: police, :ligne, :sous, :lignes_combi, rangs: math.ceil(maxjeux / sous)}
+  meilleure or repli
 
 -- Disposition du panneau MIDI : en-tête sur deux lignes (navigation, puis
 -- compteurs), une ligne par clavier, contrôle, expression, actions, puis une
