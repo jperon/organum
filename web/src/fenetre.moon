@@ -65,6 +65,10 @@ MAX_ASSOCIATIONS = 16
   -- publie le moteur. message_qualite affiche un échec ou un redémarrage.
   qualite_opt = options.qualite
   message_qualite = nil
+  -- Tempérament demandé : tenu localement tant que le fil audio n'a pas
+  -- publié la valeur effective. Il distingue la cible en cours (libellé
+  -- suivi de « … ») du tempérament réellement en service (bouton accentué).
+  temperament_cible = nil
   cible_apprentissage = "volume"
   -- Apprentissage : {i: n} refait l'association n, {nouveau: true} attend un
   -- contrôle pour en créer une. dernier_vu est le dernier contrôle publié au
@@ -309,7 +313,9 @@ MAX_ASSOCIATIONS = 16
     -- réglages de qualité : même chemin que POST /api/orgue {"temperament"}.
     if payload.temperament != nil
       ok, err = pcall organum.temperament, payload.temperament
-      unless ok
+      if ok
+        temperament_cible = payload.temperament
+      else
         message_qualite = "Échec de l'enregistrement des réglages"
         Log kLogWarn, "fenêtre : tempérament : #{err}" if Log
       seq = nil
@@ -621,6 +627,14 @@ MAX_ASSOCIATIONS = 16
     if mode == "qualite"
       l, h = ui\taille!
       q = etat_qualite e
+      if temperament_cible != nil
+        if q.temperament == temperament_cible
+          -- Valeur effective publiée : la demande est aboutie.
+          temperament_cible = nil
+          message_qualite = nil
+        elseif q.application != true and type(q.temperament_erreur) == "string" and q.temperament_erreur != ""
+          -- Calcul terminé, valeur inchangée et erreur publiée.
+          temperament_cible = nil
       a_tete = type(q.tete_reverb) == "boolean" and type(q.tete_reverb_prochain) == "boolean"
       a_reverb = type(q.reverb) == "number"
       calib = type(q.calibration) == "table" and q.calibration or nil
@@ -741,18 +755,39 @@ MAX_ASSOCIATIONS = 16
           regler_qualite {limiteur: nouveau} if nouveau != actif_limiteur
 
         -- Tempérament : 11 valeurs sur deux rangées (libellé + 5 boutons,
-        -- puis 6 boutons). Le calcul se fait hors du fil audio.
+        -- puis 6 boutons). Le calcul se fait hors du fil audio ; la cible en
+        -- cours porte « … » dans son libellé, la valeur en service reste le
+        -- bouton accentué.
+        etiquette_temperament = "Tempérament"
+        if temperament_cible != nil
+          etiquette_temperament = "Application de #{modele.TEMPERAMENTS[temperament_cible + 1]}…"
         ui\ligne ligne, 6
-        ui\texte "Tempérament", "droite"
+        ui\texte tronquer(etiquette_temperament, (l - 2 * MARGE) / 6 - ESPACE), "droite"
         for i = 1, 5
           actif = q.temperament == i - 1
-          change = ui\choix(modele.TEMPERAMENTS[i], actif) != actif
-          regler_qualite {temperament: i - 1} if change
+          en_cours = temperament_cible == i - 1
+          libelle = modele.TEMPERAMENTS[i]
+          libelle = libelle .. " …" if en_cours
+          if en_cours
+            -- Cible en cours : état vert éphémère, jamais la sélection
+            -- accentuée qui désigne le tempérament réellement en service.
+            ui\etat libelle, false, true
+          else
+            choix = ui\choix libelle, actif
+            if choix != actif and choix and q.temperament != i - 1 and temperament_cible != i - 1
+              regler_qualite {temperament: i - 1}
         ui\ligne ligne, 6
         for i = 6, 11
           actif = q.temperament == i - 1
-          change = ui\choix(modele.TEMPERAMENTS[i], actif) != actif
-          regler_qualite {temperament: i - 1} if change
+          en_cours = temperament_cible == i - 1
+          libelle = modele.TEMPERAMENTS[i]
+          libelle = libelle .. " …" if en_cours
+          if en_cours
+            ui\etat libelle, false, true
+          else
+            choix = ui\choix libelle, actif
+            if choix != actif and choix and q.temperament != i - 1 and temperament_cible != i - 1
+              regler_qualite {temperament: i - 1}
 
         -- Périphérique : lecture seule (le module nk n'expose pas de champ
         -- de saisie de texte) ; la page web permet de le modifier.
