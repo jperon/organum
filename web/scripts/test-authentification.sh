@@ -204,6 +204,12 @@ if [ -f "$AUTH" ]; then
   ATTENDU=$(python3 -c 'import hashlib;print(hashlib.sha256(b"organiste:organum:secret01").hexdigest())')
   grep -qF "$ATTENDU" "$AUTH" && ok "HA1 attendu dans le fichier" \
     || echec "HA1 absent du fichier ($ATTENDU)"
+  ETAT_AUTH=$(client GET /api/authentification --digest -u organiste:secret01)
+  if printf '%s' "$ETAT_AUTH" | grep -qi 'ha1\|secret01'; then
+    echec "l'API expose un haché ou le mot de passe : $ETAT_AUTH"
+  else
+    ok "l'API n'expose ni haché ni mot de passe"
+  fi
 else
   echec "fichier d'authentification absent"
 fi
