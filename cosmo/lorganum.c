@@ -33,6 +33,7 @@
 #include "../moteur/api/aeolus_c.h"
 #include "../plateforme/audio.h"
 #include "../plateforme/midi.h"
+#include "charge_niveau.h"
 
 #define MAX_DIVISIONS 8
 #define MAX_JEUX 64
@@ -214,14 +215,6 @@ static unsigned long long g_xruns_blocage;
 static unsigned short g_xruns_anneau[XRUNS_ANNEAU];
 static int g_xruns_anneau_pos;
 static int g_xruns_recents;
-
-// Règle de la puce, calculée sur des entiers : jamais de vert sans mesure.
-static int calculer_charge_niveau(int pointe, int recents, int evaluee) {
-  if (pointe >= 90 || recents >= 3) return 3;
-  if (pointe >= 65 || recents >= 1) return 2;
-  if (evaluee && recents == 0) return 1;
-  return 0;
-}
 
 // Nouveau réglage audio ou de qualité : la pointe repart de zéro et aucune
 // couleur ne doit être affichée avant une seconde de jeu.
