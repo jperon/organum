@@ -236,9 +236,44 @@ demarrer_organum() {
   return 1
 }
 
+# Serveur avec mot de passe, pour l'e2e de l'authentification : écoute sur
+# toutes les interfaces afin qu'une adresse non locale de l'hôte soit
+# utilisée par Chromium (127.0.0.1 est exempté).
+demarrer_organum_auth() {
+  PORT=$(trouver_port $((18100 + ($$ % 300))))
+  URL="http://$HOTE_AUTH:$PORT"
+  ETAT="$TMP/etat-auth-$PORT.json"
+  CONFIG="$TMP/midi-auth-$PORT.json"
+  JOURNAL="$TMP/organum-auth-$PORT.log"
+  setsid env -u DISPLAY -u WAYLAND_DISPLAY ORGANUM_FENETRE=non \
+    PATH="$TMP/bin:$PATH" ORGANUM_VOLUME=wpctl ORGANUM_PERIPHERIQUE=null \
+    ORGANUM_QUALITE=3 ORGANUM_ETAT="$ETAT" ORGANUM_CONFIG_MIDI="$CONFIG" \
+    ORGANUM_MOT_DE_PASSE=secret01 \
+    "$BIN" -p "$PORT" >"$JOURNAL" 2>&1 &
+  PID_ORGANUM=$!
+  for _ in $(seq 1 300); do
+    if curl -s --connect-timeout 1 --max-time 1 -o /dev/null "http://127.0.0.1:$PORT/api/orgue"; then
+      if curl -s "http://127.0.0.1:$PORT/api/orgue" | grep -qF '"temps_reel":true'; then
+        echo "ÉCHEC : temps réel actif malgré ulimit -r 0" >&2
+        arreter_organum
+        return 1
+      fi
+      return 0
+    fi
+    if ! kill -0 "$PID_ORGANUM" 2>/dev/null; then
+      echo "ÉCHEC : organum (authentification) s'est arrêté au démarrage" >&2
+      sed 's/^/        /' "$JOURNAL" >&2
+      return 1
+    fi
+    sleep 0.1
+  done
+  echo "ÉCHEC : organum (authentification) ne répond pas" >&2
+  sed 's/^/        /' "$JOURNAL" >&2
+  return 1
+}
+
 demarrer_chromium() {
   # Profil neuf à chaque lancement : le SingletonLock du précédent empêcherait
-  # Chromium de démarrer (et le profil reste dans le dossier temporaire).
   rm -rf "$TMP/profil-chromium"
   CDP_PORT=$(trouver_port $((PORT + 300)))
   env -u LD_LIBRARY_PATH -u DISPLAY -u WAYLAND_DISPLAY \
@@ -512,6 +547,9 @@ fi
 creer_faux_wpctl
 ecrire_helper_lua || { echo "ÉCHEC : compilation de fenetre_disposition" >&2; exit 1; }
 
+# Adresse non locale pour l'e2e de l'authentification (jamais orgue.lan).
+HOTE_AUTH=$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n 1)
+
 # --- Interface web ---------------------------------------------------------
 DEBUT_WEB=$(date +%s%N)
 if demarrer_organum non && demarrer_chromium; then
@@ -531,6 +569,29 @@ arreter_chromium
 arreter_organum
 FIN_WEB=$(date +%s%N)
 echo "      durée web : $(duree "$DEBUT_WEB" "$FIN_WEB")"
+
+# --- Authentification web (Chromium headless, adresse non locale) ----------
+DEBUT_AUTH=$(date +%s%N)
+if [ -z "$HOTE_AUTH" ]; then
+  ignore "e2e authentification web (aucune adresse IPv4 non locale)"
+elif demarrer_organum_auth && demarrer_chromium; then
+  CDP_PORT="$CDP_PORT" BASE_URL="$URL" ORGANUM_USER=organiste \
+    ORGANUM_PASS=secret01 \
+    node "$RACINE/scripts/e2e-auth.mjs" >"$TMP/web-auth.log" 2>&1
+  CODE_AUTH=$?
+  sed 's/^/        /' "$TMP/web-auth.log"
+  if [ "$CODE_AUTH" -eq 0 ]; then
+    OKS=$((OKS + 1))
+  else
+    ECHECS=$((ECHECS + 1))
+  fi
+else
+  echec "e2e authentification web : serveur ou Chromium ne démarre pas"
+fi
+arreter_chromium
+arreter_organum
+FIN_AUTH=$(date +%s%N)
+echo "      durée authentification web : $(duree "$DEBUT_AUTH" "$FIN_AUTH")"
 
 # --- Interface native ------------------------------------------------------
 DEBUT_NATIF=$(date +%s%N)
