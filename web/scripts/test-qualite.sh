@@ -6,6 +6,17 @@
 # Sortie : une ligne OK/ÉCHEC par contrôle ; code de retour non nul si échec.
 set -u
 
+# Sûreté : sur l'ALSA null, snd_pcm_writei ne bloque pas (le plugin consomme
+# le tampon immédiatement) ; la boucle audio de cosmo/lorganum.c:985 rend donc
+# aussi vite que possible. Si le fil obtenait SCHED_FIFO 70
+# (cosmo/lorganum.c:887), il affamerait les interruptions Wi-Fi de la machine.
+# ulimit -r 0 retire ce droit à tout le sous-arbre (script, organum, Xvfb) ;
+# chaque lancement vérifie ensuite que le serveur publie temps_reel=false.
+ulimit -r 0 2>/dev/null || {
+  echo "ÉCHEC : ulimit -r 0 impossible ; ne pas lancer le moteur sans temps réel" >&2
+  exit 2
+}
+
 RACINE="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$RACINE/build/organum.com"
 
@@ -143,6 +154,12 @@ lancer() {
   # machine chargée. Chaque essai est borné pour ne jamais bloquer.
   while [ "$i" -lt 200 ]; do
     if curl -s --connect-timeout 1 --max-time 1 -o /dev/null "$URL/api/orgue"; then
+      # Aucun serveur de ce test ne doit avoir obtenu le temps réel.
+      if curl -s "$URL/api/orgue" | grep -qF '"temps_reel":true'; then
+        echec "temps réel actif malgré ulimit -r 0 (fil audio à 100 % sur null)"
+        arreter
+        return 1
+      fi
       return 0
     fi
     # Le processus a pu mourir au démarrage : ne pas attendre 10 s.
@@ -313,6 +330,12 @@ controle_fenetre() {
   if [ "$i" -ge 200 ]; then
     echec "contrôle avec fenêtre : organum ne répond pas sur $URL_FEN"
     sed 's/^/        /' "$DIR_FEN/journal.log" >&2
+    arreter_fenetre
+    unset DISPLAY
+    return 1
+  fi
+  if curl -s "$URL_FEN/api/orgue" | grep -qF '"temps_reel":true'; then
+    echec "contrôle avec fenêtre : temps réel actif malgré ulimit -r 0"
     arreter_fenetre
     unset DISPLAY
     return 1
