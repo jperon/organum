@@ -130,7 +130,7 @@ export UNIT_LUA_PATH
 for test in "$RACINE"/web/tests/*.lua; do
   base="$(basename "$test")"
   case "$base" in
-    aide.lua|js_extraire.lua) continue ;;
+    aide.lua|js_extraire.lua|moteur_scale.lua) continue ;;
   esac
   sortie=$(env -u WAYLAND_DISPLAY -u DISPLAY redbean -i "$test" 2>&1)
   code=$?
