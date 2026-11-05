@@ -167,6 +167,7 @@ if [ "$MOTEUR_PRET" -eq 1 ]; then
   banc "équivalence spatialisation" equiv_spatial.cpp
   banc "équivalence voix spatiale" equiv_voix_spatial.cpp
   banc "écrêtage et limiteur" ecretage.cpp
+  banc "polyphonie accouplée" polyphonie.cpp
 fi
 
 FIN_NS=$(date +%s%N)
