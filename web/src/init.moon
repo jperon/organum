@@ -2,6 +2,8 @@
 -- volume général (wpctl, pactl ou amixer) et de l'orgue (module « organum »).
 -- Lua 5.4 (redbean). Aucun shell n'est utilisé pour lancer les binaires.
 
+-- Validations et fusions pures, partagées avec les tests unitaires.
+validation = require "validation"
 
 -- Horloge monotone, en secondes (pour les délais de run).
 maintenant = ->
@@ -246,21 +248,12 @@ PRESELECTIONS = {
 -- audio, limiteur) : eux aussi mémorisés, mais sans faire partie des
 -- présélections. Les valeurs effectives du lancement en cours sont tenues à
 -- part (EFFECTIF) ; les valeurs enregistrées vivent dans QUALITE_FICHIER.
-TAUX_VALIDES = {[44100]: true, [48000]: true}
-PERIODES_VALIDES = {[128]: true, [256]: true, [512]: true, [1024]: true, [2048]: true}
-DEMARRAGE_DEFAUT = {periode: 512, taux: 48000, peripherique: "", limiteur: true}
+TAUX_VALIDES = validation.TAUX_VALIDES
+PERIODES_VALIDES = validation.PERIODES_VALIDES
+DEMARRAGE_DEFAUT = validation.DEMARRAGE_DEFAUT
 
-entier_borne = (v, min, max) ->
-  type(v) == "number" and v == math.floor(v) and v >= min and v <= max
-
--- Un périphérique audio est un nom ALSA : au plus 200 octets, sans caractère
--- de contrôle (une chaîne vide désigne le périphérique par défaut).
-peripherique_valide = (s) ->
-  return false unless type(s) == "string" and #s <= 200
-  for i = 1, #s
-    b = s\byte i
-    return false if b < 32 or b == 127
-  true
+entier_borne = validation.entier_borne
+peripherique_valide = validation.peripherique_valide
 
 -- Au premier lancement (etat.json sans clé qualite), le mode automatique est
 -- actif : la calibration choisit le niveau. Un réglage manuel sauvegardé met
@@ -303,30 +296,7 @@ ecrire_qualite_locale = (q) ->
 -- Valeur courante côté Lua : le fichier d'abord (écrit par les processus de
 -- requête), à défaut la copie du processus principal.
 qualite_locale_actuelle = ->
-  q = qualite_fichier QUALITE_FICHIER
-  if q
-    niveau = q.niveau
-    niveau = qualite_locale.niveau unless type(niveau) == "number"
-    auto = q.auto
-    auto = qualite_locale.auto unless type(auto) == "boolean"
-    tete = q.tete_reverb
-    tete = qualite_locale.tete_reverb unless type(tete) == "boolean"
-    periode = q.periode
-    periode = qualite_locale.periode unless PERIODES_VALIDES[periode] == true
-    taux = q.taux
-    taux = qualite_locale.taux unless TAUX_VALIDES[taux] == true
-    peripherique = q.peripherique
-    peripherique = qualite_locale.peripherique unless peripherique_valide peripherique
-    limiteur = q.limiteur
-    limiteur = qualite_locale.limiteur unless type(limiteur) == "boolean"
-    return {niveau: niveau, auto: auto, tete_reverb: tete,
-            periode: periode, taux: taux, :peripherique, :limiteur}
-  {
-    niveau: qualite_locale.niveau, auto: qualite_locale.auto,
-    tete_reverb: qualite_locale.tete_reverb,
-    periode: qualite_locale.periode, taux: qualite_locale.taux,
-    peripherique: qualite_locale.peripherique, limiteur: qualite_locale.limiteur
-  }
+  validation.qualite_fichier_normalisee qualite_fichier(QUALITE_FICHIER), qualite_locale
 
 -- cosmo_dlopen (pour libasound) a besoin d'un petit programme d'aide lié à
 -- la libc du système ; faute de l'y trouver, il le compile avec cc. On
@@ -360,9 +330,8 @@ etat_sauve = do
 -- sur l'orgue et neutralise un éventuel réglage utilisateur d'Aeolus.
 TEMPERAMENT_DEFAUT = 5
 TEMPERAMENT_MAX = 10
-temperament_demarrage = TEMPERAMENT_DEFAUT
-if entier_borne etat_sauve.temperament, 0, TEMPERAMENT_MAX
-  temperament_demarrage = math.tointeger etat_sauve.temperament
+temperament_demarrage = validation.temperament_depuis_etat etat_sauve.temperament,
+  TEMPERAMENT_DEFAUT, TEMPERAMENT_MAX
 
 -- Qualité au démarrage : etat.json d'abord, puis ORGANUM_QUALITE
 -- (auto|0|1|2|3), prioritaire sur le fichier.
@@ -419,43 +388,25 @@ do
 -- Valeurs EFFECTIVES du lancement et variables d'environnement qui les
 -- imposent. Les valeurs enregistrées (qualite_locale) ne sont jamais
 -- remplacées par une valeur imposée : elles restent « prochaines ».
-EFFECTIF = {
-  taux: qualite_locale.taux
-  periode: qualite_locale.periode
-  peripherique: qualite_locale.peripherique
-  limiteur: qualite_locale.limiteur
-}
-IMPOSE = {taux: false, periode: false, peripherique: false, limiteur: false}
-AUDIO_REPLI = ""
-
+EFFECTIF, IMPOSE = nil, nil
 do
-  v = os.getenv "ORGANUM_TAUX"
-  if v and v != ""
-    n = math.tointeger tonumber v
-    if n and TAUX_VALIDES[n] == true
-      EFFECTIF.taux = n
-      IMPOSE.taux = true
-    else
-      Log kLogWarn, "organum : ORGANUM_TAUX invalide (#{v}), ignoré"
-  v = os.getenv "ORGANUM_PERIODE"
-  if v and v != ""
-    n = math.tointeger tonumber v
-    if n and PERIODES_VALIDES[n] == true
-      EFFECTIF.periode = n
-      IMPOSE.periode = true
-    else
-      Log kLogWarn, "organum : ORGANUM_PERIODE invalide (#{v}), ignoré"
-  v = os.getenv "ORGANUM_PERIPHERIQUE"
-  if v != nil
-    if peripherique_valide v
-      EFFECTIF.peripherique = v
-      IMPOSE.peripherique = true
-    else
-      Log kLogWarn, "organum : ORGANUM_PERIPHERIQUE invalide, ignoré"
-  v = os.getenv "ORGANUM_LIMITEUR"
-  if v and v != ""
-    EFFECTIF.limiteur = v != "non"
-    IMPOSE.limiteur = true
+  env_impose = {
+    ORGANUM_TAUX: os.getenv "ORGANUM_TAUX"
+    ORGANUM_PERIODE: os.getenv "ORGANUM_PERIODE"
+    ORGANUM_PERIPHERIQUE: os.getenv "ORGANUM_PERIPHERIQUE"
+    ORGANUM_LIMITEUR: os.getenv "ORGANUM_LIMITEUR"
+  }
+  imp = validation.impositions env_impose, {
+    taux: qualite_locale.taux
+    periode: qualite_locale.periode
+    peripherique: qualite_locale.peripherique
+    limiteur: qualite_locale.limiteur
+  }
+  EFFECTIF = imp.effectif
+  IMPOSE = imp.impose
+  for message in *imp.erreurs
+    Log kLogWarn, "organum : #{message}"
+AUDIO_REPLI = ""
 
 taux_demarrage = EFFECTIF.taux
 periode_demarrage = EFFECTIF.periode
@@ -758,39 +709,8 @@ qualite_etat = ->
 -- moteur, les réglages audio par une demande de reconfiguration unique. Un
 -- échec audio est publié de façon asynchrone dans audio_erreur.
 regler_qualite = (q) ->
-  return nil, "qualite doit être un objet" unless type(q) == "table"
-  connus = {
-    bruit_attaque: true, instabilite: true, spatialisation: true,
-    polyphonie_max: true, tete_reverb: true, niveau: true, auto: true,
-    periode: true, taux: true, peripherique: true, limiteur: true
-  }
-  nq = 0
-  for k in pairs q
-    return nil, "qualite : champ inconnu : #{k}" unless connus[k]
-    nq += 1
-  return nil, "qualite : aucun champ" unless nq > 0
-  if q.bruit_attaque != nil and type(q.bruit_attaque) != "boolean"
-    return nil, "qualite.bruit_attaque doit être un booléen"
-  if q.instabilite != nil and type(q.instabilite) != "boolean"
-    return nil, "qualite.instabilite doit être un booléen"
-  if q.spatialisation != nil and not entier_borne q.spatialisation, 0, 2
-    return nil, "qualite.spatialisation doit être un entier entre 0 et 2"
-  if q.polyphonie_max != nil and not entier_borne q.polyphonie_max, 0, 512
-    return nil, "qualite.polyphonie_max doit être un entier entre 0 et 512"
-  if q.tete_reverb != nil and type(q.tete_reverb) != "boolean"
-    return nil, "qualite.tete_reverb doit être un booléen"
-  if q.niveau != nil and not entier_borne q.niveau, 0, 3
-    return nil, "qualite.niveau doit être un entier entre 0 et 3"
-  if q.auto != nil and type(q.auto) != "boolean"
-    return nil, "qualite.auto doit être un booléen"
-  if q.periode != nil and not (type(q.periode) == "number" and PERIODES_VALIDES[q.periode] == true)
-    return nil, "qualite.periode doit valoir 128, 256, 512, 1024 ou 2048"
-  if q.taux != nil and not (type(q.taux) == "number" and TAUX_VALIDES[q.taux] == true)
-    return nil, "qualite.taux doit valoir 44100 ou 48000"
-  if q.peripherique != nil and not peripherique_valide q.peripherique
-    return nil, "qualite.peripherique doit être une chaîne de 200 octets au plus, sans caractère de contrôle"
-  if q.limiteur != nil and type(q.limiteur) != "boolean"
-    return nil, "qualite.limiteur doit être un booléen"
+  valide, err = validation.valider_qualite q
+  return nil, err unless valide
 
   impose_tete = organum.etat!.qualite.tete_reverb_impose == true
   loc = qualite_locale_actuelle!
@@ -897,11 +817,8 @@ etat_orgue = ->
       }
   }
 
-is_finite_number = (v) ->
-  type(v) == "number" and v == v and v != math.huge and v != -math.huge
-
-is_integer = (v) ->
-  is_finite_number(v) and v == math.floor(v)
+is_finite_number = validation.is_finite_number
+is_integer = validation.is_integer
 
 send_json = (status, payload) ->
   SetStatus status
@@ -1023,89 +940,42 @@ handle_orgue = ->
     send_json 400, {error: "corps JSON invalide"}
     return
 
-  actions = {stop: true, cancel: true, step: true, reverb: true, panic: true, gain: true, link: true, qualite: true, volume: true, temperament: true}
-  n = 0
-  for k in pairs data
-    unless actions[k]
-      send_json 400, {error: "champ inconnu : #{k}"}
-      return
-    n += 1
-  unless n == 1
-    send_json 400, {error: "une seule action attendue"}
-    return
-
   divisions = organum.etat!.divisions
-  division_valide = (d) -> is_integer(d) and d >= 0 and d < #divisions
-
-  if st = data.stop
-    unless type(st) == "table" and division_valide(st.division) and is_integer(st.index) and type(st.on) == "boolean"
-      send_json 400, {error: "stop invalide"}
-      return
-    unless st.index >= 0 and st.index < #divisions[st.division + 1].jeux
-      send_json 400, {error: "jeu hors limites"}
-      return
-    organum.jeu st.division + 1, st.index + 1, st.on
-
-  elseif l = data.link
-    unless type(l) == "table" and division_valide(l.division) and is_integer(l.index) and type(l.on) == "boolean"
-      send_json 400, {error: "link invalide"}
-      return
-    unless l.index >= 0 and l.index < #divisions[l.division + 1].liens
-      send_json 400, {error: "accouplement hors limites"}
-      return
-    organum.lien l.division + 1, l.index + 1, l.on
-
-  elseif data.cancel != nil
-    unless division_valide data.cancel
-      send_json 400, {error: "division hors limites"}
-      return
-    for j = 1, #divisions[data.cancel + 1].jeux
-      organum.jeu data.cancel + 1, j, false
-
-  elseif data.step != nil
-    unless is_integer(data.step) and data.step >= 0 and data.step < NB_ETAPES
-      send_json 400, {error: "step hors limites"}
-      return
-    organum.midi 0xCF, data.step  -- Program Change, canal de contrôle 16
-
-  elseif data.reverb != nil
-    unless is_integer(data.reverb) and data.reverb >= 0 and data.reverb <= 127
-      send_json 400, {error: "reverb hors limites"}
-      return
-    organum.reverb data.reverb / 127
-
-  elseif g = data.gain
-    unless type(g) == "table" and division_valide(g.division) and is_finite_number(g.value) and g.value >= 0 and g.value <= 1
-      send_json 400, {error: "gain invalide"}
-      return
-    organum.gain g.division + 1, g.value
-
-  elseif data.qualite != nil
-    reponse, err = regler_qualite data.qualite
-    if reponse
-      send_json 200, reponse
-    else
-      send_json 400, {error: err}
+  action, err = validation.valider_orgue data, divisions, NB_ETAPES, TEMPERAMENT_MAX
+  unless action
+    send_json 400, {error: err}
     return
 
-  elseif data.temperament != nil
-    unless is_integer(data.temperament) and data.temperament >= 0 and data.temperament <= TEMPERAMENT_MAX
-      send_json 400, {error: "tempérament doit être un entier entre 0 et #{TEMPERAMENT_MAX}"}
+  switch action
+    when "stop"
+      st = data.stop
+      organum.jeu st.division + 1, st.index + 1, st.on
+    when "link"
+      l = data.link
+      organum.lien l.division + 1, l.index + 1, l.on
+    when "cancel"
+      for j = 1, #divisions[data.cancel + 1].jeux
+        organum.jeu data.cancel + 1, j, false
+    when "step"
+      organum.midi 0xCF, data.step  -- Program Change, canal de contrôle 16
+    when "reverb"
+      organum.reverb data.reverb / 127
+    when "gain"
+      g = data.gain
+      organum.gain g.division + 1, g.value
+    when "qualite"
+      reponse, err = regler_qualite data.qualite
+      if reponse
+        send_json 200, reponse
+      else
+        send_json 400, {error: err}
       return
-    organum.temperament data.temperament
-
-  elseif data.volume != nil
-    unless is_finite_number(data.volume) and data.volume >= 0 and data.volume <= 1
-      send_json 400, {error: "volume hors limites"}
-      return
-    organum.volume data.volume
-
-  elseif data.panic == true
-    organum.panique!
-
-  else
-    send_json 400, {error: "panic doit être true"}
-    return
+    when "temperament"
+      organum.temperament data.temperament
+    when "volume"
+      organum.volume data.volume
+    when "panic"
+      organum.panique!
 
   send_json 200, {ok: true}
 
@@ -1144,12 +1014,9 @@ handle_midi_connexion = ->
   unless ok and type(data) == "table"
     send_json 400, {error: "corps JSON invalide"}
     return
-  unless is_integer(data.client) and data.client >= 0 and data.client <= 255 and
-         is_integer(data.port) and data.port >= 0 and data.port <= 255
-    send_json 400, {error: "client et port doivent être des entiers entre 0 et 255"}
-    return
-  unless type(data.connecte) == "boolean"
-    send_json 400, {error: "connecte doit être un booléen"}
+  valide, err = validation.valider_connexion_midi data
+  unless valide
+    send_json 400, {error: err}
     return
   action = data.connecte and organum.midi_connecter or organum.midi_deconnecter
   ok, err = pcall action, data.client, data.port
