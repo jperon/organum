@@ -13,6 +13,7 @@ etat = {
   charge_niveau: tonumber(os.getenv "CHARGE_NIVEAU") or 1
   volume: 0.5
   reverb: 0.3
+  temperament: 5
   etape: 0
   netapes: 32
   midi: "128:0"
@@ -29,6 +30,7 @@ etat = {
   -- Réglages de qualité factices, avec une calibration au démarrage pour
   -- exercer la ligne d'information du panneau.
   qualite: {
+    temperament: 5
     bruit_attaque: true
     instabilite: true
     spatialisation: 2
@@ -96,6 +98,11 @@ organum.reverb = (v) ->
   bump!
 organum.panique = ->
   print "panique"
+  bump!
+organum.temperament = (t) ->
+  etat.temperament = t
+  etat.qualite.temperament = t
+  print "temperament=#{t}"
   bump!
 -- Repli sans options.qualite : la fenêtre écrit directement les quatre
 -- champs à chaud du moteur.

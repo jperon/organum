@@ -355,6 +355,15 @@ etat_sauve = do
   ok, e = pcall DecodeJson, contenu if contenu
   ok and type(e) == "table" and e or {}
 
+-- Tempérament au démarrage : entier 0..10 (ordre de l'enum du moteur).
+-- Absent ou invalide : égal (5), ce qui préserve les fichiers déjà présents
+-- sur l'orgue et neutralise un éventuel réglage utilisateur d'Aeolus.
+TEMPERAMENT_DEFAUT = 5
+TEMPERAMENT_MAX = 10
+temperament_demarrage = TEMPERAMENT_DEFAUT
+if entier_borne etat_sauve.temperament, 0, TEMPERAMENT_MAX
+  temperament_demarrage = math.tointeger etat_sauve.temperament
+
 -- Qualité au démarrage : etat.json d'abord, puis ORGANUM_QUALITE
 -- (auto|0|1|2|3), prioritaire sur le fichier.
 qualite_demarrage = {}
@@ -494,6 +503,7 @@ if organum.demarrer
   demarrer = (taux, periode, peripherique, limiteur) ->
     organum.demarrer {
       :taux, :periode, :peripherique, :limiteur
+      temperament: temperament_demarrage
       etat: etat_moteur
       qualite: qualite_demarrage
       tete_reverb: qualite_locale.tete_reverb
@@ -542,7 +552,7 @@ seq_sauve = nil
 sauvegarder_etat = ->
   e = organum.etat!
   q = qualite_locale_actuelle!
-  signature = "#{e.seq}|#{q.niveau}|#{q.auto}|#{q.tete_reverb}|#{q.periode}|#{q.taux}|#{q.peripherique}|#{q.limiteur}"
+  signature = "#{e.seq}|#{e.temperament}|#{q.niveau}|#{q.auto}|#{q.tete_reverb}|#{q.periode}|#{q.taux}|#{q.peripherique}|#{q.limiteur}"
   return if signature == seq_sauve
   seq_sauve = signature
   dossier = ETAT_FICHIER\match "^(.*)/[^/]*$"
@@ -550,6 +560,7 @@ sauvegarder_etat = ->
   contenu = EncodeJson {
     moteur: organum.sauvegarder!
     volume: e.volume, reverb: e.reverb
+    temperament: e.temperament
     gains: [d.gain for d in *e.divisions]
     qualite: {
       bruit_attaque: e.qualite.bruit_attaque
@@ -705,6 +716,8 @@ qualite_etat = ->
   e = organum.etat!
   q = qualite_locale_actuelle!
   etat_qualite = {
+    temperament: e.temperament
+    temperament_erreur: e.qualite.temperament_erreur or ""
     bruit_attaque: e.qualite.bruit_attaque == true
     instabilite: e.qualite.instabilite == true
     spatialisation: e.qualite.spatialisation
@@ -874,6 +887,7 @@ etat_orgue = ->
     source: "aeolus", instance: INSTANCE, seq: e.seq, step: e.etape, steps: e.netapes
     volume: e.volume, reverb: e.reverb, xruns: e.xruns, midi: e.midi, temps_reel: e.temps_reel
     taux: e.taux, periode: e.periode, nb_periodes: e.nb_periodes, erreurs_ecriture: e.erreurs_ecriture
+    temperament: e.temperament
     qualite: qualite_etat!
     divisions: for d in *e.divisions
       {
@@ -1009,7 +1023,7 @@ handle_orgue = ->
     send_json 400, {error: "corps JSON invalide"}
     return
 
-  actions = {stop: true, cancel: true, step: true, reverb: true, panic: true, gain: true, link: true, qualite: true, volume: true}
+  actions = {stop: true, cancel: true, step: true, reverb: true, panic: true, gain: true, link: true, qualite: true, volume: true, temperament: true}
   n = 0
   for k in pairs data
     unless actions[k]
@@ -1073,6 +1087,12 @@ handle_orgue = ->
     else
       send_json 400, {error: err}
     return
+
+  elseif data.temperament != nil
+    unless is_integer(data.temperament) and data.temperament >= 0 and data.temperament <= TEMPERAMENT_MAX
+      send_json 400, {error: "tempérament doit être un entier entre 0 et #{TEMPERAMENT_MAX}"}
+      return
+    organum.temperament data.temperament
 
   elseif data.volume != nil
     unless is_finite_number(data.volume) and data.volume >= 0 and data.volume <= 1

@@ -145,6 +145,22 @@ niveau_correspondant = (q) ->
       return i - 1
   -1
 
+-- Tempéraments, dans l'ordre de l'enum du moteur (Scale::Type). Source
+-- unique des libellés pour la page web et la fenêtre native.
+TEMPERAMENTS = {
+  "Pythagoricien"
+  "Mésotonique"
+  "Werckmeister III"
+  "Kirnberger III"
+  "Bien tempéré"
+  "Égal"
+  "Ahrend"
+  "Vallotti"
+  "Kellner"
+  "Lehman"
+  "Juste (do)"
+}
+
 -- Libellé court d'un port du séquenceur : « 24:0 — Clavier USB ». Le nom du
 -- client suffit ; à défaut on prend celui du port ou l'adresse.
 libelle_port = (p) ->
@@ -191,4 +207,5 @@ etat_port = (p) ->
   :libelle_association
   :libelle_port
   :etat_port
+  :TEMPERAMENTS
 }

@@ -230,6 +230,10 @@ script = [[
   var boutonsTaux = groupeTaux ?
     Array.prototype.slice.call(groupeTaux.querySelectorAll('.qualite-segment')) : [];
   var noteTaux = document.getElementById('qualite-taux-note');
+  var groupeTemperament = document.getElementById('qualite-temperament');
+  var boutonsTemperament = groupeTemperament ?
+    Array.prototype.slice.call(groupeTemperament.querySelectorAll('.qualite-segment')) : [];
+  var noteTemperament = document.getElementById('qualite-temperament-note');
   var champPeripherique = document.getElementById('qualite-peripherique');
   var notePeripherique = document.getElementById('qualite-peripherique-note');
   var basculeLimiteur = document.getElementById('qualite-limiteur');
@@ -372,6 +376,7 @@ script = [[
 
   function desactiver(etat) {
     var tous = boutonsNiveau.concat(boutonsSpatialisation, boutonsPeriode, boutonsTaux,
+      boutonsTemperament,
       [basculeBruit, basculeInstabilite, basculeLimiteur, basculeTete,
        curseurPolyphonie, champPeripherique]);
     tous.forEach(function (el) {
@@ -439,6 +444,14 @@ script = [[
         etatTete = q.tete_reverb ? 'en cours : active' : 'en cours : coupée';
       }
       note(noteTeteEtat, etatTete);
+    }
+
+    boutonsTemperament.forEach(function (b) {
+      poser(b, nombre(b.getAttribute('data-valeur')) === q.temperament);
+    });
+    if (noteTemperament) {
+      var erreurTemperament = typeof q.temperament_erreur === 'string' ? q.temperament_erreur : '';
+      note(noteTemperament, erreurTemperament);
     }
 
     var tauxProchain = nombre(q.taux_prochain);
@@ -548,6 +561,48 @@ script = [[
         majMessage(null);
       });
   }
+
+  function envoyer_temperament(n) {
+    enAttente += 1;
+    echecEnvoi = '';
+    return fetch('/api/orgue', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ temperament: n })
+    })
+      .then(function (r) {
+        return r.json().then(
+          function (data) {
+            if (!r.ok) { throw new Error((data && data.error) || ('HTTP ' + r.status)); }
+            return data;
+          },
+          function () {
+            if (!r.ok) { throw new Error('HTTP ' + r.status); }
+            return {};
+          }
+        );
+      })
+      .then(function () {
+        // La réponse de POST temperament est {ok:true} : la relire comme un
+        // état complet effacerait la sélection. La boucle d'état publiera la
+        // valeur effective une fois le calcul terminé.
+        enAttente -= 1;
+      })
+      .catch(function (err) {
+        enAttente -= 1;
+        var detail = err && err.message ? err.message : 'erreur réseau';
+        echecEnvoi = 'Audio : échec de l’enregistrement (' + detail + ').';
+        majMessage(null);
+      });
+  }
+
+  surGroupe(boutonsTemperament, function (valeur) {
+    boutonsTemperament.forEach(function (b) {
+      poser(b, b.getAttribute('data-valeur') === valeur);
+    });
+    var n = nombre(valeur);
+    if (n !== null && n >= 0) { envoyer_temperament(Math.round(n)); }
+  });
 
   surGroupe(boutonsNiveau, function (valeur) {
     boutonsNiveau.forEach(function (b) {
@@ -860,6 +915,18 @@ script = [[
                 h.button type: "button", class: "qualite-bascule", id: "qualite-limiteur", ["aria-pressed"]: "true", "Limiteur"
                 h.span class: "qualite-note", id: "qualite-taux-note", hidden: true
                 h.span class: "qualite-note", id: "qualite-limiteur-note", hidden: true
+              )
+            )
+            h.div(
+              class: "qualite-ligne"
+              h.span class: "qualite-libelle", "Tempérament"
+              h.div(
+                class: "qualite-commandes"
+                h.div(
+                  class: "qualite-segments", id: "qualite-temperament", role: "group", ["aria-label"]: "Tempérament"
+                  table.unpack [bouton_segment(tostring(i - 1), nom, i - 1 == 5) for i, nom in ipairs modele.TEMPERAMENTS]
+                )
+                h.span class: "qualite-note", id: "qualite-temperament-note", hidden: true
               )
             )
             h.div(

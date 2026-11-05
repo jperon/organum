@@ -222,7 +222,9 @@ disposer_qualite = (rows, l, h, colonnes) ->
   ligne = math.floor (h - fixe) / rows
   par_hauteur = ligne / LIGNE_POLICE
   case = (l - 2 * MARGE) / colonnes - ESPACE
-  par_largeur = case / 5.5
+  -- 8,7 : les libellés de tempérament les plus longs (« Werckmeister III »,
+  -- 16 caractères) doivent tenir dans une case, pas seulement les nombres.
+  par_largeur = case / 8.7
   police = math.floor math.min(par_hauteur, par_largeur, POLICE_MAX)
   trop_petit = false
   if police < POLICE_MIN
@@ -476,6 +478,8 @@ texte_calibration = (c) ->
         q.reverb = e.reverb if type(e.reverb) == "number"
         return q
     {
+      temperament: e.temperament or 5
+      temperament_erreur: base.temperament_erreur or ""
       bruit_attaque: base.bruit_attaque == true
       instabilite: base.instabilite == true
       spatialisation: base.spatialisation or 0
@@ -514,6 +518,15 @@ texte_calibration = (c) ->
   -- champs.
   regler_qualite = (payload) ->
     message_qualite = nil
+    -- Le tempérament passe par son propre calcul différé, pas par les
+    -- réglages de qualité : même chemin que POST /api/orgue {"temperament"}.
+    if payload.temperament != nil
+      ok, err = pcall organum.temperament, payload.temperament
+      unless ok
+        message_qualite = "Échec de l'enregistrement des réglages"
+        Log kLogWarn, "fenêtre : tempérament : #{err}" if Log
+      seq = nil
+      return
     if qualite_opt and qualite_opt.regler
       ok, res = pcall qualite_opt.regler, payload
       if not ok then
@@ -825,10 +838,11 @@ texte_calibration = (c) ->
       a_reverb = type(q.reverb) == "number"
       calib = type(q.calibration) == "table" and q.calibration or nil
       -- Rangées : en-tête, niveau, deux cases, spatialisation, polyphonie,
-      -- période, taux + limiteur, périphérique, puis (tête), (calibration) et
-      -- message. Le nombre de cases de la ligne « Niveau » vaut 6 quand le
-      -- mode Auto existe (bouton en plus), 5 sinon.
-      rows = 10 + (a_reverb and 1 or 0) + (a_tete and 1 or 0) + (calib and 1 or 0)
+      -- période, taux + limiteur, tempérament (2 rangées), périphérique,
+      -- puis (tête), (calibration) et message. Le nombre de cases de la
+      -- ligne « Niveau » vaut 6 quand le mode Auto existe (bouton en plus),
+      -- 5 sinon.
+      rows = 9 + (a_reverb and 1 or 0) + (a_tete and 1 or 0) + (calib and 1 or 0) + 2
       colonnes = (type(q.auto) == "boolean") and 6 or 5
       p = disposer_qualite rows, l, h, colonnes
       if p.police != police
@@ -939,6 +953,20 @@ texte_calibration = (c) ->
           nouveau = ui\choix "Limiteur", actif_limiteur
           regler_qualite {limiteur: nouveau} if nouveau != actif_limiteur
 
+        -- Tempérament : 11 valeurs sur deux rangées (libellé + 5 boutons,
+        -- puis 6 boutons). Le calcul se fait hors du fil audio.
+        ui\ligne ligne, 6
+        ui\texte "Tempérament", "droite"
+        for i = 1, 5
+          actif = q.temperament == i - 1
+          change = ui\choix(modele.TEMPERAMENTS[i], actif) != actif
+          regler_qualite {temperament: i - 1} if change
+        ui\ligne ligne, 6
+        for i = 6, 11
+          actif = q.temperament == i - 1
+          change = ui\choix(modele.TEMPERAMENTS[i], actif) != actif
+          regler_qualite {temperament: i - 1} if change
+
         -- Périphérique : lecture seule (le module nk n'expose pas de champ
         -- de saisie de texte) ; la page web permet de le modifier.
         ui\ligne ligne, 1
@@ -996,6 +1024,8 @@ texte_calibration = (c) ->
         if q.application == true
           message_affiche = "Application…"
         message_affiche or= message_qualite
+        if not message_affiche and type(q.temperament_erreur) == "string" and q.temperament_erreur != ""
+          message_affiche = "Tempérament : #{q.temperament_erreur}"
         if not message_affiche and type(q.audio_erreur) == "string" and q.audio_erreur != ""
           message_affiche = "Reconfiguration audio : #{q.audio_erreur}"
         if not message_affiche and type(q.audio_repli) == "string" and q.audio_repli != ""
