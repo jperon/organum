@@ -268,6 +268,20 @@ script = [[
     if (el) { el.setAttribute('aria-pressed', etat ? 'true' : 'false'); }
   }
 
+  // Remplit la partie colorée du curseur jusqu'à sa valeur : le style de
+  // base pose --fill à 50 %, il faut donc le recalculer à chaque changement.
+  function majRemplissage(el) {
+    if (!el) { return; }
+    var min = nombre(el.min);
+    var max = nombre(el.max);
+    var valeur = nombre(el.value);
+    if (min === null || max === null || valeur === null || max <= min) { return; }
+    var pourcent = (valeur - min) / (max - min) * 100;
+    if (pourcent < 0) { pourcent = 0; }
+    if (pourcent > 100) { pourcent = 100; }
+    el.style.setProperty('--fill', pourcent + '%');
+  }
+
   function surGroupe(boutons, action) {
     boutons.forEach(function (b) {
       b.addEventListener('click', function () {
@@ -375,6 +389,7 @@ script = [[
       if (vr < 0) { vr = 0; }
       if (vr > 127) { vr = 127; }
       curseurReverb.value = String(vr);
+      majRemplissage(curseurReverb);
     }
     if (!q || typeof q !== 'object') {
       // Serveur sans réglages de qualité (ancienne version) : la section
@@ -403,7 +418,10 @@ script = [[
     });
     if (!polyActif && typeof q.polyphonie_max === 'number') {
       polyEnvoye = null;
-      if (curseurPolyphonie) { curseurPolyphonie.value = String(q.polyphonie_max); }
+      if (curseurPolyphonie) {
+        curseurPolyphonie.value = String(q.polyphonie_max);
+        majRemplissage(curseurPolyphonie);
+      }
       if (valeurPolyphonie) { valeurPolyphonie.textContent = textePolyphonie(q.polyphonie_max); }
     }
     // Tête de réverbération : le contrôle montre la valeur ENREGISTRÉE.
@@ -563,6 +581,7 @@ script = [[
   if (curseurPolyphonie) {
     curseurPolyphonie.addEventListener('input', function () {
       polyActif = true;
+      majRemplissage(curseurPolyphonie);
       var n = nombre(curseurPolyphonie.value);
       if (n !== null && valeurPolyphonie) { valeurPolyphonie.textContent = textePolyphonie(n); }
     });
@@ -615,7 +634,10 @@ script = [[
   }
   if (curseurReverb) {
     curseurReverb.addEventListener('pointerdown', function () { reverbManip = true; });
-    curseurReverb.addEventListener('input', function () { reverbManip = true; });
+    curseurReverb.addEventListener('input', function () {
+      reverbManip = true;
+      majRemplissage(curseurReverb);
+    });
     var envoyerReverb = function () {
       reverbManip = false;
       var v = nombre(curseurReverb.value);
@@ -635,6 +657,10 @@ script = [[
     curseurReverb.addEventListener('change', envoyerReverb);
     curseurReverb.addEventListener('blur', envoyerReverb);
   }
+
+  // Remplissage initial, avant la première réponse du serveur.
+  majRemplissage(curseurReverb);
+  majRemplissage(curseurPolyphonie);
 
   // --- Boucle d'état propre à cette page ------------------------------
   // GET /api/orgue puis attente longue /api/orgue/attendre, comme la page
