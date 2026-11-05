@@ -125,6 +125,31 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   Tests : `web/scripts/test-authentification.sh` (curl --digest, 401,
   stale=true, exemption locale, fichier 0600, environnement) et
   `scripts/e2e-auth.mjs` (Chromium headless sur adresse non locale).
+- Contrôle d'accès facultatif par sous-réseau source, indépendant de
+  l'authentification : `web/src/controle_acces.moon` (module pur, analysé par
+  `web/tests/controle_acces.lua`). Quatre cas : liste vide sans mot de passe =
+  aucun contrôle ; liste vide avec mot de passe = Digest seul ; liste remplie
+  sans mot de passe = sous-réseau seul ; les deux = sous-réseau PUIS Digest.
+  Exception unique : `127.0.0.1` et `::1` passent toujours, et la fenêtre
+  native n'emprunte pas HTTP. Source hors liste : `403` avant toute analyse
+  Digest, sans `WWW-Authenticate`. L'adresse vient de `GetClientAddr` (jamais
+  `X-Forwarded-For`) ; `::ffff:a.b.c.d` est traitée comme IPv4 et la zone
+  d'une lien-local n'entre pas dans la comparaison (GetClientAddr la retire,
+  vérifié sur connexion réelle). Analyse stricte : adresse seule = /32 ou
+  /128, formes compressées et casse IPv6 admises, masques hors bornes et
+  adresses invalides refusés, **bits d'hôte non nuls refusés** (choix
+  documenté). Comparaison bit à bit, sans bibliothèque ajoutée ; `ParseIp`
+  n'est pas utilisé (trop permissif : `1.2.3` et `1.2.3.4.5` passent).
+  Persistance dans `etat.json.reseaux.json` (0600), clé `reseaux`, lecture à
+  chaque requête ; fichier illisible = aucun filtrage avec erreur publiée
+  (ne pas bloquer l'utilisateur dehors), `ORGANUM_RESEAUX` prioritaire, non
+  recopié, verrouille (`409`) et une valeur d'environnement invalide arrête
+  le démarrage (intention de sécurité). Routes `GET/POST /api/reseaux` ;
+  une liste non vide qui exclut la source HTTP courante est refusée (400),
+  sauf source locale. Panneaux Audio web (`page_audio.moon`) et natif
+  (`fenetre.moon`, `nk.saisie`). Tests réels :
+  `web/scripts/test-reseaux.sh`, lancé par `scripts/tests-longs.sh`.
+
 - Puce d'adaptation à la machine : le fil audio mesure le rendu avec deux
   `clock_gettime(CLOCK_MONOTONIC)` par tampon (vDSO sous Linux, donc sans
   appel système), hors attente d'écriture. Pour chaque seconde pleine, la
