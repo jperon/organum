@@ -459,6 +459,8 @@ elseif mode == "qualite" then
   print("retour_x=" .. arrondi(xr)); print("retour_y=" .. y(0))
   local xt = colonne(6, 2)
   print("temp_x=" .. arrondi(xt)); print("temp_y=" .. y(8))
+  local xt3 = colonne(6, 4)
+  print("temp3_x=" .. arrondi(xt3)); print("temp3_y=" .. y(8))
   local xrv, w = colonne(2, 1)
   local frac = tonumber(os.getenv("REVERB_FRAC") or "0.25")
   print("reverb_x=" .. arrondi(MARGE + 1 * (w + ESPACE) + w * frac))
@@ -611,6 +613,36 @@ if demarrer_xvfb && demarrer_organum oui && attendre_fenetre; then
     ok "natif : tempérament stable après le clic (une seule commande)"
   else
     echec "natif : le tempérament a changé à nouveau sans clic"
+  fi
+
+  # Rafale réelle : le calcul est assez long pour que la deuxième cible
+  # arrive avant la fin de la première. La capture prise juste après les
+  # deux clics doit montrer l'état « en cours » (libellé et bouton changés),
+  # et la dernière demande doit finalement l'emporter.
+  ecrire_json_api '{"temperament":5}'
+  attendre_api '"temperament":5' 100
+  sleep 1
+  capturer "temp-avant"
+  H_TEMP_AVANT=$(md5sum "$CAPTURES/temp-avant.png" | cut -d' ' -f1)
+  clic_xy "$temp_x" "$temp_y"
+  clic_xy "$temp3_x" "$temp3_y"
+  capturer "temp-en-cours"
+  H_TEMP_ENC=$(md5sum "$CAPTURES/temp-en-cours.png" | cut -d' ' -f1)
+  if [ "$H_TEMP_AVANT" = "$H_TEMP_ENC" ]; then
+    echec "natif : l'état « en cours » du tempérament n'apparaît pas après les deux clics"
+  else
+    ok "natif : état « en cours » visible pendant le calcul du tempérament"
+  fi
+  if attendre_api '"temperament":3' 250; then
+    ok "natif : la dernière demande de la rafale (tempérament 3) l'emporte"
+  else
+    echec "natif : la dernière demande de la rafale n'a pas été appliquée"
+  fi
+  sleep 1
+  if [ "$(lire_api | python3 -c 'import json,sys; print(json.load(sys.stdin)["temperament"])' 2>/dev/null)" = 3 ]; then
+    ok "natif : tempérament 3 stable après la rafale, sans nouvelle commande"
+  else
+    echec "natif : le tempérament change encore après la rafale"
   fi
 
   REVERB_AVANT=$(lire_api | python3 -c 'import json,sys; print(json.load(sys.stdin)["reverb"])' 2>/dev/null || echo 0)
