@@ -9,6 +9,7 @@ o/
 *.elf
 /web/build/
 /moteur/tests/rendu
+/moteur/tests/polyphonie
 /moteur/tests/*.wav
 /plateforme/tests/bip
 /plateforme/tests/ecoute
