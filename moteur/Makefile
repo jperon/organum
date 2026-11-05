@@ -54,7 +54,12 @@ ecretage: libaeolus.a tests/ecretage.cpp
 	@mkdir -p tests
 	$(CXX) $(CXXFLAGS) tests/ecretage.cpp $(JUCE)/juce_core/juce_core_CompilationTime.cpp -L. -laeolus -lpthread -ldl -lrt -lm -o tests/ecretage
 
+# Polyphonie par accouplement : moteur complet, donc hors de la suite rapide.
+# cosmoc++ échoue au lien aarch64 ; on rejoue les trois commandes x86-64.
+polyphonie: libaeolus.a tests/polyphonie.cpp
+	sh tests/compiler-test-x86.sh . tests/polyphonie tests/polyphonie.cpp
+
 clean:
 	rm -rf o libaeolus.a
 
-.PHONY: all clean rendu ecretage
+.PHONY: all clean rendu ecretage polyphonie
