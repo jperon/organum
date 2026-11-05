@@ -5,6 +5,7 @@
 -- Validations et fusions pures, partagées avec les tests unitaires.
 validation = require "validation"
 authentification = require "authentification"
+controle_acces = require "controle_acces"
 
 -- Écoute : redbean, sans adresse explicite (-l), ne programme que 0.0.0.0
 -- (tool/net/redbean.c, Listen) ; on ajoute « :: » pour répondre aussi en
@@ -369,6 +370,27 @@ SECRET_NONCE = GetRandomBytes 32
 -- éprouver la péremption sans attendre cinq minutes dans les tests.
 AUTH_NONCE_DUREE = tonumber(os.getenv "ORGANUM_AUTH_NONCE_DUREE") or AUTH.DUREE_NONCE
 
+-- Contrôle d'accès par sous-réseau source, facultatif et indépendant de
+-- l'authentification. Liste vide : aucun filtrage. Fichier voisin d'etat.json
+-- (même motif que l'authentification), relu à chaque requête pour qu'un
+-- réglage s'applique à chaud. ORGANUM_RESEAUX (liste séparée par virgules ou
+-- espaces) est prioritaire et n'est jamais recopié sur disque : il verrouille
+-- alors le réglage. Une valeur d'environnement invalide arrête le démarrage :
+-- elle exprime une intention de sécurité, qu'il ne faut pas remplacer
+-- silencieusement par « aucun filtre ». Un fichier illisible, en revanche, ne
+-- filtre rien (pour ne pas enfermer l'utilisateur dehors) et son erreur est
+-- publiée dans l'état.
+RESEAUX_FICHIER = "#{ETAT_FICHIER}.reseaux.json"
+RESEAUX_ENV = os.getenv "ORGANUM_RESEAUX"
+RESEAUX_ENV_ACTIF = RESEAUX_ENV != nil and RESEAUX_ENV != ""
+RESEAUX_ENV_LISTE = {}
+if RESEAUX_ENV_ACTIF
+  liste, err = controle_acces.normaliser_liste RESEAUX_ENV
+  unless liste
+    Log kLogFatal, "organum : ORGANUM_RESEAUX invalide : #{err}"
+    unix.exit 1
+  RESEAUX_ENV_LISTE = liste
+
 auth_fichier = (chemin) ->
   contenu = Slurp chemin
   return nil unless contenu
@@ -450,16 +472,11 @@ regler_authentification = (data) ->
   return nil, err unless ok
   auth_etat!
 
--- Adresse strictement locale : les scripts locaux (127.0.0.1 et ::1) n'ont
--- pas à s'authentifier. GetClientAddr, et non GetRemoteAddr : un en-tête
--- X-Forwarded-For venu d'une adresse de confiance ne doit pas exempter.
-auth_locale = ->
-  ip = GetClientAddr!
-  if type(ip) == "number"
-    return ip == 0x7f000001
-  if type(ip) == "string" and #ip == 16
-    return ip == (string.rep "\0", 15) .. "\1"
-  false
+-- Source HTTP réelle : GetClientAddr, et non GetRemoteAddr, pour qu'un
+-- en-tête X-Forwarded-For venu d'une adresse de confiance ne puisse ni
+-- exempter du filtre de sous-réseau ni contourner l'authentification. La
+-- reconnaissance des adresses strictement locales est dans
+-- controle_acces.source_locale (127.0.0.1 et ::1 seulement).
 
 -- Cible de la requête telle que le client l'a signée : chemin et chaîne de
 -- requête, sans schéma ni hôte (GetUrl les ajoute).
@@ -713,6 +730,91 @@ CONFIG_MIDI = os.getenv("ORGANUM_CONFIG_MIDI") or "#{os.getenv 'HOME'}/.config/o
 -- Présentation partagée avec l'interface native (modele.moon).
 modele = require "modele"
 
+-- Lecture tolérante du fichier de réseaux : absent, illisible ou invalide
+-- donne une liste vide et, le cas échéant, un message publié dans l'état.
+reseaux_fichier = ->
+  contenu = Slurp RESEAUX_FICHIER
+  return {}, nil unless contenu
+  ok, t = pcall DecodeJson, contenu
+  return {}, "fichier illisible (JSON invalide)" unless ok and type(t) == "table"
+  liste, err = controle_acces.normaliser_liste t.reseaux
+  return {}, "liste invalide : #{err}" unless liste
+  liste, nil
+
+reseaux_config = ->
+  if RESEAUX_ENV_ACTIF
+    return {liste: RESEAUX_ENV_LISTE, impose: true, erreur: nil}
+  liste, erreur = reseaux_fichier!
+  {liste: liste, impose: false, erreur: erreur}
+
+-- État publié (API et panneaux). ip est la valeur brute de GetClientAddr
+-- quand elle est connue ; la fenêtre native n'a pas de source HTTP.
+reseaux_etat = (ip) ->
+  config = reseaux_config!
+  {
+    active: #config.liste > 0
+    texte: controle_acces.formater_liste config.liste
+    reseaux: modele.liste_json [r.texte for r in *config.liste]
+    impose: config.impose
+    source: if ip != nil then controle_acces.texte_source ip else nil
+    erreur: config.erreur
+  }
+
+reseaux_ecrire = (liste) ->
+  contenu = EncodeJson {reseaux: [r.texte for r in *liste]}
+  dossier = RESEAUX_FICHIER\match "^(.*)/[^/]*$"
+  unix.makedirs dossier, tonumber("755", 8) if dossier
+  tmp = "#{RESEAUX_FICHIER}.tmp.#{unix.getpid!}"
+  unless Barf tmp, contenu, tonumber("600", 8)
+    pcall unix.unlink, tmp
+    return nil, "écriture impossible"
+  ok = pcall unix.rename, tmp, RESEAUX_FICHIER
+  unless ok
+    pcall unix.unlink, tmp
+    return nil, "écriture impossible"
+  pcall unix.chmod, RESEAUX_FICHIER, tonumber("600", 8)
+  true
+
+-- Enregistre une liste. ip est la source HTTP courante : une liste non vide
+-- qui l'exclut est refusée, sauf si cette source est locale (elle passe
+-- toujours). La fenêtre native n'appelle sans ip : elle est locale.
+regler_reseaux = (data, ip = nil) ->
+  return nil, "objet attendu" unless type(data) == "table"
+  return nil, "imposé par ORGANUM_RESEAUX" if RESEAUX_ENV_ACTIF
+  if data.retirer == true
+    pcall unix.unlink, RESEAUX_FICHIER
+    return reseaux_etat ip
+  return nil, "champ reseaux attendu" if data.reseaux == nil
+  liste, err = controle_acces.normaliser_liste data.reseaux
+  return nil, "liste invalide : #{err}" unless liste
+  exclut = false
+  if ip != nil and #liste > 0
+    exclut = not controle_acces.source_locale(ip) and not controle_acces.autorise liste, ip
+  if exclut
+    return nil, "la liste exclut l'adresse source (#{controle_acces.texte_source ip})"
+  if #liste == 0
+    pcall unix.unlink, RESEAUX_FICHIER
+  else
+    ok, err = reseaux_ecrire liste
+    return nil, err unless ok
+  reseaux_etat ip
+
+-- Garde de sous-réseau : 403 avant toute analyse Digest, sans défi. Une
+-- liste vide ne filtre rien ; les adresses locales ne sont jamais soumises
+-- à ce filtre (l'appelant les exempte).
+reseaux_autoriser = (ip) ->
+  config = reseaux_config!
+  return true if #config.liste == 0
+  return true if controle_acces.autorise config.liste, ip
+  SetStatus 403
+  SetHeader "Content-Type", "application/json"
+  Write EncodeJson {error: "adresse source non autorisée"}
+  false
+
+do
+  config = reseaux_config!
+  Log kLogWarn, "organum : #{RESEAUX_FICHIER} : #{config.erreur} ; aucun filtrage" if config.erreur
+
 etat_midi = ->
   e = organum.etat!
   {
@@ -823,7 +925,14 @@ lancer_fenetre = ->
         error raison unless res
         res
     }
-    ouvert, raison = lancer organum, nk, {titre: "organum", :volume, :midi, :qualite, authentification: auth, continuer: -> unix.getppid! == maitre}
+    reseaux = {
+      etat: reseaux_etat
+      regler: (p) ->
+        res, raison = regler_reseaux p
+        error raison unless res
+        res
+    }
+    ouvert, raison = lancer organum, nk, {titre: "organum", :volume, :midi, :qualite, authentification: auth, :reseaux, continuer: -> unix.getppid! == maitre}
     Log kLogWarn, "fenêtre : #{raison}" unless ouvert
   Log kLogWarn, "fenêtre : #{err}" unless ok
   unix.exit 0
@@ -1103,6 +1212,26 @@ handle_authentification = ->
     status = if err == "imposé par ORGANUM_MOT_DE_PASSE" then 409 else 400
     send_json status, {error: err}
 
+handle_reseaux = ->
+  ip = GetClientAddr!
+  method = GetMethod!
+  if method == "GET"
+    send_json 200, reseaux_etat ip
+    return
+  unless method == "POST"
+    send_json_405 "GET, POST"
+    return
+  ok, data = pcall DecodeJson, GetBody!
+  unless ok and type(data) == "table"
+    send_json 400, {error: "corps JSON invalide"}
+    return
+  reponse, err = regler_reseaux data, ip
+  if reponse
+    send_json 200, reponse
+  else
+    status = if err == "imposé par ORGANUM_RESEAUX" then 409 else 400
+    send_json status, {error: err}
+
 handle_orgue_attendre = ->
   unless GetMethod! == "GET"
     send_json_405 "GET"
@@ -1279,10 +1408,19 @@ _G.OnWorkerStart = ->
 
 _G.OnHttpRequest = ->
   path = GetPath!
-  -- Authentification facultative : couvre toutes les routes, y compris les
-  -- pages, les API et l'attente longue. Les adresses locales en sont
-  -- exemptées ; la fenêtre native n'emprunte pas HTTP.
-  return unless auth_locale! or auth_autoriser!
+  -- Contrôle d'accès facultatif, dans cet ordre : une source hors des
+  -- sous-réseaux autorisés reçoit 403 avant toute analyse Digest (sans défi
+  -- WWW-Authenticate) ; l'authentification vient ensuite. Les adresses
+  -- strictement locales (127.0.0.1 et ::1) échappent aux deux ; la fenêtre
+  -- native n'emprunte pas HTTP. Ces deux réglages couvrent toutes les
+  -- routes, y compris les pages, les API et l'attente longue.
+  ip = GetClientAddr!
+  unless controle_acces.source_locale ip
+    return unless reseaux_autoriser ip
+    return unless auth_autoriser!
+  if path == "/api/reseaux"
+    handle_reseaux!
+    return
   if path == "/api/authentification"
     handle_authentification!
     return
