@@ -885,6 +885,111 @@ lancer "" 1 "" "-" || exit 1
 S=$(get)
 verifie "après relance : volume moteur = 0.25" '"volume":0.25' "$S"
 
+echo "== tempérament : GET, POST, invalides, note tenue, rafale, persistance"
+effacer_etat
+lancer "" 1 "" "-" || exit 1
+S=$(get)
+verifie "GET contient temperament" '"temperament":' "$S"
+verifie "tempérament par défaut = égal (5)" '"temperament":5' "$S"
+verifie "tempérament sans erreur au démarrage" '"temperament_erreur":""' "$S"
+R=$(post '{"temperament":1}')
+verifie "POST tempérament valide : ok" '"ok":true' "$R"
+S=$(attendre_etat '"temperament":1' 100) || true
+verifie "tempérament appliqué et relu = 1 (mésotonique)" '"temperament":1' "$S"
+S=$(attendre_etat '"application":false' 100) || true
+verifie "tempérament : application repasse à faux" '"application":false' "$S"
+for bad in '11' '-1' '2.5' '"1"' 'true'; do
+  code=$(code_post "{\"temperament\":$bad}")
+  if [ "$code" = "400" ]; then
+    ok "tempérament invalide refusé (400) : $bad"
+  else
+    echec "tempérament invalide $bad : HTTP $code au lieu de 400"
+  fi
+done
+S=$(get)
+verifie "POST invalide : tempérament inchangé = 1" '"temperament":1' "$S"
+
+# Note tenue pendant le changement : le calcul différé ne doit ni planter ni
+# arrêter le serveur (même si une bascule rapprochée peut couper la voix).
+if command -v aplaymidi >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+  CLIENT_MIDI=$(env -u ALSA_CONFIG_PATH aplaymidi -l 2>/dev/null | awk '/Organum/ { split($1, a, ":"); print a[1]; exit }')
+  if [ -n "$CLIENT_MIDI" ]; then
+    python3 - "$TMP/note-tenue.mid" <<'PYNOTE'
+import struct, sys
+
+def vlq(n):
+    b = [n & 0x7f]
+    n >>= 7
+    while n:
+        b.insert(0, (n & 0x7f) | 0x80)
+        n >>= 7
+    return bytes(b)
+
+piste = vlq(0) + bytes([0x90, 60, 100])
+piste += vlq(3840) + bytes([0x80, 60, 0]) + vlq(0) + bytes([0xFF, 0x2F, 0])
+data = (b'MThd' + struct.pack('>IHHH', 6, 0, 1, 480) +
+        b'MTrk' + struct.pack('>I', len(piste)) + piste)
+open(sys.argv[1], 'wb').write(data)
+PYNOTE
+    env -u ALSA_CONFIG_PATH aplaymidi -p "$CLIENT_MIDI:0" "$TMP/note-tenue.mid" >/dev/null 2>&1 &
+    MIDI_PID=$!
+    sleep 0.4
+    R=$(post '{"temperament":2}')
+    verifie "note tenue : POST tempérament accepté" '"ok":true' "$R"
+    sleep 0.3
+    S=$(attendre_etat '"temperament":2' 100) || true
+    verifie "note tenue : tempérament appliqué = 2" '"temperament":2' "$S"
+    R=$(post '{"temperament":5}')
+    verifie "note tenue : second POST accepté" '"ok":true' "$R"
+    wait "$MIDI_PID" 2>/dev/null || true
+    CODE=$(curl -s -o /dev/null -w '%{http_code}' "$URL/api/orgue")
+    if [ "$CODE" = "200" ]; then
+      ok "note tenue : serveur vivant après le changement"
+    else
+      echec "note tenue : serveur muet après le changement (HTTP $CODE)"
+    fi
+  else
+    echo "INFO  : port MIDI Organum introuvable, note tenue non jouée"
+  fi
+else
+  echo "INFO  : aplaymidi/python3 absents, note tenue non jouée"
+fi
+
+# Survivance au changement de taux (le moteur est recréé).
+post '{"temperament":3}' >/dev/null
+S=$(attendre_etat '"temperament":3' 100) || true
+post '{"qualite":{"taux":44100}}' >/dev/null
+S=$(attendre_etat '"taux":44100' 200) || true
+S=$(attendre_etat '"application":false' 100) || true
+verifie "changement de taux : tempérament conservé = 3" '"temperament":3' "$S"
+post '{"qualite":{"taux":48000}}' >/dev/null
+S=$(attendre_etat '"taux":48000' 200) || true
+S=$(attendre_etat '"application":false' 100) || true
+verifie "retour taux 48000 : tempérament toujours 3" '"temperament":3' "$S"
+
+# Cinq demandes rapprochées : seule la dernière compte, serveur vivant.
+for t in 0 2 7 3 9; do
+  post "{\"temperament\":$t}" >/dev/null
+  sleep 0.02
+done
+S=$(attendre_etat '"application":false' 200) || true
+verifie "5 demandes rapprochées : application finit à faux" '"application":false' "$S"
+verifie "5 demandes rapprochées : la dernière gagne (9)" '"temperament":9' "$S"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$URL/api/orgue")
+if [ "$CODE" = "200" ]; then
+  ok "5 demandes rapprochées : serveur vivant"
+else
+  echec "5 demandes rapprochées : serveur muet (HTTP $CODE)"
+fi
+
+# Persistance : clé temperament d'etat.json, relue au lancement suivant.
+attendre_sauvegarde
+verifie "etat.json contient temperament" '"temperament":9' "$(cat "$ETAT" 2>/dev/null || true)"
+arreter
+lancer "" 1 "" "-" || exit 1
+S=$(get)
+verifie "après relance : tempérament 9 restauré" '"temperament":9' "$S"
+
 echo "== pédale MIDI associée à volume : e.volume évolue, /api/volume intact"
 if command -v python3 >/dev/null 2>&1 &&
    command -v aplaymidi >/dev/null 2>&1; then
