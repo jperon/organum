@@ -905,6 +905,117 @@ script = [[
   }, 2000);
 
   demarrer();
+
+  // --- Authentification facultative --------------------------------------
+  // Le mot de passe n'est jamais relu : le serveur ne renvoie que l'état.
+  // Sur HTTP, il est envoyé en clair ; le calcul de HA1 côté navigateur
+  // exigerait crypto.subtle, indisponible hors HTTPS.
+  var sectionAuth = document.getElementById('authentification');
+  var authEtat = document.getElementById('auth-etat');
+  var authUtilisateur = document.getElementById('auth-utilisateur');
+  var authMotDePasse = document.getElementById('auth-mot-de-passe');
+  var authEnregistrer = document.getElementById('auth-enregistrer');
+  var authRetirer = document.getElementById('auth-retirer');
+  var authNote = document.getElementById('auth-note');
+  var authEnCours = false;
+
+  function majAuth(a) {
+    if (!sectionAuth || !a || typeof a !== 'object') { return; }
+    if (authUtilisateur && document.activeElement !== authUtilisateur &&
+        typeof a.utilisateur === 'string') {
+      authUtilisateur.value = a.utilisateur;
+    }
+    if (authEtat) {
+      if (a.active === true) {
+        authEtat.textContent = 'Activée pour « ' + (a.utilisateur || '') + ' »';
+      } else {
+        authEtat.textContent = 'Désactivée';
+      }
+    }
+    var impose = a.impose === true;
+    if (authUtilisateur) { authUtilisateur.disabled = impose || authEnCours; }
+    if (authMotDePasse) { authMotDePasse.disabled = impose || authEnCours; }
+    if (authEnregistrer) { authEnregistrer.disabled = impose || authEnCours; }
+    if (authRetirer) {
+      authRetirer.disabled = impose || authEnCours;
+      authRetirer.hidden = a.active !== true;
+    }
+    if (authNote) {
+      if (impose) {
+        authNote.textContent = 'Mot de passe imposé par ORGANUM_MOT_DE_PASSE : non modifiable ici.';
+        authNote.hidden = false;
+      } else {
+        authNote.textContent = '';
+        authNote.hidden = true;
+      }
+    }
+  }
+
+  function chargerAuth() {
+    fetch('/api/authentification', { cache: 'no-store', headers: { Accept: 'application/json' } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (a) { if (a) { majAuth(a); } })
+      .catch(function () {});
+  }
+
+  function envoyerAuth(payload) {
+    if (authEnCours) { return; }
+    authEnCours = true;
+    fetch('/api/authentification', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(payload)
+    })
+      .then(function (r) {
+        return r.json().then(
+          function (data) {
+            if (!r.ok) { throw new Error((data && data.error) || ('HTTP ' + r.status)); }
+            return data;
+          },
+          function () {
+            if (!r.ok) { throw new Error('HTTP ' + r.status); }
+            return {};
+          }
+        );
+      })
+      .then(function (data) {
+        authEnCours = false;
+        if (authMotDePasse) { authMotDePasse.value = ''; }
+        majAuth(data);
+      })
+      .catch(function (err) {
+        authEnCours = false;
+        chargerAuth();
+        if (authNote) {
+          authNote.textContent = 'Authentification : échec (' +
+            (err && err.message ? err.message : 'erreur réseau') + ').';
+          authNote.hidden = false;
+        }
+      });
+  }
+
+  if (authEnregistrer) {
+    authEnregistrer.addEventListener('click', function () {
+      var mot = authMotDePasse ? authMotDePasse.value : '';
+      if (!mot) {
+        if (authNote) {
+          authNote.textContent = 'Saisir un mot de passe avant d’enregistrer.';
+          authNote.hidden = false;
+        }
+        return;
+      }
+      envoyerAuth({
+        utilisateur: authUtilisateur ? authUtilisateur.value : '',
+        mot_de_passe: mot
+      });
+    });
+  }
+  if (authRetirer) {
+    authRetirer.addEventListener('click', function () {
+      envoyerAuth({ retirer: true });
+    });
+  }
+  chargerAuth();
 })();
 ]]
 
@@ -1045,6 +1156,40 @@ script = [[
           h.p class: "note qualite-erreur", id: "qualite-audio-erreur", hidden: true
           h.p class: "note qualite-calibration", id: "qualite-calibration", hidden: true
           h.p class: "note qualite-message", id: "qualite-message", role: "status", ["aria-live"]: "polite", hidden: true
+        )
+        h.section(
+          class: "qualite", id: "authentification", ["aria-label"]: "Authentification"
+          h.div(
+            class: "qualite-corps"
+            h.div(
+              class: "qualite-ligne"
+              h.span class: "qualite-libelle", "Authentification"
+              h.div(
+                class: "qualite-commandes"
+                h.span id: "auth-etat", "Désactivée"
+              )
+            )
+            h.div(
+              class: "qualite-ligne"
+              h.span class: "qualite-libelle", "Utilisateur"
+              h.div(
+                class: "qualite-commandes"
+                h.input type: "text", id: "auth-utilisateur", maxlength: "64", value: "organiste", autocomplete: "username", ["aria-label"]: "Utilisateur de l'authentification"
+              )
+            )
+            h.div(
+              class: "qualite-ligne"
+              h.span class: "qualite-libelle", "Mot de passe"
+              h.div(
+                class: "qualite-commandes"
+                h.input type: "password", id: "auth-mot-de-passe", maxlength: "1024", autocomplete: "new-password", ["aria-label"]: "Nouveau mot de passe"
+                h.button type: "button", class: "qualite-bascule", id: "auth-enregistrer", "Enregistrer"
+                h.button type: "button", class: "qualite-bascule", id: "auth-retirer", hidden: true, "Retirer"
+              )
+            )
+          )
+          h.p class: "note", "Sur HTTP, le mot de passe est envoyé en clair : le calcul de HA1 côté navigateur exige HTTPS (crypto.subtle)."
+          h.p class: "note qualite-message", id: "auth-note", role: "status", ["aria-live"]: "polite", hidden: true
         )
         h.script script
       )
