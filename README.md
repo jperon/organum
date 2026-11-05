@@ -60,6 +60,45 @@ réseau de confiance si cela compte. Le compteur `nc` du client n'est pas
 mémorisé (aucune table de nonces) : une requête capturée peut être rejouée
 tant que son nonce de 5 minutes est valide.
 
+### Contrôle d'accès par sous-réseau source
+
+Réglage facultatif, indépendant de l'authentification. Il se règle dans le
+panneau **Audio** (page web ou fenêtre native) et se conserve dans
+`etat.json.reseaux.json` (droits `0600`). Une liste vide ne filtre rien.
+Sinon, une adresse source hors liste reçoit `403` **avant** toute analyse
+Digest, sans en-tête `WWW-Authenticate`. Quand les deux réglages sont actifs,
+le sous-réseau est vérifié d'abord, puis l'authentification. Les adresses
+`127.0.0.1` et `::1` passent toujours, et la fenêtre native n'emprunte pas
+HTTP.
+
+| Liste de réseaux | Mot de passe | Comportement |
+|---|---|---|
+| vide | aucun | aucun contrôle |
+| vide | défini | Digest seul |
+| remplie | aucun | sous-réseau seul |
+| remplie | défini | sous-réseau puis Digest |
+
+Le champ accepte une liste séparée par des virgules ou des espaces :
+`10.35.0.0/16, 2001:470:ca35::/48`. Une adresse seule vaut `/32` (IPv4) ou
+`/128` (IPv6). Les formes compressées et la casse IPv6 sont admises, une
+adresse `::ffff:a.b.c.d` est traitée comme IPv4, et la zone d'une adresse
+lien-local (`fe80::…%wlo1`) n'entre pas dans la comparaison (le serveur
+utilise l'adresse réelle de connexion, jamais `X-Forwarded-For`). Les
+masques hors bornes, les adresses malformées et les **bits d'hôte non nuls**
+(saisir `10.35.1.2/16` plutôt que `10.35.0.0/16`) sont refusés avec un
+message clair : une faute de saisie ne doit pas élargir silencieusement un
+sous-réseau. Enregistrer une liste non vide qui exclut l'adresse source
+courante est refusé (`400`), sauf si cette source est locale.
+
+`ORGANUM_RESEAUX` (liste séparée par virgules ou espaces) est prioritaire,
+n'est jamais recopié sur disque et verrouille le réglage (`409`). Une valeur
+d'environnement invalide arrête le démarrage avec un message explicite, car
+elle exprime une intention de sécurité. Un **fichier** de réseaux illisible
+ne filtre rien, en revanche : l'erreur est publiée dans le panneau et l'API
+plutôt que d'enfermer l'utilisateur dehors. `GET /api/reseaux` expose l'état
+et l'adresse source ; `POST /api/reseaux` accepte `{"reseaux": "…"}` ou
+`{"retirer": true}`.
+
 ### Craquements et temps réel
 
 Le fil audio demande la priorité temps réel `SCHED_FIFO 70`. Sans ce droit,
@@ -231,6 +270,7 @@ livrer le son à temps. Ne pas la relever au-dessus de PipeWire.
 | `ORGANUM_REVERB_TETE` | oui | `non` (ou `0`) coupe la tête zéro latence de la réverbération, prioritaire sur `tete_reverb` |
 | `ORGANUM_CALIBRATION_FACTEUR` | `1` | Réservé aux tests : multiplie tous les coûts mesurés par la calibration (simule une machine plus lente) |
 | `ORGANUM_CALIBRATION_VOIX` | `250` | Réservé aux tests : nombre de voix de référence de la calibration |
+| `ORGANUM_RESEAUX` | vide | Sous-réseaux source autorisés (virgules ou espaces), prioritaire et non recopié ; une valeur invalide arrête le démarrage |
 
 Le limiteur de sortie est actif par défaut. Les pilotes audio convertissent
 les échantillons flottants en entiers et **écrêtent dur** au-delà de 1.0 :
