@@ -195,6 +195,11 @@ par l'article 13 de l'AGPL.
 ## Pièges connus
 
 - Ne jamais arrêter PipeWire : l'audio passe par libasound `default`.
+- Sortie ALSA `null` : `audio_ecrire` rend aussitôt et la boucle audio
+  tournerait à 100 % d'un cœur. `g_sortie_null`, recalculé à chaque ouverture
+  (`cosmo/sortie_null.h`), n'active l'attente `clock_nanosleep` que pour ce
+  nom exact ; `default` et un nom vide n'attendent pas, et une vraie carte ne
+  paie que le test d'entier.
 - Ne pas copier par-dessus un `organum.com` en cours d'exécution :
   `build.sh` écrit un fichier temporaire puis renomme.
 - `pkill -f organum` / `pgrep -f` peuvent viser le shell qui les lance.
