@@ -107,6 +107,24 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   `aeolus_creer`, sans priorité sur notre valeur (le fichier de réglages
   utilisateur d'Aeolus, `~/.config/Aeolus.settings`, est écrasé par
   l'application explicite au démarrage).
+- Authentification facultative HTTP Digest SHA-256 (RFC 7616, `qop=auth`,
+  royaume `organum`) : désactivée sans mot de passe ; ne sert qu'à vérifier
+  les droits, sans chiffrement. Règles pures dans
+  `web/src/authentification.moon` (analyse de l'en-tête, réponse, nonce sans
+  état horodaté et signé par HMAC-SHA256, comparaisons à temps constant),
+  testées avec le vecteur de la RFC. `web/src/init.moon` conserve seulement
+  HA1 dans `etat.json.authentification.json` (0600), applique la garde en
+  tête de `_G.OnHttpRequest` (toutes les routes, attente longue comprise),
+  exempte uniquement `127.0.0.1` et `::1` via `GetClientAddr`, et publie
+  `/api/authentification` (GET/POST, retrait). `ORGANUM_MOT_DE_PASSE`
+  prioritaire, non recopié, verrouille le réglage (409) ; durée du nonce
+  réglable seulement par `ORGANUM_AUTH_NONCE_DUREE` pour les tests, 5 min par
+  défaut. Le panneau Audio web et natif règle le mot de passe ; la fenêtre
+  native passe par le module, jamais par HTTP. La saisie de texte native
+  (`nk.saisie`) suppose une disposition US ; Wayland demande `wl_keyboard`.
+  Tests : `web/scripts/test-authentification.sh` (curl --digest, 401,
+  stale=true, exemption locale, fichier 0600, environnement) et
+  `scripts/e2e-auth.mjs` (Chromium headless sur adresse non locale).
 - Puce d'adaptation à la machine : le fil audio mesure le rendu avec deux
   `clock_gettime(CLOCK_MONOTONIC)` par tampon (vDSO sous Linux, donc sans
   appel système), hors attente d'écriture. Pour chaque seconde pleine, la
