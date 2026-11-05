@@ -7,7 +7,7 @@
 # Un dossier déjà présent (ou un lien vers une copie existante) est conservé.
 set -euo pipefail
 
-COSMOPOLITAN_COMMIT=aefad27c09ffda64c6ac64bd69f758e9f9c7b91d
+COSMOPOLITAN_COMMIT=675370ee428bf48b77b22383679fcb9294d55fdb
 JUCE_COMMIT=10a589619b452c261b2940767eb253171eb5a823
 
 RACINE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -29,7 +29,7 @@ fi
 C="$EXTERNE/cosmopolitan"
 if [ ! -e "$C" ]; then
   echo "== cosmopolitan"
-  cloner https://github.com/jart/cosmopolitan.git "$COSMOPOLITAN_COMMIT" "$C"
+  cloner https://github.com/jperon/cosmopolitan.git "$COSMOPOLITAN_COMMIT" "$C"
   git -C "$C" apply "$RACINE/cosmo/cosmopolitan.patch"
 fi
 [ -e "$C/tool/organum" ] || ln -s "$RACINE/cosmo" "$C/tool/organum"
