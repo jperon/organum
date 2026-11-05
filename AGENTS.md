@@ -166,17 +166,20 @@ ORGANUM_WEB=1 web/scripts/build.sh    # variante sans UI native : web/build/orga
 Test rapide : lancer `web/build/organum.com -p 8099`, puis
 `curl localhost:8099/api/orgue`. Un clavier MIDI virtuel suffit pour le MIDI.
 
-Tests unitaires rapides (sans carte son, affichage, réseau, moteur ni
-`sleep`) :
+Quatre commandes, du plus rapide au plus complet :
 
 ```bash
-scripts/tests-unitaires.sh            # code 0 si tout passe
+scripts/tests-unitaires.sh            # ~3 s : MoonScript, Lua, C/C++ purs
+scripts/tests-longs.sh                # API qualité, bancs moteur, plate-forme
+scripts/tests-e2e.sh                  # web (Chromium) et natif (Xvfb/xdotool)
+scripts/tests.sh                      # les trois, arrêt au premier échec
+scripts/tests.sh --rapide             # unitaires seulement
 ```
 
-Il compile tous les `.moon` avec `moonc`, les exécute avec `redbean -i`
-(Lua 5.4), vérifie la syntaxe JavaScript avec `node --check`, lint les
-globales MoonScript (liste explicite, toute nouvelle globale échoue), et
-éprouve les règles C/C++ pures (`cosmo/charge_niveau.h`,
+`tests-unitaires.sh` compile tous les `.moon` avec `moonc`, les exécute avec
+`redbean -i` (Lua 5.4), vérifie la syntaxe JavaScript avec `node --check`,
+lint les globales MoonScript (liste explicite, toute nouvelle globale
+échoue), et éprouve les règles C/C++ pures (`cosmo/charge_niveau.h`,
 `moteur/tests/scale_tables.cpp`). La disposition et les validations ont été
 extraites dans `web/src/fenetre_disposition.moon` et `web/src/validation.moon`
 pour être testables sans Nuklear ni redbean ; `web/src/fenetre.moon` et
@@ -184,6 +187,30 @@ pour être testables sans Nuklear ni redbean ; `web/src/fenetre.moon` et
 Les objets C++ sont mis en cache dans `web/build/objets-tests` : la première
 exécution compile `scale.cpp` (quelques secondes), les suivantes restent
 sous 3 s.
+
+`tests-longs.sh` lance `web/scripts/test-qualite.sh` (serveur réel sur sortie
+muette), `scripts/tester.sh` (couche ALSA/MIDI sans carte) et les bancs de
+`moteur/tests/` hors suite rapide, compilés par
+`moteur/tests/compiler-test-x86.sh` (chaîne x86-64 seule). Un banc
+qui ne se compile plus est signalé IGNORÉ avec sa raison, jamais compté OK.
+
+`tests-e2e.sh` pilote Chromium headless par le protocole DevTools (Node,
+sans dépendance nouvelle) sur `/`, `/midi` et `/audio` : clics réels, valeurs
+relues dans l'API, erreurs console, stabilité de `seq` et des `on`, largeurs
+420/1100 px, cibles tactiles et remplissage `--fill` des curseurs. Il pilote
+aussi la fenêtre native sous Xvfb avec xdotool (console, Audio, MIDI,
+Connexions aux trois tailles ; tempérament et réverbération par clic), puis
+réintroduit temporairement les régressions `--fill` et `nouveau` local pour
+vérifier que la suite les détecte, avant de restaurer les sources.
+
+Règle de sûreté pour tout script de test : en tête, `ulimit -r 0` et
+`unset WAYLAND_DISPLAY` ; jamais le bureau réel (`DISPLAY` retiré, sauf vers
+un Xvfb lancé par le script, jamais Xephyr) ; Chromium uniquement
+`--headless=new --no-sandbox --disable-gpu` avec `env -u LD_LIBRARY_PATH` ;
+sortie audio muette `ORGANUM_PERIPHERIQUE=null`, port et dossier d'état
+temporaires, jamais les réglages de l'utilisateur ; arrêt par PID de tout ce
+qui a été lancé, même en échec (trap), et vérification de `temps_reel` faux
+dans chaque serveur.
 
 ## Licences
 
