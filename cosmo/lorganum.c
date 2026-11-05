@@ -118,6 +118,8 @@ struct etat {
   char peripherique[PERIPH_MAX + 1];  // effectif ("" = défaut)
   int limiteur;  // effectif
   char audio_erreur[ERREUR_MAX];  // dernier échec de reconfiguration
+  int temperament;  // valeur effective (enum Scale::Type)
+  char temperament_erreur[ERREUR_MAX];  // dernier échec d'application
   unsigned erreurs_ecriture;  // audio_ecrire() a renvoyé une erreur
 };
 
@@ -136,6 +138,13 @@ struct etat_partage {
   atomic_uint demandes_audio, traitees_audio;
   struct demande_audio demande_audio;
   atomic_int verrou_demande;
+  // Tempérament : même principe, mais l'application se fait dans un fil de
+  // calcul dédié (jamais dans le fil audio). Le verrou protège la valeur
+  // demandée et les compteurs, pour qu'une demande ne soit jamais comptée
+  // sans que le fil de calcul puisse la voir.
+  atomic_uint demandes_temperament, traitees_temperament;
+  atomic_int temperament_demande;  // -1 : aucune
+  atomic_int verrou_temperament;
 };
 
 static struct etat_partage *g_partage;
@@ -155,9 +164,18 @@ static int g_demande_pendante_valide;
 static long g_dernier_essai_audio;
 static unsigned g_erreurs_ecriture;  // fil audio uniquement, publié par publier()
 static int g_maitre;  // processus qui fait tourner le moteur
-// Protège g_moteur entre le fil audio (recréation au changement de taux) et
-// le processus principal qui le sérialise (l_sauvegarder).
+// Protège g_moteur entre le fil audio (recréation au changement de taux), le
+// fil de calcul du tempérament et le processus principal qui le sérialise
+// (l_sauvegarder).
 static pthread_mutex_t g_moteur_verrou = PTHREAD_MUTEX_INITIALIZER;
+// Fil de calcul du tempérament : il reconstruit le jeu de tuyaux parallèle
+// hors du fil audio, puis bascule ; le son tenu continue pendant ce temps.
+static pthread_t g_fil_temperament;
+static int g_fil_temperament_demarre;
+static atomic_int g_temperament_fin;
+
+static void demarrer_fil_temperament(void);
+static void arreter_fil_temperament(void);
 // Propres au fil audio ; publiées dans g_etat.
 static struct association g_associations[MAX_ASSOCIATIONS];
 static int g_nassociations;
@@ -357,6 +375,7 @@ static void oublier_audio_fils(void) {
 // d'ouverture audio ou MIDI). Sans cela, g_etat resterait non nul et
 // l_demarrer refuserait de redémarrer.
 static void liberer_demarrage(void) {
+  arreter_fil_temperament();
   if (g_midi) {
     midi_fermer(g_midi);
     g_midi = NULL;
@@ -438,6 +457,11 @@ static void publier(void) {
   {
     int tete = aeolus_lire_reverb_tete(g_moteur);
     if (tete != e->tete_reverb) e->tete_reverb = tete, change = 1;
+  }
+  {
+    int temperament = aeolus_lire_temperament(g_moteur);
+    if (temperament != e->temperament)
+      e->temperament = temperament, change = 1;
   }
   if (g_erreurs_ecriture != e->erreurs_ecriture) {
     e->erreurs_ecriture = g_erreurs_ecriture;
@@ -583,6 +607,81 @@ static void verrou_rendre(atomic_int *v) {
   atomic_store_explicit(v, 0, memory_order_release);
 }
 
+// --- Calcul du tempérament hors du fil audio ------------------------------
+
+// Une demande est déposée par un processus de requête (ou la fenêtre), puis
+// traitée ici : retunePipes écrit dans le jeu de tuyaux inactif, prepareToPlay
+// le reconstruit, et la bascule atomique de _pipeSetIndex n'a lieu qu'une
+// fois le nouveau jeu prêt. Le fil audio n'alloue ni n'attend jamais.
+static void *boucle_temperament(void *arg) {
+  (void)arg;
+  while (!atomic_load_explicit(&g_temperament_fin, memory_order_acquire)) {
+    int type = atomic_load_explicit(&g_partage->temperament_demande,
+                                    memory_order_acquire);
+    if (type < 0) {
+      struct timespec pause = {0, 10 * 1000 * 1000};
+      nanosleep(&pause, NULL);
+      continue;
+    }
+    // Capturer aussi le nombre de demandes déjà déposées, sous le même
+    // verrou : les demandes plus récentes resteront comptées et seront
+    // traitées au tour suivant (seule la dernière valeur compte).
+    verrou_prendre(&g_partage->verrou_temperament);
+    type = atomic_load_explicit(&g_partage->temperament_demande,
+                                memory_order_acquire);
+    unsigned demandees =
+        atomic_load_explicit(&g_partage->demandes_temperament,
+                             memory_order_acquire);
+    if (type >= 0)
+      atomic_store_explicit(&g_partage->temperament_demande, -1,
+                            memory_order_release);
+    verrou_rendre(&g_partage->verrou_temperament);
+    if (type < 0) continue;
+
+    int ok;
+    int effectif = -1;
+    pthread_mutex_lock(&g_moteur_verrou);
+    ok = g_moteur ? aeolus_temperament(g_moteur, type) : -1;
+    if (ok == 0 && g_moteur) effectif = aeolus_lire_temperament(g_moteur);
+    pthread_mutex_unlock(&g_moteur_verrou);
+
+    if (ok == 0) {
+      // Publier la valeur effective AVANT de marquer la demande traitée :
+      // sinon une lecture d'état pourrait voir « application » à faux avec
+      // l'ancien tempérament, le fil audio n'ayant pas encore publié.
+      if (effectif >= 0) g_etat->temperament = effectif;
+      g_etat->temperament_erreur[0] = '\0';
+    } else {
+      snprintf(g_etat->temperament_erreur,
+               sizeof(g_etat->temperament_erreur),
+               "application du tempérament %d impossible", type);
+    }
+    // Les demandes couvertes par ce calcul sont traitées, y compris celles
+    // qui ont été fusionnées en une seule valeur. Les suivantes restent
+    // comptées et « application » reste vrai.
+    verrou_prendre(&g_partage->verrou_temperament);
+    atomic_store_explicit(&g_partage->traitees_temperament, demandees,
+                          memory_order_release);
+    verrou_rendre(&g_partage->verrou_temperament);
+    atomic_fetch_add_explicit(&g_etat->seq, 1, memory_order_release);
+  }
+  return NULL;
+}
+
+static void demarrer_fil_temperament(void) {
+  atomic_store(&g_temperament_fin, 0);
+  if (pthread_create(&g_fil_temperament, NULL, boucle_temperament, NULL) != 0)
+    return;
+  g_fil_temperament_demarre = 1;
+}
+
+static void arreter_fil_temperament(void) {
+  if (!g_fil_temperament_demarre) return;
+  atomic_store_explicit(&g_temperament_fin, 1, memory_order_release);
+  pthread_join(g_fil_temperament, NULL);
+  g_fil_temperament_demarre = 0;
+}
+
 static void copier_demande(struct demande_audio *d) {
   if (!g_partage) {
     memset(d, 0, sizeof(*d));
@@ -623,6 +722,7 @@ struct sauvegarde_moteur {
   int ndiv;
   int qualite[4];
   int limiteur, tete;
+  int temperament;
 };
 
 static void capturer_moteur(struct sauvegarde_moteur *s) {
@@ -639,6 +739,7 @@ static void capturer_moteur(struct sauvegarde_moteur *s) {
   for (int q = 0; q < 4; ++q) s->qualite[q] = aeolus_lire_qualite(g_moteur, q);
   s->limiteur = aeolus_lire_limiteur(g_moteur);
   s->tete = aeolus_lire_reverb_tete(g_moteur);
+  s->temperament = aeolus_lire_temperament(g_moteur);
 }
 
 static void appliquer_sauvegarde(void *moteur, struct sauvegarde_moteur *s) {
@@ -649,6 +750,9 @@ static void appliquer_sauvegarde(void *moteur, struct sauvegarde_moteur *s) {
   for (int q = 0; q < 4; ++q) aeolus_qualite(moteur, q, s->qualite[q]);
   aeolus_limiteur(moteur, s->limiteur);
   aeolus_reverb_tete(moteur, s->tete);
+  // La création du moteur a pu basculer sur l'autre jeu de tuyaux, resté à
+  // l'accord précédent : réapplique donc explicitement le tempérament.
+  aeolus_temperament(moteur, s->temperament);
 }
 
 // Recrée le moteur à un nouveau taux externe. Le verrou empêche
@@ -1093,6 +1197,10 @@ static int l_demarrer(lua_State *L) {
   atomic_init(&g_partage->verrou_demande, 0);
   atomic_init(&g_partage->demandes_audio, 0);
   atomic_init(&g_partage->traitees_audio, 0);
+  atomic_init(&g_partage->verrou_temperament, 0);
+  atomic_init(&g_partage->demandes_temperament, 0);
+  atomic_init(&g_partage->traitees_temperament, 0);
+  atomic_init(&g_partage->temperament_demande, -1);
   mesure_init();
   if (pipe(g_tube) < 0) {
     liberer_demarrage();
@@ -1119,6 +1227,23 @@ static int l_demarrer(lua_State *L) {
     lua_getfield(L, 1, "qualite");
     if (lua_istable(L, -1)) appliquer_qualite_table(L, lua_gettop(L));
     lua_pop(L, 1);
+  }
+  // Tempérament initial : appliqué avant l'ouverture audio, donc audible dès
+  // la première note. Hors bornes ou absent : égal (préserve les fichiers
+  // existants et neutralise tout réglage utilisateur d'Aeolus).
+  {
+    int temperament = 5;  // Scale::EqualTemp
+    int ntemperaments = aeolus_nb_temperaments();
+    if (lua_istable(L, 1)) {
+      lua_getfield(L, 1, "temperament");
+      if (lua_isinteger(L, -1)) {
+        lua_Integer v = lua_tointeger(L, -1);
+        if (v >= 0 && v < ntemperaments) temperament = (int)v;
+      }
+      lua_pop(L, 1);
+    }
+    aeolus_temperament(g_moteur, temperament);
+    g_etat->temperament = aeolus_lire_temperament(g_moteur);
   }
   // Tête de convolution zéro latence de la réverbération : active par
   // défaut ; l'option tete_reverb=false la coupe, et ORGANUM_REVERB_TETE
@@ -1218,6 +1343,8 @@ static int l_demarrer(lua_State *L) {
   }
   publier();
 
+  demarrer_fil_temperament();
+
   pthread_t fil;
   if (pthread_create(&fil, NULL, boucle_audio, NULL)) {
     liberer_demarrage();
@@ -1239,6 +1366,28 @@ static int l_limiteur(lua_State *L) {
 // organum.tete_reverb(actif) : applique à chaud, sauf ORGANUM_REVERB_TETE.
 static int l_tete_reverb(lua_State *L) {
   envoyer(L, (struct commande){CMD_TETE, .a = lua_toboolean(L, 1) ? 1 : 0});
+  return 0;
+}
+
+// organum.temperament(type) : demande un changement de tempérament (0..10,
+// voir aeolus_nb_temperaments). Le calcul se fait hors du fil audio, qui
+// continue de rendre le jeu courant ; seule la dernière demande déposée
+// compte réellement à la fin. Les demandes rapprochées restent comptées
+// jusqu'au calcul qui les couvre (qualite.application).
+static int l_temperament(lua_State *L) {
+  if (!g_etat || !g_partage)
+    return luaL_error(L, "organum non démarré (organum.demarrer dans .init.lua)");
+  int type = (int)luaL_checkinteger(L, 1);
+  int n = aeolus_nb_temperaments();
+  if (type < 0 || type >= n)
+    return luaL_error(L, "tempérament hors bornes (0..%d)", n - 1);
+  verrou_prendre(&g_partage->verrou_temperament);
+  atomic_store_explicit(&g_partage->temperament_demande, type,
+                        memory_order_release);
+  atomic_fetch_add_explicit(&g_partage->demandes_temperament, 1,
+                            memory_order_acq_rel);
+  verrou_rendre(&g_partage->verrou_temperament);
+  atomic_fetch_add_explicit(&g_etat->seq, 1, memory_order_release);
   return 0;
 }
 
@@ -1334,6 +1483,10 @@ static int l_etat(lua_State *L) {
       atomic_load_explicit(&g_partage->demandes_audio, memory_order_acquire);
   unsigned traitees_audio =
       atomic_load_explicit(&g_partage->traitees_audio, memory_order_acquire);
+  unsigned demandes_temperament =
+      atomic_load_explicit(&g_partage->demandes_temperament, memory_order_acquire);
+  unsigned traitees_temperament =
+      atomic_load_explicit(&g_partage->traitees_temperament, memory_order_acquire);
 
   lua_createtable(L, 0, 7);
   lua_pushinteger(L, seq), lua_setfield(L, -2, "seq");
@@ -1347,6 +1500,8 @@ static int l_etat(lua_State *L) {
   lua_pushinteger(L, copie.etape), lua_setfield(L, -2, "etape");
   lua_pushinteger(L, copie.netapes), lua_setfield(L, -2, "netapes");
   lua_pushinteger(L, copie.taux), lua_setfield(L, -2, "taux");
+  lua_pushinteger(L, copie.temperament);
+  lua_setfield(L, -2, "temperament");
   lua_pushfstring(L, "%d:%d", copie.midi_client, copie.midi_port);
   lua_setfield(L, -2, "midi");
   lua_pushinteger(L, copie.canaux_controle), lua_setfield(L, -2, "canaux_controle");
@@ -1366,7 +1521,12 @@ static int l_etat(lua_State *L) {
   lua_setfield(L, -2, "limiteur");
   lua_pushstring(L, copie.audio_erreur);
   lua_setfield(L, -2, "audio_erreur");
-  lua_pushboolean(L, demandes_audio != traitees_audio);
+  lua_pushinteger(L, copie.temperament);
+  lua_setfield(L, -2, "temperament");
+  lua_pushstring(L, copie.temperament_erreur);
+  lua_setfield(L, -2, "temperament_erreur");
+  lua_pushboolean(L, demandes_audio != traitees_audio ||
+                         demandes_temperament != traitees_temperament);
   lua_setfield(L, -2, "application");
   lua_pushinteger(L, copie.xruns), lua_setfield(L, -2, "xruns");
   lua_pushinteger(L, copie.xruns_recents);
@@ -1645,6 +1805,7 @@ static const luaL_Reg kFonctions[] = {
     {"qualite", l_qualite}, {"calibrer", l_calibrer},
     {"charge_niveau", l_charge_niveau_diag},
     {"limiteur", l_limiteur}, {"tete_reverb", l_tete_reverb},
+    {"temperament", l_temperament},
     {"oublier_audio", l_oublier_audio},
     {"reconfigurer_audio", l_reconfigurer_audio},
     {"canaux_division", l_canaux_division},
