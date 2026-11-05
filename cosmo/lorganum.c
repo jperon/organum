@@ -34,6 +34,7 @@
 #include "../plateforme/audio.h"
 #include "../plateforme/midi.h"
 #include "charge_niveau.h"
+#include "sortie_null.h"
 
 #define MAX_DIVISIONS 8
 #define MAX_JEUX 64
@@ -153,6 +154,10 @@ static struct etat *g_etat;  // &g_partage->etat, partagée avec les fils
 static int g_tube[2] = {-1, -1};
 static void *g_moteur;
 static audio_t *g_audio;
+// Vrai seulement quand la sortie effective est exactement « null » : ce
+// plugin ALSA rend la main immédiatement, la boucle doit alors se cadencer
+// elle-même. Recalculé à chaque ouverture, jamais comparé par tampon.
+static int g_sortie_null;
 static midi_t *g_midi;
 static int g_periode;
 static int g_taux;
@@ -377,6 +382,7 @@ static void liberer_demarrage(void) {
     audio_fermer(g_audio);
     g_audio = NULL;
   }
+  g_sortie_null = 0;
   if (g_moteur) {
     aeolus_detruire(g_moteur);
     g_moteur = NULL;
@@ -691,12 +697,14 @@ static void fermer_audio_cumuler(void) {
     audio_fermer(g_audio);
     g_audio = NULL;
   }
+  g_sortie_null = 0;
 }
 
 static int ouvrir_audio_cfg(const struct demande_audio *d) {
   if (d->taux <= 0 || d->periode <= 0) return 0;
   g_audio = audio_ouvrir(d->peripherique[0] ? d->peripherique : NULL, d->taux, 2,
                          d->periode, 3);
+  g_sortie_null = g_audio && sortie_est_null(d->peripherique);
   return g_audio != NULL;
 }
 
@@ -873,6 +881,41 @@ static int appliquer_demande(struct demande_audio *dem, float **bg,
   return 1;
 }
 
+// Cale le rythme du fil audio sur la sortie « null », dont l'écriture rend
+// la main aussitôt : attente absolue jusqu'à l'échéance du tampon suivant.
+// Appelée seulement si g_sortie_null ; sur une vraie carte, le seul coût est
+// ce test d'entier. L'échéance est recalée après un retard ou un changement
+// de période ou de taux.
+static void attendre_tampon_null(void) {
+  static struct timespec echeance;
+  static int echeance_valide, derniere_periode, dernier_taux;
+  long long periode_ns = (long long)g_periode * 1000000000LL / (long long)g_taux;
+  struct timespec pas = {(time_t)(periode_ns / 1000000000LL),
+                         (long)(periode_ns % 1000000000LL)};
+  struct timespec maintenant;
+  clock_gettime(CLOCK_MONOTONIC, &maintenant);
+  int en_retard =
+      maintenant.tv_sec > echeance.tv_sec ||
+      (maintenant.tv_sec == echeance.tv_sec &&
+       maintenant.tv_nsec >= echeance.tv_nsec);
+  if (!echeance_valide || en_retard || g_periode != derniere_periode ||
+      g_taux != dernier_taux) {
+    echeance = maintenant;
+  }
+  derniere_periode = g_periode;
+  dernier_taux = g_taux;
+  echeance_valide = 1;
+  echeance.tv_sec += pas.tv_sec;
+  echeance.tv_nsec += pas.tv_nsec;
+  if (echeance.tv_nsec >= 1000000000L) {
+    echeance.tv_sec += 1;
+    echeance.tv_nsec -= 1000000000L;
+  }
+  while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &echeance, NULL) ==
+         EINTR) {
+  }
+}
+
 static void *boucle_audio(void *arg) {
   // Sous la priorité du fil de PipeWire (88) : il doit pouvoir nous
   // interrompre pour livrer le son. Il faut un droit « rtprio » (groupe
@@ -976,6 +1019,7 @@ static void *boucle_audio(void *arg) {
       entrelace[2 * i + 1] = d[i];
     }
     if (audio_ecrire(g_audio, entrelace, g_periode) < 0) ++g_erreurs_ecriture;
+    if (g_sortie_null) attendre_tampon_null();
     g_echantillons += g_periode;
 
     // Charge du tampon, en pourcentage entier de la durée de période.
@@ -1285,6 +1329,7 @@ static int l_demarrer(lua_State *L) {
     lua_pushstring(L, message);
     return 2;
   }
+  g_sortie_null = sortie_est_null(peripherique);
   if (!(g_midi = midi_ouvrir("Organum", "entree"))) {
     liberer_demarrage();
     lua_pushnil(L);
