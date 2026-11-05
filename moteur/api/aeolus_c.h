@@ -30,6 +30,16 @@ int aeolus_calibrer(int taux, int periode, aeolus_calibrage* sortie);
 void* aeolus_creer(int taux);
 void aeolus_detruire(void* moteur);
 
+/* Tempérament : nombre de valeurs, nom de chacune (chaîne allouée à
+   libérer avec free()), application et lecture de la valeur effective. */
+int aeolus_nb_temperaments(void);
+const char* aeolus_nom_temperament(int type);
+/* Applique à chaud : reconstruit le jeu de tuyaux parallèle puis bascule.
+   À appeler hors du fil audio (le moteur conserve le son courant). Renvoie
+   0 en cas de succès, -1 si le type est hors bornes. */
+int aeolus_temperament(void* moteur, int type);
+int aeolus_lire_temperament(void* moteur);
+
 int aeolus_nb_divisions(void* moteur);
 const char* aeolus_nom_division(void* moteur, int div);
 int aeolus_nb_jeux(void* moteur, int div);

@@ -41,6 +41,11 @@ namespace
 
 extern "C" void* aeolus_creer(int taux)
 {
+    // Le fichier de réglages utilisateur d'Aeolus peut activer MTS ; dans
+    // organum, le tempérament est celui de l'interface et MTS doit rester
+    // hors jeu (sinon retunePipes ignorerait notre table).
+    EngineGlobal::getInstance()->setMTSEnabled(false);
+
     auto* h = new Handle();
     h->engine = new aeolus::Engine();
     h->listener = new MidiListener(*h->engine);
@@ -83,6 +88,33 @@ extern "C" void aeolus_detruire(void* moteur)
     }
     delete h->listener;
     delete h;
+}
+
+extern "C" int aeolus_nb_temperaments(void)
+{
+    return (int)Scale::Total;
+}
+
+extern "C" const char* aeolus_nom_temperament(int type)
+{
+    if (type < (int)Scale::First || type >= (int)Scale::Total) return nullptr;
+    juce::String s = Scale::getNameForType((Scale::Type)type);
+    char* buf = (char*)std::malloc(s.length() + 1);
+    std::strcpy(buf, s.toRawUTF8());
+    return buf;
+}
+
+extern "C" int aeolus_temperament(void* moteur, int type)
+{
+    if (!moteur) return -1;
+    if (type < (int)Scale::First || type >= (int)Scale::Total) return -1;
+    EngineGlobal::getInstance()->applyTemperament((Scale::Type)type);
+    return 0;
+}
+
+extern "C" int aeolus_lire_temperament(void* moteur)
+{
+    return moteur ? EngineGlobal::getInstance()->getTemperament() : -1;
 }
 
 extern "C" int aeolus_nb_divisions(void* moteur)

@@ -78,6 +78,7 @@ EngineGlobal::EngineGlobal()
     _globalProperties.setStorageParameters(options);
 
     loadSettings();
+    _temperamentPublie.store((int)_scale.getType(), std::memory_order_release);
 
     loadRankwaves();
     loadIRs();
@@ -269,6 +270,15 @@ void EngineGlobal::rebuildRankwaves()
     //       may result in voice to be killed.
 
     updateStops(_sampleRate);
+}
+
+void EngineGlobal::applyTemperament(Scale::Type type)
+{
+    _scale.setType(type);
+    rebuildRankwaves();
+    // Publication après la bascule : le fil audio ne voit jamais la nouvelle
+    // valeur avant que le jeu de tuyaux correspondant soit prêt.
+    _temperamentPublie.store((int)type, std::memory_order_release);
 }
 
 void EngineGlobal::loadRankwaves()

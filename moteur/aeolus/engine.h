@@ -116,6 +116,16 @@ public:
     const Scale& getScale() const noexcept { return _scale; }
     void setScaleType(Scale::Type type) noexcept { _scale.setType(type); }
 
+    /// Tempérament effectivement appliqué (lu par le fil audio pour
+    /// publication). Distinct de _scale, qui n'est écrit que par le fil de
+    /// calcul du tempérament.
+    int getTemperament() const noexcept { return _temperamentPublie.load(); }
+
+    /// Applique un tempérament et reconstruit les jeux de tuyaux. À appeler
+    /// hors du fil audio (fil de calcul dédié) : le jeu courant continue de
+    /// sonner pendant la reconstruction du jeu parallèle.
+    void applyTemperament(Scale::Type type);
+
     bool isConnectedToMTSMaster();
     juce::String getMTSScaleName();
     float getMTSNoteToFrequency(int midiNote, int midiChannel = -1);
@@ -167,6 +177,7 @@ private:
 
     float _sampleRate;
     Scale _scale;
+    std::atomic<int> _temperamentPublie{ (int)Scale::EqualTemp };
     float _tuningFrequency;
 
     MTSClient* _mtsClient{};
