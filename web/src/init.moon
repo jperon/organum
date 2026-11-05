@@ -4,6 +4,7 @@
 
 -- Validations et fusions pures, partagées avec les tests unitaires.
 validation = require "validation"
+authentification = require "authentification"
 
 -- Écoute : redbean, sans adresse explicite (-l), ne programme que 0.0.0.0
 -- (tool/net/redbean.c, Listen) ; on ajoute « :: » pour répondre aussi en
@@ -354,6 +355,139 @@ etat_sauve = do
   ok, e = pcall DecodeJson, contenu if contenu
   ok and type(e) == "table" and e or {}
 
+-- Authentification facultative (HTTP Digest SHA-256, RFC 7616). Désactivée
+-- tant qu'aucun mot de passe n'est enregistré. Seul HA1 est conservé, dans
+-- un fichier voisin d'etat.json à droits 0600 ; le mot de passe lui-même
+-- n'est jamais écrit. ORGANUM_MOT_DE_PASSE est prioritaire et n'est pas
+-- recopié sur disque : il verrouille alors le réglage.
+AUTH_FICHIER = os.getenv("ORGANUM_AUTH") or "#{ETAT_FICHIER}.authentification.json"
+AUTH = authentification
+-- Secret du nonce : tiré une fois, dans le processus principal, avant que
+-- redbean ne crée les processus de requêtes ; chacun en hérite par fork.
+SECRET_NONCE = GetRandomBytes 32
+-- Durée de validité du nonce : 5 minutes. La variable n'existe que pour
+-- éprouver la péremption sans attendre cinq minutes dans les tests.
+AUTH_NONCE_DUREE = tonumber(os.getenv "ORGANUM_AUTH_NONCE_DUREE") or AUTH.DUREE_NONCE
+
+auth_fichier = (chemin) ->
+  contenu = Slurp chemin
+  return nil unless contenu
+  ok, t = pcall DecodeJson, contenu
+  return nil unless ok and type(t) == "table"
+  return nil unless type(t.ha1) == "string" and #t.ha1 == 64 and t.ha1\match "^%x+$"
+  utilisateur = t.utilisateur
+  unless type(utilisateur) == "string" and #utilisateur >= 1 and #utilisateur <= 64
+    utilisateur = AUTH.UTILISATEUR_DEFAUT
+  {utilisateur: utilisateur, ha1: t.ha1}
+
+auth_utilisateur_valide = (u) ->
+  type(u) == "string" and #u >= 1 and #u <= 64 and not u\match "[:%c]"
+
+auth_mot_de_passe_valide = (m) ->
+  type(m) == "string" and #m >= 1 and #m <= 1024 and not m\find "\0", 1, true
+
+auth_env = os.getenv "ORGANUM_MOT_DE_PASSE"
+AUTH_ENV_ACTIF = auth_env != nil and auth_env != ""
+AUTH_ENV_UTILISATEUR = AUTH.UTILISATEUR_DEFAUT
+AUTH_ENV_HA1 = nil
+if AUTH_ENV_ACTIF
+  fichier = auth_fichier AUTH_FICHIER
+  AUTH_ENV_UTILISATEUR = fichier.utilisateur if fichier
+  AUTH_ENV_HA1 = AUTH.ha1 AUTH_ENV_UTILISATEUR, AUTH.ROYAUME, auth_env
+
+auth_config = ->
+  if AUTH_ENV_ACTIF
+    return {active: true, utilisateur: AUTH_ENV_UTILISATEUR, ha1: AUTH_ENV_HA1, impose: true}
+  fichier = auth_fichier AUTH_FICHIER
+  unless fichier
+    return {active: false, utilisateur: AUTH.UTILISATEUR_DEFAUT, ha1: nil, impose: false}
+  {active: true, utilisateur: fichier.utilisateur, ha1: fichier.ha1, impose: false}
+
+auth_etat = ->
+  config = auth_config!
+  {
+    active: config.active
+    utilisateur: config.utilisateur
+    impose: config.impose
+    source: if config.impose then "environnement" elseif config.active then "fichier" else "aucune"
+  }
+
+auth_enregistrer = (utilisateur, mot_de_passe) ->
+  return nil, "imposé par ORGANUM_MOT_DE_PASSE" if AUTH_ENV_ACTIF
+  return nil, "utilisateur invalide" unless auth_utilisateur_valide utilisateur
+  return nil, "mot de passe invalide" unless auth_mot_de_passe_valide mot_de_passe
+  dossier = AUTH_FICHIER\match "^(.*)/[^/]*$"
+  unix.makedirs dossier, tonumber("755", 8) if dossier
+  tmp = "#{AUTH_FICHIER}.tmp.#{unix.getpid!}"
+  ha1 = AUTH.ha1 utilisateur, AUTH.ROYAUME, mot_de_passe
+  contenu = EncodeJson {utilisateur: utilisateur, ha1: ha1}
+  ok = Barf tmp, contenu, tonumber("600", 8)
+  unless ok
+    pcall unix.unlink, tmp
+    return nil, "écriture impossible"
+  ok = pcall unix.rename, tmp, AUTH_FICHIER
+  unless ok
+    pcall unix.unlink, tmp
+    return nil, "écriture impossible"
+  pcall unix.chmod, AUTH_FICHIER, tonumber("600", 8)
+  true
+
+auth_retirer = ->
+  return nil, "imposé par ORGANUM_MOT_DE_PASSE" if AUTH_ENV_ACTIF
+  pcall unix.unlink, AUTH_FICHIER
+  true
+
+regler_authentification = (data) ->
+  return nil, "objet attendu" unless type(data) == "table"
+  if data.retirer == true
+    ok, err = auth_retirer!
+    return nil, err unless ok
+    return auth_etat!
+  utilisateur = data.utilisateur
+  unless utilisateur != nil
+    utilisateur = auth_config!.utilisateur
+  ok, err = auth_enregistrer utilisateur, data.mot_de_passe
+  return nil, err unless ok
+  auth_etat!
+
+-- Adresse strictement locale : les scripts locaux (127.0.0.1 et ::1) n'ont
+-- pas à s'authentifier. GetClientAddr, et non GetRemoteAddr : un en-tête
+-- X-Forwarded-For venu d'une adresse de confiance ne doit pas exempter.
+auth_locale = ->
+  ip = GetClientAddr!
+  if type(ip) == "number"
+    return ip == 0x7f000001
+  if type(ip) == "string" and #ip == 16
+    return ip == (string.rep "\0", 15) .. "\1"
+  false
+
+-- Cible de la requête telle que le client l'a signée : chemin et chaîne de
+-- requête, sans schéma ni hôte (GetUrl les ajoute).
+auth_cible = ->
+  url = GetUrl!
+  cible = type(url) == "string" and url\match "^[%a][%w+.-]*://[^/]*(/.*)$"
+  cible or GetPath!
+
+auth_autoriser = ->
+  config = auth_config!
+  return true unless config.active
+  ok, stale, raison = AUTH.verifier {
+    entete: GetHeader "Authorization"
+    methode: GetMethod!
+    uri: auth_cible!
+    ha1: config.ha1
+    utilisateur: config.utilisateur
+    secret: SECRET_NONCE
+    maintenant: os.time!
+    duree: AUTH_NONCE_DUREE
+  }
+  return true if ok
+  SetStatus 401
+  SetHeader "WWW-Authenticate", AUTH.entete_defi SECRET_NONCE, os.time!, stale
+  SetHeader "Content-Type", "application/json"
+  Write EncodeJson {error: "authentification requise"}
+  false
+
 -- Tempérament au démarrage : entier 0..10 (ordre de l'enum du moteur).
 -- Absent ou invalide : égal (5), ce qui préserve les fichiers déjà présents
 -- sur l'orgue et neutralise un éventuel réglage utilisateur d'Aeolus.
@@ -682,7 +816,14 @@ lancer_fenetre = ->
         error raison unless res
         res
     }
-    ouvert, raison = lancer organum, nk, {titre: "organum", :volume, :midi, :qualite, continuer: -> unix.getppid! == maitre}
+    auth = {
+      etat: auth_etat
+      regler: (p) ->
+        res, raison = regler_authentification p
+        error raison unless res
+        res
+    }
+    ouvert, raison = lancer organum, nk, {titre: "organum", :volume, :midi, :qualite, authentification: auth, continuer: -> unix.getppid! == maitre}
     Log kLogWarn, "fenêtre : #{raison}" unless ouvert
   Log kLogWarn, "fenêtre : #{err}" unless ok
   unix.exit 0
@@ -942,6 +1083,26 @@ handle_volume = ->
   send_json 200, state
 
 
+handle_authentification = ->
+  method = GetMethod!
+  if method == "GET"
+    send_json 200, auth_etat!
+    return
+  unless method == "POST"
+    send_json_405 "GET, POST"
+    return
+  ok, data = pcall DecodeJson, GetBody!
+  unless ok and type(data) == "table"
+    send_json 400, {error: "corps JSON invalide"}
+    return
+  reponse, err = regler_authentification data
+  if reponse
+    send_json 200, reponse
+  else
+    -- 409 : la variable d'environnement verrouille le réglage.
+    status = if err == "imposé par ORGANUM_MOT_DE_PASSE" then 409 else 400
+    send_json status, {error: err}
+
 handle_orgue_attendre = ->
   unless GetMethod! == "GET"
     send_json_405 "GET"
@@ -1118,6 +1279,13 @@ _G.OnWorkerStart = ->
 
 _G.OnHttpRequest = ->
   path = GetPath!
+  -- Authentification facultative : couvre toutes les routes, y compris les
+  -- pages, les API et l'attente longue. Les adresses locales en sont
+  -- exemptées ; la fenêtre native n'emprunte pas HTTP.
+  return unless auth_locale! or auth_autoriser!
+  if path == "/api/authentification"
+    handle_authentification!
+    return
   -- Diagnostic opt-in : teste la règle C du niveau de charge sans moteur.
   if os.getenv("ORGANUM_DIAGNOSTIC") == "1" and path == "/api/diagnostic/charge"
     pointe = tonumber(GetParam "pointe") or 0
