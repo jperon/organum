@@ -11,6 +11,10 @@
 -- volume (facultatif) : volume du système, 0 à 100, comme le curseur de la
 -- page web ; à défaut, le curseur règle le volume interne du moteur.
 --
+-- authentification et reseaux (facultatifs) : même contrat que la page web
+-- (etat/regler) ; la fenêtre est locale, donc jamais filtrée par
+-- ORGANUM_RESEAUX.
+--
 -- midi (facultatif) : active le panneau MIDI (bouton « MIDI » dans la barre
 -- de réglages). etat renvoie la configuration au format d'etat_midi
 -- (divisions[].canaux, controle, expression, associations), appliquer
@@ -73,6 +77,13 @@ MAX_ASSOCIATIONS = 16
   auth_charge = false
   auth_courant = nil
   message_auth = nil
+  -- Contrôle d'accès par sous-réseau source : la fenêtre est locale, donc
+  -- jamais filtrée ; elle règle la liste par le module, sans HTTP.
+  reseaux_opt = options.reseaux
+  reseaux_texte = ""
+  reseaux_charge = false
+  reseaux_courant = nil
+  message_reseaux = nil
   -- Tempérament demandé : tenu localement tant que le fil audio n'a pas
   -- publié la valeur effective. Il distingue la cible en cours (libellé
   -- suivi de « … ») du tempérament réellement en service (bouton accentué).
@@ -374,6 +385,26 @@ MAX_ASSOCIATIONS = 16
     auth_courant = etat_auth!
     seq = nil
 
+  etat_reseaux = ->
+    if reseaux_opt and reseaux_opt.etat
+      ok, r = pcall reseaux_opt.etat
+      if ok and type(r) == "table"
+        return r
+    {active: false, texte: "", impose: true, source: nil, erreur: nil}
+
+  regler_reseaux = (payload) ->
+    message_reseaux = nil
+    unless reseaux_opt and reseaux_opt.regler
+      message_reseaux = "Contrôle d'accès indisponible"
+      return
+    ok, res = pcall reseaux_opt.regler, payload
+    unless ok
+      message_reseaux = "Échec : #{res}"
+      return
+    reseaux_charge = false
+    reseaux_courant = etat_reseaux!
+    seq = nil
+
   while continuer!
     ouverte, sale = ui\evenements 50
     break unless ouverte
@@ -400,6 +431,7 @@ MAX_ASSOCIATIONS = 16
     if mode == "qualite" and tour - tour_qualite >= 40
       tour_qualite = tour
       auth_courant = etat_auth!
+      reseaux_courant = etat_reseaux!
       sale = true
     -- canaux_actifs est éphémère et hors seq : c'est la seule comparaison qui
     -- réveille le rendu pour éteindre un canal après 250 ms d'inactivité.
@@ -672,10 +704,10 @@ MAX_ASSOCIATIONS = 16
       calib = type(q.calibration) == "table" and q.calibration or nil
       -- Rangées : en-tête, niveau, deux cases, spatialisation, polyphonie,
       -- période, taux + limiteur, tempérament (2 rangées), périphérique,
-      -- puis (tête), (calibration) et message. Le nombre de cases de la
-      -- ligne « Niveau » vaut 6 quand le mode Auto existe (bouton en plus),
-      -- 5 sinon.
-      rows = 9 + (a_reverb and 1 or 0) + (a_tete and 1 or 0) + (calib and 1 or 0) + 2 + 3
+      -- authentification (2 + 3 rangées), réseaux (3 rangées), puis (tête),
+      -- (calibration) et message. Le nombre de cases de la ligne « Niveau »
+      -- vaut 6 quand le mode Auto existe (bouton en plus), 5 sinon.
+      rows = 9 + (a_reverb and 1 or 0) + (a_tete and 1 or 0) + (calib and 1 or 0) + 2 + 3 + 3
       colonnes = (type(q.auto) == "boolean") and 6 or 5
       p = disposer_qualite rows, l, h, colonnes
       if p.police != police
@@ -874,6 +906,38 @@ MAX_ASSOCIATIONS = 16
               regler_auth {retirer: true}
           else
             ui\texte ""
+
+        -- Contrôle d'accès par sous-réseau source. Une liste vide ne filtre
+        -- rien ; la fenêtre est locale, donc toujours exemptée. Même
+        -- persistance et même verrouillage par l'environnement que la page
+        -- web. Trois rangées, quel que soit l'état.
+        a_reseaux = reseaux_courant or etat_reseaux!
+        unless reseaux_charge
+          reseaux_texte = if type(a_reseaux.texte) == "string" then a_reseaux.texte else ""
+          reseaux_charge = true
+        if type(a_reseaux.erreur) == "string" and a_reseaux.erreur != ""
+          message_reseaux or= "Réseaux : #{a_reseaux.erreur} (aucun filtrage)"
+        ui\ligne ligne, 1
+        texte_reseaux = if a_reseaux.active == true
+          "Réseaux autorisés : #{a_reseaux.texte}"
+        else
+          "Réseaux autorisés : tous"
+        ui\texte tronquer("#{texte_reseaux} · source : #{a_reseaux.source or "locale"}", l - 2 * MARGE - ESPACE)
+        ui\ligne ligne, 2
+        if a_reseaux.impose == true
+          ui\texte tronquer("Liste imposée par ORGANUM_RESEAUX", (l - 2 * MARGE) / 2 - ESPACE)
+          ui\texte ""
+        else
+          ui\texte "Sous-réseaux", "droite"
+          reseaux_texte = ui\saisie reseaux_texte, 1024, false
+        ui\ligne ligne, 2
+        if a_reseaux.impose == true
+          ui\texte ""
+          ui\texte tronquer(message_reseaux or "", (l - 2 * MARGE) / 2 - ESPACE)
+        else
+          if ui\bouton "Enregistrer"
+            regler_reseaux {reseaux: reseaux_texte}
+          ui\texte tronquer(message_reseaux or "", (l - 2 * MARGE) / 2 - ESPACE)
 
         if a_tete
           ui\ligne ligne, 1
