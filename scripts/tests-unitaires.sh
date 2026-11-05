@@ -94,7 +94,7 @@ done < <(find "$RACINE/web/src" "$RACINE/ui" -name '*.moon' -not -path '*/extern
 # fichier. Liste explicite des globales fournies par redbean ou le journal :
 # toute nouvelle globale (le bug de a498232 était une variable de branche
 # devenue globale à la lecture) fait échouer la suite.
-GLOBALES_PERMISES=" Slurp utf8 Log kLogWarn kLogInfo kLogFatal DecodeJson EncodeJson Barf SetStatus SetHeader Write GetBody GetMethod GetPath GetParam ProgramHeartbeatInterval GetHostOs unix arg nk organum Route "
+GLOBALES_PERMISES=" Slurp utf8 Log kLogWarn kLogInfo kLogFatal DecodeJson EncodeJson Barf SetStatus SetHeader Write GetBody GetMethod GetPath GetParam ProgramHeartbeatInterval ProgramAddr GetHostOs unix arg nk organum Route "
 LINT_LOG="$TMP/lint.log"
 (cd "$RACINE" && moonc -l --lint-stage global_access web/src ui) >"$LINT_LOG" 2>&1 || true
 awk -v racine="$RACINE/" '
