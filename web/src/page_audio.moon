@@ -1016,6 +1016,97 @@ script = [[
     });
   }
   chargerAuth();
+
+  // --- Contrôle d'accès par sous-réseau source -------------------------
+  // Même contrat que l'authentification : l'état seul est relu, la liste
+  // est enregistrée telle que saisie, et le serveur refuse une liste qui
+  // exclurait l'adresse source courante (sauf source locale).
+  var sectionReseaux = document.getElementById('reseaux');
+  var reseauxEtat = document.getElementById('reseaux-etat');
+  var reseauxSource = document.getElementById('reseaux-source');
+  var reseauxListe = document.getElementById('reseaux-liste');
+  var reseauxEnregistrer = document.getElementById('reseaux-enregistrer');
+  var reseauxNote = document.getElementById('reseaux-note');
+  var reseauxEnCours = false;
+
+  function majReseaux(r) {
+    if (!sectionReseaux || !r || typeof r !== 'object') { return; }
+    if (reseauxEtat) {
+      reseauxEtat.textContent = r.active === true ? 'Filtrage actif' : 'Aucun filtrage';
+    }
+    if (reseauxSource) {
+      reseauxSource.textContent = 'Source : ' + (r.source || 'locale');
+    }
+    if (reseauxListe && document.activeElement !== reseauxListe &&
+        typeof r.texte === 'string') {
+      reseauxListe.value = r.texte;
+    }
+    var impose = r.impose === true;
+    if (reseauxListe) { reseauxListe.disabled = impose || reseauxEnCours; }
+    if (reseauxEnregistrer) { reseauxEnregistrer.disabled = impose || reseauxEnCours; }
+    if (reseauxNote) {
+      if (r.erreur) {
+        reseauxNote.textContent = 'Fichier de réseaux illisible : ' + r.erreur +
+          ' — aucun filtrage.';
+        reseauxNote.hidden = false;
+      } else if (impose) {
+        reseauxNote.textContent = 'Liste imposée par ORGANUM_RESEAUX : non modifiable ici.';
+        reseauxNote.hidden = false;
+      } else {
+        reseauxNote.textContent = '';
+        reseauxNote.hidden = true;
+      }
+    }
+  }
+
+  function chargerReseaux() {
+    fetch('/api/reseaux', { cache: 'no-store', headers: { Accept: 'application/json' } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (r) { if (r) { majReseaux(r); } })
+      .catch(function () {});
+  }
+
+  function envoyerReseaux(payload) {
+    if (reseauxEnCours) { return; }
+    reseauxEnCours = true;
+    fetch('/api/reseaux', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(payload)
+    })
+      .then(function (r) {
+        return r.json().then(
+          function (data) {
+            if (!r.ok) { throw new Error((data && data.error) || ('HTTP ' + r.status)); }
+            return data;
+          },
+          function () {
+            if (!r.ok) { throw new Error('HTTP ' + r.status); }
+            return {};
+          }
+        );
+      })
+      .then(function (data) {
+        reseauxEnCours = false;
+        majReseaux(data);
+      })
+      .catch(function (err) {
+        reseauxEnCours = false;
+        chargerReseaux();
+        if (reseauxNote) {
+          reseauxNote.textContent = 'Réseaux : échec (' +
+            (err && err.message ? err.message : 'erreur réseau') + ').';
+          reseauxNote.hidden = false;
+        }
+      });
+  }
+
+  if (reseauxEnregistrer) {
+    reseauxEnregistrer.addEventListener('click', function () {
+      envoyerReseaux({ reseaux: reseauxListe ? reseauxListe.value : '' });
+    });
+  }
+  chargerReseaux();
 })();
 ]]
 
@@ -1190,6 +1281,32 @@ script = [[
           )
           h.p class: "note", "Sur HTTP, le mot de passe est envoyé en clair : le calcul de HA1 côté navigateur exige HTTPS (crypto.subtle)."
           h.p class: "note qualite-message", id: "auth-note", role: "status", ["aria-live"]: "polite", hidden: true
+        )
+        h.section(
+          class: "qualite", id: "reseaux", ["aria-label"]: "Contrôle d'accès par sous-réseau source"
+          h.div(
+            class: "qualite-corps"
+            h.div(
+              class: "qualite-ligne"
+              h.span class: "qualite-libelle", "Réseaux autorisés"
+              h.div(
+                class: "qualite-commandes"
+                h.span id: "reseaux-etat", "Aucun filtrage"
+                h.span class: "qualite-note", id: "reseaux-source", "Source : —"
+              )
+            )
+            h.div(
+              class: "qualite-ligne"
+              h.span class: "qualite-libelle", "Sous-réseaux"
+              h.div(
+                class: "qualite-commandes"
+                h.input type: "text", id: "reseaux-liste", maxlength: "1024", autocomplete: "off", placeholder: "10.35.0.0/16, 2001:470:ca35::/48", ["aria-label"]: "Sous-réseaux autorisés"
+                h.button type: "button", class: "qualite-bascule", id: "reseaux-enregistrer", "Enregistrer"
+              )
+            )
+          )
+          h.p class: "note", "Séparer les sous-réseaux par une virgule ou un espace. Une liste vide ne filtre rien ; les adresses locales 127.0.0.1 et ::1 passent toujours."
+          h.p class: "note qualite-message", id: "reseaux-note", role: "status", ["aria-live"]: "polite", hidden: true
         )
         h.script script
       )
