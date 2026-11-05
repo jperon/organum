@@ -617,6 +617,18 @@ CSS = [[
     border-color: var(--off);
   }
 
+  /* Liens MIDI et Audio de la page principale : même hauteur que Panique,
+     texte centré au lieu d'être collé en haut. */
+  a.btn.small {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    padding: 0 16px;
+    text-align: center;
+    line-height: 1.1;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
