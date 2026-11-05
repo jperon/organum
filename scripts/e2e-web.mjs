@@ -173,10 +173,11 @@ async function viewport(largeur, hauteur = 900) {
 }
 
 async function rect(expression) {
-  return evaluer(`(() => {
+  return evaluer(`(async () => {
     const e = (${expression});
     if (!e) return null;
     e.scrollIntoView({ block: 'center', inline: 'center' });
+    await new Promise((r) => requestAnimationFrame(() => r()));
     const r = e.getBoundingClientRect();
     return { x: r.left, y: r.top, w: r.width, h: r.height };
   })()`);
