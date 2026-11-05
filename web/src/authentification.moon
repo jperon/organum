@@ -124,8 +124,10 @@ M.calculer_reponse = (p) ->
   sha256_hexa "#{p.ha1}:#{p.nonce}:#{p.nc}:#{p.cnonce}:#{p.qop}:#{ha2}"
 
 -- Vérifie une requête. p contient entete, methode, uri, ha1, utilisateur,
--- secret, maintenant. Renvoie vrai si acceptée ; sinon nil, stale, raison.
+-- secret, maintenant (et, pour les tests, duree du nonce). Renvoie vrai si
+-- acceptée ; sinon nil, stale, raison.
 M.verifier = (p) ->
+  duree = p.duree or DUREE_NONCE
   champs = M.analyser_entete p.entete
   return nil, false, "en-tête absent" unless champs
   return nil, false, "utilisateur absent" unless champs.username
@@ -137,7 +139,7 @@ M.verifier = (p) ->
   return nil, false, "uri différente" unless champs.uri == p.uri
   return nil, false, "nc absent" unless champs.nc and #champs.nc > 0
   return nil, false, "cnonce absent" unless champs.cnonce and #champs.cnonce > 0
-  etat_nonce = M.valider_nonce p.secret, champs.nonce, p.maintenant
+  etat_nonce = M.valider_nonce p.secret, champs.nonce, p.maintenant, duree
   return nil, false, "nonce invalide" unless etat_nonce == "valide" or etat_nonce == "perime"
   attendue = M.calculer_reponse {
     ha1: p.ha1, nonce: champs.nonce, nc: champs.nc,
