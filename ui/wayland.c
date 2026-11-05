@@ -1,7 +1,8 @@
 /* Client Wayland minimal, sans libwayland : le protocole filaire est parlé
  * directement sur la socket du compositeur ($XDG_RUNTIME_DIR/$WAYLAND_DISPLAY).
  * Interfaces : wl_compositor, wl_shm (tampons en mémoire partagée), xdg_wm_base
- * (fenêtre), wl_seat (pointeur, tactile), et zxdg_decoration_manager_v1 si le
+ * (fenêtre), wl_seat (pointeur, tactile, clavier), et
+ * zxdg_decoration_manager_v1 si le
  * compositeur sait dessiner les bordures (sinon la fenêtre en est dépourvue).
  *
  * Format d'un message : u32 objet, u32 (taille << 16 | opcode), arguments
@@ -35,7 +36,7 @@ struct wl {
   uint32_t registre, compositeur, shm, wm, siege, decorations;
   uint32_t version_siege;
   // Objets de la fenêtre
-  uint32_t surface, xdg_surface, toplevel, pointeur, tactile, synchro;
+  uint32_t surface, xdg_surface, toplevel, pointeur, tactile, clavier, synchro;
   int configure, synchro_ok, ferme;
   int largeur, hauteur, l_attente, h_attente;
   int px, py;  // dernière position du pointeur
@@ -109,8 +110,9 @@ static void pousser(struct wl *w, fenetre_ev_t ev) {
   if (w->fqueue - w->ftete < 64) w->file[w->fqueue++ % 64] = ev;
 }
 
-// Lit ce qui est disponible sur la socket ; les descripteurs reçus (aucun
-// attendu : on ne demande pas le clavier) sont refermés.
+// Lit ce qui est disponible sur la socket ; les descripteurs reçus (la
+// table de touches du clavier, que la disposition US fixe rend inutile)
+// sont refermés.
 static int remplir(struct wl *w) {
   if (w->debut > 0) {
     memmove(w->lu, w->lu + w->debut, w->fin - w->debut);
@@ -170,6 +172,11 @@ static void traiter(struct wl *w, uint32_t objet, uint16_t op, const uint32_t *a
       debut(&m, w->siege, 2), u(&m, w->tactile);
       envoyer(w, &m);
     }
+    if ((a[0] & 2) && !w->clavier) {
+      w->clavier = nouvel_objet(w);
+      debut(&m, w->siege, 1), u(&m, w->clavier);
+      envoyer(w, &m);
+    }
     return;
   }
   if (objet == w->xdg_surface && op == 0) {  // configure(serial)
@@ -214,6 +221,13 @@ static void traiter(struct wl *w, uint32_t objet, uint16_t op, const uint32_t *a
         }
         break;
     }
+    return;
+  }
+  if (objet == w->clavier) {
+    // key(serial, temps, code evdev, état) : seules les frappes comptent.
+    if (op == 3)
+      pousser(w, (fenetre_ev_t){.type = FEN_TOUCHE, .code = (int)a[2],
+                                .appui = a[3] == 1});
     return;
   }
   if (objet == w->tactile) {  // un seul doigt, présenté comme le bouton gauche

@@ -320,7 +320,8 @@ int x11_evenement(x11_t *x, fenetre_ev_t *ev, int attente_ms) {
         continue;
       case 2:
       case 3:
-        ev->type = FEN_TOUCHE, ev->code = e[1], ev->appui = (e[0] & 0x7F) == 2;
+        ev->type = FEN_TOUCHE, ev->code = e[1] >= 8 ? e[1] - 8 : e[1],
+        ev->appui = (e[0] & 0x7F) == 2;
         return 1;
       case 4:
       case 5:
