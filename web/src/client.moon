@@ -26,8 +26,8 @@ JS = [[
     var classe = lienQualite.getAttribute('data-charge-classe-' + niveau) || 'charge-gris';
     var libelle = lienQualite.getAttribute('data-charge-libelle-' + niveau) || 'Pas encore évalué';
     lienQualite.className = 'btn small lien-qualite ' + classe;
-    lienQualite.textContent = niveau >= 3 ? 'Qualité !!' : niveau >= 2 ? 'Qualité !' : 'Qualité';
-    lienQualite.setAttribute('aria-label', 'Qualité — ' + libelle);
+    lienQualite.textContent = niveau >= 3 ? 'Audio !!' : niveau >= 2 ? 'Audio !' : 'Audio';
+    lienQualite.setAttribute('aria-label', 'Audio — ' + libelle);
   }
 
   var etatReseau = false;
@@ -347,7 +347,6 @@ JS = [[
     var aeolusSeq = null;
     var aeolusMode = false;
     var orgueToken = 0;
-    var reverbManip = false;
 
     function orgueTabActive() { return true; }
     function shouldPollOrgue() {
@@ -385,10 +384,6 @@ JS = [[
       var comboInput = document.getElementById('combo-num');
       if (comboInput) { comboInput.value = String((orgueState.step || 0) + 1); }
       majCombos();
-      var reverbSlider = document.getElementById('reverb');
-      if (reverbSlider && typeof orgueState.reverb === 'number' && orgueState.reverb >= 0) {
-        reverbSlider.value = String(orgueState.reverb);
-      }
       updateSyncUI();
     }
 
@@ -402,8 +397,6 @@ JS = [[
         if (v < 0) { v = 0; }
         if (v > 127) { v = 127; }
         orgueState.reverb = v;
-        var reverbSlider = document.getElementById('reverb');
-        if (reverbSlider && !reverbManip) { reverbSlider.value = String(v); }
       }
       if (Array.isArray(data.divisions)) {
         var stops = [];
@@ -605,20 +598,6 @@ JS = [[
       });
     });
 
-    var reverbSlider = document.getElementById('reverb');
-    if (reverbSlider) {
-      reverbSlider.addEventListener('pointerdown', function () { reverbManip = true; });
-      reverbSlider.addEventListener('input', function () { reverbManip = true; });
-      reverbSlider.addEventListener('change', function () {
-        var v = parseInt(reverbSlider.value, 10);
-        reverbManip = false;
-        if (!isFinite(v)) return;
-        if (v < 0) v = 0;
-        if (v > 127) v = 127;
-        postOrgue({ reverb: v });
-      });
-      reverbSlider.addEventListener('blur', function () { reverbManip = false; });
-    }
 
     var panicBtn = document.getElementById('panic');
     if (panicBtn) {

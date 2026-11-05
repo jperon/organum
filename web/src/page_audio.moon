@@ -213,6 +213,8 @@ script = [[
   var notePeripherique = document.getElementById('qualite-peripherique-note');
   var caseLimiteur = document.getElementById('qualite-limiteur');
   var noteLimiteur = document.getElementById('qualite-limiteur-note');
+  var curseurReverb = document.getElementById('reverb');
+  var reverbManip = false;
   var ligneRepli = document.getElementById('qualite-repli');
   var ligneErreur = document.getElementById('qualite-audio-erreur');
   var ligneCalibration = document.getElementById('qualite-calibration');
@@ -331,8 +333,17 @@ script = [[
     });
   }
 
-  function maj(q) {
+  function maj(q, reverb) {
     if (enAttente > 0) { majMessage(q); majPuce(q); return; }
+    // Réverbération : valeur publiée par le moteur (0..1), curseur 0..127.
+    // Une association MIDI de cible « reverb » la modifie aussi : ne pas
+    // écraser le curseur pendant un glissement.
+    if (curseurReverb && !reverbManip && typeof reverb === 'number' && isFinite(reverb)) {
+      var vr = Math.round(reverb * 127);
+      if (vr < 0) { vr = 0; }
+      if (vr > 127) { vr = 127; }
+      curseurReverb.value = String(vr);
+    }
     if (!q || typeof q !== 'object') {
       // Serveur sans réglages de qualité (ancienne version) : la section
       // reste visible mais ses contrôles sont inertes, avec une explication.
@@ -475,7 +486,7 @@ script = [[
       .catch(function (err) {
         enAttente -= 1;
         var detail = err && err.message ? err.message : 'erreur réseau';
-        echecEnvoi = 'Qualité : échec de l’enregistrement (' + detail + ').';
+        echecEnvoi = 'Audio : échec de l’enregistrement (' + detail + ').';
         majMessage(null);
       });
   }
@@ -552,6 +563,28 @@ script = [[
       envoyer({ limiteur: caseLimiteur.checked });
     });
   }
+  if (curseurReverb) {
+    curseurReverb.addEventListener('pointerdown', function () { reverbManip = true; });
+    curseurReverb.addEventListener('input', function () { reverbManip = true; });
+    var envoyerReverb = function () {
+      reverbManip = false;
+      var v = nombre(curseurReverb.value);
+      if (v === null) { return; }
+      v = Math.round(v);
+      if (v < 0) { v = 0; }
+      if (v > 127) { v = 127; }
+      fetch('/api/orgue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ reverb: v })
+      }).catch(function () {
+        echecEnvoi = 'Audio : échec de l’enregistrement de la réverbération.';
+        majMessage(null);
+      });
+    };
+    curseurReverb.addEventListener('change', envoyerReverb);
+    curseurReverb.addEventListener('blur', envoyerReverb);
+  }
 
   // --- Boucle d'état propre à cette page ------------------------------
   // GET /api/orgue puis attente longue /api/orgue/attendre, comme la page
@@ -560,7 +593,7 @@ script = [[
 
   function appliquerEtat(data) {
     if (!data || typeof data !== 'object') { return; }
-    maj(data.qualite);
+    maj(data.qualite, data.reverb);
   }
 
   function attendre(instance, seq, token) {
@@ -657,19 +690,19 @@ script = [[
     h.head {},
       h.meta charset: "utf-8",
       h.meta name: "viewport", content: "width=device-width, initial-scale=1",
-      h.title "Orgue — Qualité",
+      h.title "Orgue — Audio",
       h.style style .. css,
     h.body {},
       h.main class: "qualite-page",
         h.div class: "entete",
           h.a href: "/", "← Orgue",
-          h.h2 "Qualité",
+          h.h2 "Audio",
         h.div class: "puce-bloc",
           h.span class: "puce-charge charge-gris", id: "qualite-puce", role: "status", ["aria-live"]: "polite", "Pas encore évalué — jouez quelques accords",
           h.p class: "note", id: "qualite-puce-detail", "Pointe : — · Xruns récents : 0 · total : 0",
-        h.section class: "qualite", id: "qualite", ["aria-label"]: "Réglages de qualité", ["data-charge-classe-0"]: modele.CHARGE_NIVEAUX[1].classe, ["data-charge-classe-1"]: modele.CHARGE_NIVEAUX[2].classe, ["data-charge-classe-2"]: modele.CHARGE_NIVEAUX[3].classe, ["data-charge-classe-3"]: modele.CHARGE_NIVEAUX[4].classe, ["data-charge-libelle-0"]: modele.CHARGE_NIVEAUX[1].libelle, ["data-charge-libelle-1"]: modele.CHARGE_NIVEAUX[2].libelle, ["data-charge-libelle-2"]: modele.CHARGE_NIVEAUX[3].libelle, ["data-charge-libelle-3"]: modele.CHARGE_NIVEAUX[4].libelle,
+        h.section class: "qualite", id: "qualite", ["aria-label"]: "Réglages audio", ["data-charge-classe-0"]: modele.CHARGE_NIVEAUX[1].classe, ["data-charge-classe-1"]: modele.CHARGE_NIVEAUX[2].classe, ["data-charge-classe-2"]: modele.CHARGE_NIVEAUX[3].classe, ["data-charge-classe-3"]: modele.CHARGE_NIVEAUX[4].classe, ["data-charge-libelle-0"]: modele.CHARGE_NIVEAUX[1].libelle, ["data-charge-libelle-1"]: modele.CHARGE_NIVEAUX[2].libelle, ["data-charge-libelle-2"]: modele.CHARGE_NIVEAUX[3].libelle, ["data-charge-libelle-3"]: modele.CHARGE_NIVEAUX[4].libelle,
           h.p class: "note qualite-indisponible", id: "qualite-indisponible", hidden: true,
-            "Réglages de qualité indisponibles sur ce serveur.",
+            "Réglages audio indisponibles sur ce serveur.",
           h.div class: "qualite-corps",
             h.label class: "qualite-champ",
               h.span "Niveau",
@@ -688,6 +721,9 @@ script = [[
                 h.option value: "0", "Coupée",
                 h.option value: "1", "Simplifiée",
                 h.option value: "2", selected: true, "Complète",
+            h.label class: "qualite-champ",
+              h.span "Réverbération",
+              h.input type: "range", id: "reverb", min: "0", max: "127", step: "1", value: "64", ["aria-label"]: "Réverbération",
             h.label class: "qualite-champ qualite-polyphonie",
               h.span "Polyphonie maximale",
               h.input type: "range", id: "qualite-polyphonie", min: "0", max: "512", step: "1", value: "0", ["aria-label"]: "Polyphonie maximale",

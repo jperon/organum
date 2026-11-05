@@ -1182,7 +1182,7 @@ handle_midi = ->
     send_json_405 "GET, POST"
 
 page_midi = require "page_midi"
-page_qualite = require "page_qualite"
+page_audio = require "page_audio"
 
 page = require "page"
 
@@ -1225,10 +1225,15 @@ _G.OnHttpRequest = ->
     SetStatus 200
     SetHeader "Content-Type", "text/html; charset=utf-8"
     Write page_midi!
-  elseif path == "/qualite"
+  elseif path == "/audio"
     SetStatus 200
     SetHeader "Content-Type", "text/html; charset=utf-8"
-    Write page_qualite!
+    Write page_audio!
+  elseif path == "/qualite"
+    -- Anciens signets : le panneau « Qualité » est devenu « Audio ».
+    SetStatus 302
+    SetHeader "Location", "/audio"
+    Write ""
   elseif path == "/"
     SetStatus 200
     SetHeader "Content-Type", "text/html; charset=utf-8"

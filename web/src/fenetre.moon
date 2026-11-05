@@ -423,6 +423,7 @@ texte_calibration = (c) ->
     if qualite_opt and qualite_opt.etat
       ok, q = pcall qualite_opt.etat
       if ok and type(q) == "table"
+        q.reverb = e.reverb if type(e.reverb) == "number"
         return q
     {
       bruit_attaque: base.bruit_attaque == true
@@ -452,6 +453,7 @@ texte_calibration = (c) ->
       charge_niveau: base.charge_niveau or 0
       xruns_recents: base.xruns_recents or 0
       xruns: e.xruns or 0
+      reverb: e.reverb
       niveau: modele.niveau_correspondant base
       calibration: base.calibration
     }
@@ -770,12 +772,13 @@ texte_calibration = (c) ->
       l, h = ui\taille!
       q = etat_qualite e
       a_tete = type(q.tete_reverb) == "boolean" and type(q.tete_reverb_prochain) == "boolean"
+      a_reverb = type(q.reverb) == "number"
       calib = type(q.calibration) == "table" and q.calibration or nil
       -- Rangées : en-tête, niveau, deux cases, spatialisation, polyphonie,
       -- période, taux + limiteur, périphérique, puis (tête), (calibration) et
       -- message. Le nombre de cases de la ligne « Niveau » vaut 6 quand le
       -- mode Auto existe (bouton en plus), 5 sinon.
-      rows = 10 + (a_tete and 1 or 0) + (calib and 1 or 0)
+      rows = 10 + (a_reverb and 1 or 0) + (a_tete and 1 or 0) + (calib and 1 or 0)
       colonnes = (type(q.auto) == "boolean") and 6 or 5
       p = disposer_qualite rows, l, h, colonnes
       if p.police != police
@@ -790,7 +793,7 @@ texte_calibration = (c) ->
           if ui\bouton "Retour"
             mode = "console"
             seq = nil
-          ui\texte "Fenêtre trop petite pour les réglages de qualité"
+          ui\texte "Fenêtre trop petite pour les réglages audio"
           ui\fin!
           ui\dessiner 30, 30, 30
         continue
@@ -799,7 +802,7 @@ texte_calibration = (c) ->
         if ui\bouton "Retour"
           mode = "console"
           seq = nil
-        ui\texte "Qualité", "droite"
+        ui\texte "Audio", "droite"
         ui\texte (if q.auto == true then "Auto" elseif q.niveau == -1 then "Personnalisé" else "Niveau #{q.niveau}"), "droite"
 
         -- Niveau : Auto (si disponible) ou une présélection 0 à 3.
@@ -832,6 +835,14 @@ texte_calibration = (c) ->
           actif = q.spatialisation == v - 1
           if ui\choix(nom, actif) != actif
             regler_qualite {spatialisation: v - 1}
+
+        -- Réverbération : réglage du moteur, aussi pilotable par une
+        -- association MIDI de cible « reverb » ; relu à chaque image.
+        if a_reverb
+          ui\ligne ligne, 2
+          ui\texte "Réverb.", "droite"
+          r = ui\curseur (q.reverb or 0), 0, 1, 0.01
+          organum.reverb r if bouge (q.reverb or 0), r
 
         -- Polyphonie maximale : 0 = illimitée, jusqu'à 512. Colonnes de
         -- largeurs inégales : le libellé complet et un curseur assez long
@@ -961,7 +972,7 @@ texte_calibration = (c) ->
       -- Avec un volume système, deux curseurs : le système et la pédale (volume
       -- du moteur, distinct) ; sans lui, le curseur unique règle déjà le moteur.
       deux = systeme and vol_sys
-      ui\ligne ligne, (midi and 8 or 7) + (deux and 2 or 0)
+      ui\ligne ligne, (midi and 6 or 5) + (deux and 2 or 0)
       if deux
         ui\texte "Volume #{math.floor(vol_sys * 100 + 0.5)} %", "droite"
         v = ui\curseur vol_sys, 0, 1, 0.01
@@ -973,9 +984,6 @@ texte_calibration = (c) ->
         ui\texte "Volume", "droite"
         v = ui\curseur e.volume, 0, 1, 0.01
         organum.volume v if bouge e.volume, v
-      ui\texte "Réverb.", "droite"
-      r = ui\curseur e.reverb, 0, 1, 0.01
-      organum.reverb r if bouge e.reverb, r
       ui\texte ""
       organum.panique! if ui\bouton "Panique"
       -- Accès au panneau Qualité : vert seulement pour « Confortable » ;
@@ -983,9 +991,9 @@ texte_calibration = (c) ->
       niveau_charge = modele.charge_niveau e.qualite.charge_niveau
       marque_charge = if niveau_charge >= 3 then " !!" elseif niveau_charge >= 2 then " !" else ""
       clique_qualite = if niveau_charge == 1
-        ui\etat("Qualité", false, true) != false
+        ui\etat("Audio", false, true) != false
       else
-        ui\bouton "Qualité#{marque_charge}", niveau_charge
+        ui\bouton "Audio#{marque_charge}", niveau_charge
       if clique_qualite
         mode = "qualite"
         message_qualite = nil
