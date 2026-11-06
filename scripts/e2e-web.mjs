@@ -545,7 +545,7 @@ async function testTemperamentPost() {
   const dom = await attendre(
     async () => {
       const d = await etatTemperamentDom();
-      return d && d.enCours.includes(cible) ? d : null;
+      return d && (d.enCours.includes(cible) || d.actifs.includes(cible)) ? d : null;
     },
     `web /audio : changement par POST vu dans la rangée Tempérament (${cible})`,
     5000
@@ -825,11 +825,15 @@ async function modeCroise() {
     avantWeb !== apresWeb,
     'croisé : un clic web sur le tempérament change l’affichage de la fenêtre native'
   );
-  const domWeb = await etatTemperamentDom();
-  verifie(
-    domWeb && domWeb.enCours.includes(cible),
-    `croisé : la page web montre aussi la cible ${cible} en cours`
+  const domWeb = await attendre(
+    async () => {
+      const d = await etatTemperamentDom();
+      return d && (d.enCours.includes(cible) || d.actifs.includes(cible)) ? d : null;
+    },
+    `croisé : la page web montre la cible ${cible} (en cours ou appliquée)`,
+    5000
   );
+  verifie(!!domWeb, `croisé : la page web reflète le clic web (cible ${cible})`);
   await attendreApplique(cible, `croisé : cible ${cible} appliquée après clic web`);
 
   // 2. Clic natif vu côté web.
@@ -845,7 +849,7 @@ async function modeCroise() {
   const domNatif = await attendre(
     async () => {
       const d = await etatTemperamentDom();
-      return d && d.enCours.includes(cibleNatif) ? d : null;
+      return d && (d.enCours.includes(cibleNatif) || d.actifs.includes(cibleNatif)) ? d : null;
     },
     `croisé : clic natif vu dans la page web (cible ${cibleNatif})`,
     5000
@@ -872,7 +876,7 @@ async function modeCroise() {
   const domPost = await attendre(
     async () => {
       const d = await etatTemperamentDom();
-      return d && d.enCours.includes(cible) ? d : null;
+      return d && (d.enCours.includes(cible) || d.actifs.includes(cible)) ? d : null;
     },
     `croisé : POST vu dans la page web (cible ${cible})`,
     5000
