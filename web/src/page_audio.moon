@@ -941,17 +941,18 @@ script = [[
         authEtat.textContent = 'Désactivée';
       }
     }
-    var impose = a.impose === true;
-    if (authUtilisateur) { authUtilisateur.disabled = impose || authEnCours; }
-    if (authMotDePasse) { authMotDePasse.disabled = impose || authEnCours; }
-    if (authEnregistrer) { authEnregistrer.disabled = impose || authEnCours; }
+    var enCours = authEnCours;
+    if (authUtilisateur) { authUtilisateur.disabled = enCours; }
+    if (authMotDePasse) { authMotDePasse.disabled = enCours; }
+    if (authEnregistrer) { authEnregistrer.disabled = enCours; }
     if (authRetirer) {
-      authRetirer.disabled = impose || authEnCours;
+      authRetirer.disabled = enCours;
       authRetirer.hidden = a.active !== true;
     }
     if (authNote) {
-      if (impose) {
-        authNote.textContent = 'Mot de passe imposé par ORGANUM_MOT_DE_PASSE : non modifiable ici.';
+      if (a.erreur) {
+        authNote.textContent = 'Fichier d’authentification invalide : ' + a.erreur +
+          ' — accès non local refusé (503).';
         authNote.hidden = false;
       } else {
         authNote.textContent = '';
@@ -1050,16 +1051,13 @@ script = [[
         typeof r.texte === 'string') {
       reseauxListe.value = r.texte;
     }
-    var impose = r.impose === true;
-    if (reseauxListe) { reseauxListe.disabled = impose || reseauxEnCours; }
-    if (reseauxEnregistrer) { reseauxEnregistrer.disabled = impose || reseauxEnCours; }
+    var enCours = reseauxEnCours;
+    if (reseauxListe) { reseauxListe.disabled = enCours; }
+    if (reseauxEnregistrer) { reseauxEnregistrer.disabled = enCours; }
     if (reseauxNote) {
       if (r.erreur) {
-        reseauxNote.textContent = 'Fichier de réseaux illisible : ' + r.erreur +
-          ' — aucun filtrage.';
-        reseauxNote.hidden = false;
-      } else if (impose) {
-        reseauxNote.textContent = 'Liste imposée par ORGANUM_RESEAUX : non modifiable ici.';
+        reseauxNote.textContent = 'Fichier de réseaux invalide : ' + r.erreur +
+          ' — accès non local refusé (503).';
         reseauxNote.hidden = false;
       } else {
         reseauxNote.textContent = '';
@@ -1322,7 +1320,7 @@ script = [[
               )
             )
           )
-          h.p class: "note", "Séparer les sous-réseaux par une virgule ou un espace. Une liste vide ne filtre rien ; les adresses locales 127.0.0.1 et ::1 passent toujours."
+          h.p class: "note", "Un sous-réseau par ligne. Une liste vide ne filtre rien ; les adresses locales 127.0.0.1 et ::1 passent toujours. Enregistrer depuis cette page réécrit le fichier et perd ses commentaires."
           h.p class: "note qualite-message", id: "reseaux-note", role: "status", ["aria-live"]: "polite", hidden: true
         )
         h.script script
