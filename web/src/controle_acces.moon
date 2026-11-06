@@ -215,6 +215,29 @@ M.formater_liste = (reseaux) ->
     textes[#textes + 1] = M.formater_reseau reseau
   table.concat textes, ", "
 
+-- Analyse le fichier éditable à la main : un sous-réseau par ligne, lignes
+-- vides et commentaires « # » admis. Une ligne invalide fait échouer tout le
+-- fichier (une faute de saisie ne doit pas élargir silencieusement l'accès).
+M.analyser_fichier = (contenu) ->
+  return nil, "contenu attendu" unless type(contenu) == "string"
+  reseaux = {}
+  numero = 0
+  for ligne in contenu\gmatch "[^\n]*"
+    numero += 1
+    texte = ligne\match "^%s*(.-)%s*$"
+    if texte != "" and texte\sub(1, 1) != "#"
+      reseau, err = M.analyser_reseau texte
+      return nil, "ligne #{numero} : « #{texte} » : #{err}" unless reseau
+      reseaux[#reseaux + 1] = reseau
+  reseaux, nil
+
+-- Forme écrite sur disque : un sous-réseau canonique par ligne.
+M.formater_fichier = (reseaux) ->
+  textes = {}
+  for reseau in *reseaux
+    textes[#textes + 1] = M.formater_reseau reseau
+  table.concat(textes, "\n") .. (if #textes > 0 then "\n" else "")
+
 -- Adresse source brute de GetClientAddr en {famille, octets}. Une chaîne de
 -- 16 octets dont les dix premiers sont nuls et les deux suivants 0xffff est
 -- une adresse IPv4 mappée : elle est ramenée à IPv4.

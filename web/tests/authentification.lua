@@ -142,4 +142,28 @@ local ok6 = a.verifier {
 }
 aide.verifie(ok6 == true, "vérification : algorithme en minuscules accepté")
 
+-- Fichier Digest éditable : une entrée utilisateur:organum:HA1.
+local ha1_fichier = a.ha1("organiste", "organum", "motdepasse")
+local entree = a.analyser_fichier("organiste:organum:" .. ha1_fichier .. "\n")
+aide.verifie(entree ~= nil and entree ~= false, "fichier Digest : entrée acceptée")
+aide.egal(entree and entree.utilisateur, "organiste", "fichier Digest : utilisateur")
+aide.egal(entree and entree.ha1, ha1_fichier, "fichier Digest : HA1")
+aide.egal(a.formater_fichier("organiste", ha1_fichier),
+  "organiste:organum:" .. ha1_fichier .. "\n", "fichier Digest : forme écrite")
+local aid = a.analyser_fichier("  # commentaire\n\norganiste:organum:" .. string.upper(ha1_fichier) .. "\r\n")
+aide.verifie(aid ~= nil and aid ~= false, "fichier Digest : commentaires et lignes vides")
+aide.egal(aid and aid.ha1, ha1_fichier, "fichier Digest : HA1 ramené en minuscules")
+aide.egal(a.analyser_fichier("# commentaire\n\n"), false, "fichier Digest : sans entrée")
+aide.egal(a.analyser_fichier("organiste:organum:abc"), nil, "fichier Digest : HA1 trop court refusé")
+aide.egal(a.analyser_fichier("organiste:organum:" .. string.rep("z", 64)), nil,
+  "fichier Digest : HA1 non hexadécimal refusé")
+aide.egal(a.analyser_fichier("organiste:autre:" .. ha1_fichier), nil,
+  "fichier Digest : royaume différent refusé")
+aide.egal(a.analyser_fichier("organiste organum " .. ha1_fichier), nil,
+  "fichier Digest : ligne mal formée refusée")
+aide.egal(a.analyser_fichier("a:organum:" .. ha1_fichier .. "\nb:organum:" .. ha1_fichier), nil,
+  "fichier Digest : plusieurs entrées refusées")
+aide.egal(a.analyser_fichier("or:ganiste:organum:" .. ha1_fichier), nil,
+  "fichier Digest : deux-points dans l'utilisateur refusés")
+
 aide.termine()

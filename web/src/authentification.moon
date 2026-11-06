@@ -153,6 +153,36 @@ M.verifier = (p) ->
   return nil, true, "nonce périmé" if etat_nonce == "perime"
   return true, false, nil
 
+-- Analyse le fichier Digest éditable à la main : une seule entrée
+-- « utilisateur:organum:HA1 », lignes vides et commentaires « # » admis.
+-- Renvoie l'entrée, ou false si le fichier ne contient aucune entrée
+-- (équivalent à un fichier absent), ou nil et un message si une ligne est
+-- mal formée. Plusieurs entrées sont refusées : le serveur ne gère qu'un
+-- utilisateur.
+M.analyser_fichier = (contenu) ->
+  return nil, "contenu attendu" unless type(contenu) == "string"
+  entree = false
+  numero = 0
+  for ligne in contenu\gmatch "[^\n]*"
+    numero += 1
+    texte = ligne\match "^%s*(.-)%s*$"
+    if texte != "" and texte\sub(1, 1) != "#"
+      return nil, "ligne #{numero} : plusieurs entrées" if entree
+      utilisateur, royaume, ha1 = texte\match "^([^:]+):([^:]+):([^:]+)$"
+      return nil, "ligne #{numero} : format attendu utilisateur:organum:HA1" unless utilisateur
+      unless royaume == ROYAUME
+        return nil, "ligne #{numero} : royaume différent de #{ROYAUME}"
+      unless #utilisateur >= 1 and #utilisateur <= 64 and not utilisateur\match "[:%c]"
+        return nil, "ligne #{numero} : utilisateur invalide"
+      unless #ha1 == 64 and ha1\match "^%x+$"
+        return nil, "ligne #{numero} : HA1 invalide (64 hexadécimaux attendus)"
+      entree = {utilisateur: utilisateur, ha1: ha1\lower!}
+  entree, nil
+
+-- Forme écrite sur disque (jamais le mot de passe en clair).
+M.formater_fichier = (utilisateur, ha1) ->
+  "#{utilisateur}:#{ROYAUME}:#{ha1}\n"
+
 -- En-tête de défi. stale=true demande au client de rejouer avec un nouveau
 -- nonce sans redemander le mot de passe.
 M.entete_defi = (secret, maintenant, stale = false) ->

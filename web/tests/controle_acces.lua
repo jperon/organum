@@ -134,4 +134,19 @@ aide.verifie(c.autorise({reseau("10.35.0.0/16")}, 0x7f000001),
   "source locale : autorisée malgré la liste")
 aide.verifie(not c.autorise({reseau("10.35.0.0/16")}, nil), "source inconnue : refusée")
 
+-- Fichier éditable : un sous-réseau par ligne, commentaires et lignes vides.
+local fichier = c.analyser_fichier(
+  "# liste des réseaux autorisés\n\n10.35.0.0/16\n2001:470:ca35::/48\r\n")
+aide.egal(fichier and #fichier, 2, "fichier réseaux : deux entrées")
+aide.egal(fichier and c.formater_liste(fichier), "10.35.0.0/16, 2001:470:ca35::/48",
+  "fichier réseaux : liste canonique")
+aide.egal(c.formater_fichier(fichier or {}), "10.35.0.0/16\n2001:470:ca35::/48\n",
+  "fichier réseaux : forme écrite")
+aide.egal(#(c.analyser_fichier("# commentaire\n\n") or {}), 0, "fichier réseaux : vide")
+aide.egal(c.formater_fichier({}), "", "fichier réseaux : écriture vide")
+aide.egal(c.analyser_fichier("10.0.0.0/8\npas-un-reseau\n"), nil,
+  "fichier réseaux : une ligne invalide fait échouer")
+aide.egal(c.analyser_fichier("10.0.0.0/8 # fin de ligne"), nil,
+  "fichier réseaux : commentaire de fin de ligne non admis")
+
 aide.termine()
