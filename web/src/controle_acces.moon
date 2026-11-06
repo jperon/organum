@@ -37,7 +37,7 @@ analyser_ipv4 = (texte) ->
 -- pas « :: »). Renvoie nil si un groupe est vide ou trop long.
 groupes_hexa = (partie) ->
   return {} if partie == ""
-  return nil if partie\match "^:" or partie\match ":$"
+  return nil if partie\match("^:") or partie\match(":$")
   return nil if partie\match "::"
   groupes = {}
   for groupe in partie\gmatch "[^:]+"
