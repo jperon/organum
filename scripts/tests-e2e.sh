@@ -115,8 +115,25 @@ arreter_chromium() {
 
 arreter_xvfb() {
   if [ -n "$PID_XVFB" ]; then
-    tuer_arbre "$PID_XVFB"
+    # SIGTERM d'abord : Xvfb retire alors lui-même son verrou et sa socket.
+    # SIGKILL (tuer_arbre) les laisserait derrière lui et saturerait la plage.
+    kill -TERM "$PID_XVFB" 2>/dev/null || true
+    for _ in $(seq 1 50); do
+      kill -0 "$PID_XVFB" 2>/dev/null || break
+      sleep 0.1
+    done
+    if kill -0 "$PID_XVFB" 2>/dev/null; then
+      tuer_arbre "$PID_XVFB"
+    else
+      wait "$PID_XVFB" 2>/dev/null || true
+    fi
     PID_XVFB=""
+  fi
+  # Ne retirer que le numéro pris par CE script, jamais un écran hors plage
+  # ni celui d'un processus encore vivant.
+  if [ -n "$DISPLAY_NUM" ] && [ "$DISPLAY_NUM" -ge 90 ] && [ "$DISPLAY_NUM" -le 139 ]; then
+    rm -f "/tmp/.X$DISPLAY_NUM-lock" "/tmp/.X11-unix/X$DISPLAY_NUM"
+    DISPLAY_NUM=""
   fi
   unset DISPLAY
 }
@@ -184,17 +201,39 @@ WPC
   chmod +x "$TMP/bin/wpctl"
 }
 
+# Un verrou X est périmé quand son PID n'existe plus. On ne supprime que ce
+# cas : un verrou de processus vivant (ou illisible) bloque toujours le numéro.
+verrou_xvfb_obsolete() {
+  n=$1
+  verrou="/tmp/.X$n-lock"
+  [ -e "$verrou" ] || return 1
+  pid=$(sed -n '1{s/^[^0-9]*//;s/[^0-9].*//;p;}' "$verrou" 2>/dev/null)
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null && return 1
+  return 0
+}
+
 demarrer_xvfb() {
   if ! command -v Xvfb >/dev/null 2>&1; then
     return 1
   fi
+  DISPLAY_NUM=""
   for n in $(seq 90 139); do
-    if [ ! -e "/tmp/.X11-unix/X$n" ] && [ ! -e "/tmp/.X$n-lock" ]; then
-      DISPLAY_NUM=$n
-      break
+    # Une socket existante signale un écran occupé : ne jamais y toucher.
+    [ -e "/tmp/.X11-unix/X$n" ] && continue
+    if [ -e "/tmp/.X$n-lock" ]; then
+      verrou_xvfb_obsolete "$n" || continue
+      # Verrou périmé : Xvfb sait aussi le remplacer, mais le retirer ici
+      # évite qu'un arrêt brutal laisse le numéro bloqué pour les suivants.
+      rm -f "/tmp/.X$n-lock"
     fi
+    DISPLAY_NUM=$n
+    break
   done
-  [ -n "$DISPLAY_NUM" ] || return 1
+  if [ -z "$DISPLAY_NUM" ]; then
+    echo "ÉCHEC : plage d'écrans Xvfb 90..139 saturée (verrous ou sockets occupés)" >&2
+    return 1
+  fi
   Xvfb ":$DISPLAY_NUM" -screen 0 1920x1080x24 -listen tcp -ac \
     >"$TMP/xvfb.log" 2>&1 &
   PID_XVFB=$!
@@ -203,6 +242,7 @@ demarrer_xvfb() {
     timeout 1 xdotool getdisplaygeometry >/dev/null 2>&1 && return 0
     sleep 0.1
   done
+  arreter_xvfb
   return 1
 }
 
