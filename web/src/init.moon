@@ -380,11 +380,23 @@ AUTH_NONCE_DUREE = tonumber(os.getenv "ORGANUM_AUTH_NONCE_DUREE") or AUTH.DUREE_
 -- lignes vides admis.
 RESEAUX_FICHIER = chemin_environnement "ORGANUM_RESEAUX_FICHIER", "#{ETAT_FICHIER}.reseaux"
 
+-- Seul ENOENT vaut « fichier absent » : une autre erreur de stat (EACCES sur
+-- un dossier parent, ENOTDIR…) ne doit jamais ouvrir l'accès.
+est_enoent = (err) ->
+  return false unless err
+  if type(err) == "number"
+    err == unix.ENOENT
+  else
+    type(err) == "userdata" and err\errno! == unix.ENOENT
+
 -- Lecture stricte partagée : nil sans erreur si le fichier n'existe pas,
 -- sinon son contenu ; une erreur explicite s'il existe mais reste illisible
--- (permissions comprises).
+-- (permissions comprises) ou si stat échoue autrement qu'en ENOENT.
 lire_fichier_texte = (chemin) ->
-  return nil, nil unless unix.stat chemin
+  stat, stat_err = unix.stat chemin
+  unless stat
+    return nil, nil if est_enoent stat_err
+    return nil, "fichier inaccessible (#{stat_err or "stat impossible"})"
   contenu, err = Slurp chemin
   unless contenu
     return nil, "fichier illisible (#{err or "lecture impossible"})"
@@ -767,7 +779,8 @@ reseaux_ecrire = (liste) ->
 
 -- Enregistre une liste. ip est la source HTTP courante : une liste non vide
 -- qui l'exclut est refusée, sauf si cette source est locale (elle passe
--- toujours). Les commentaires du fichier sont perdus à l'écriture.
+-- toujours). Seules les lignes qui ne contiennent qu'un commentaire sont
+-- perdues à l'écriture ; les commentaires d'entrée sont conservés.
 regler_reseaux = (data, ip = nil) ->
   return nil, "objet attendu" unless type(data) == "table"
   if data.retirer == true

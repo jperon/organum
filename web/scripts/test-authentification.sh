@@ -28,6 +28,7 @@ if [ -z "${ORGANUM_LIBASOUND:-}" ] && [ -d /nix/store ]; then
 fi
 
 TMP="$(mktemp -d)" || exit 2
+PROTEGE="$TMP/protege"
 ETAT="$TMP/etat.json"
 CONFIG="$TMP/midi.json"
 AUTH="$ETAT.digest"
@@ -44,7 +45,11 @@ arreter() {
     PID=""
   fi
 }
-nettoyer() { arreter; rm -rf "$TMP"; }
+nettoyer() {
+  arreter
+  chmod -R u+rwx "$TMP" 2>/dev/null || true
+  rm -rf "$TMP"
+}
 trap nettoyer EXIT
 trap 'nettoyer; exit 130' INT TERM
 
@@ -348,6 +353,32 @@ CODE=$(code_client GET /api/orgue)
 CODE=$(code_client GET /api/orgue --digest -u organiste:secret04)
 [ "$CODE" = 200 ] && ok "fichier Digest corrigé : Digest accepté (200)" \
   || echec "fichier Digest corrigé : code $CODE"
+
+# Dossier parent inaccessible (EACCES) : ce n'est pas « absent », donc 503
+# pour les sources non locales plutôt qu'une ouverture, accès local conservé.
+if [ "$(id -u)" -eq 0 ]; then
+  ignore "dossier parent inaccessible (EACCES) : sans objet en root"
+else
+  arreter
+  rm -rf "$PROTEGE"
+  mkdir -p "$PROTEGE"
+  chmod 000 "$PROTEGE"
+  demarrer_direct "$PROTEGE/digest" \
+    || { echec "démarrage avec dossier parent inaccessible"; exit 1; }
+  [ "$(code_client GET /api/orgue)" = 503 ] \
+    && ok "dossier parent inaccessible : non local 503" \
+    || echec "dossier parent inaccessible : non local code $(code_client GET /api/orgue)"
+  [ "$(curl -s -o /dev/null -w '%{http_code}' "$URL_LOCAL/api/orgue")" = 200 ] \
+    && ok "dossier parent inaccessible : local conservé (200)" \
+    || echec "dossier parent inaccessible : local code $(curl -s -o /dev/null -w '%{http_code}' "$URL_LOCAL/api/orgue")"
+  ETAT_AUTH=$(curl -s "$URL_LOCAL/api/authentification")
+  [ -n "$(printf '%s' "$ETAT_AUTH" | champ erreur)" ] \
+    && ok "dossier parent inaccessible : erreur publiée" \
+    || echec "dossier parent inaccessible : aucune erreur publiée ($ETAT_AUTH)"
+  arreter
+  chmod 700 "$PROTEGE"
+  rm -rf "$PROTEGE"
+fi
 
 arreter
 echo
