@@ -128,7 +128,8 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   `client.moon` / `style.moon` et `web/src/fenetre.moon` (la colonne est
   choisie par `modele.colonne_transposition` : Manuel III, sinon première
   division sans accouplement) ; valeur non nulle accentuée, bornes inactives,
-  cibles web ≥ 44 px. Côté natif, le signe moins est l'hyphen ASCII (la
+  cibles web ≥ 44 px. Un clic sur la valeur centrale (page web et fenêtre
+  native) remet la transposition à 0. Côté natif, le signe moins est l'hyphen ASCII (la
   police latin embarquée n'a pas U+2212). Tests réels :
   `web/scripts/test-transposition.sh`, e2e web et natif (dont croisé),
   `scripts/tests-unitaires.sh` pour l'en-tête C.

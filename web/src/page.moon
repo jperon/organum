@@ -39,10 +39,20 @@ transposition_html = (valeur) ->
   attrs_plus = {type: "button", class: "btn small transposition-plus", ["aria-label"]: "Transposition +1 demi-ton", "+"}
   attrs_moins.disabled = true if v <= -12
   attrs_plus.disabled = true if v >= 12
+  -- Un clic sur la valeur remet la transposition à 0 : le bouton garde la
+  -- classe transposition-valeur (les tests lisent son textContent) et
+  -- aria-live, avec un libellé qui annonce la remise à 0.
+  libelle_valeur = "Transposition #{texte} : remettre à 0"
+  attrs_valeur =
+    type: "button"
+    class: "btn small transposition-valeur"
+    ["aria-live"]: "polite"
+    ["aria-label"]: libelle_valeur
+    title: libelle_valeur
   h.div class: classes, id: "transposition", ["data-transposition"]: tostring(v),
     h.span class: "transposition-libelle", "Transposition",
     h.button attrs_moins,
-    h.span class: "transposition-valeur", ["aria-live"]: "polite", texte,
+    h.button attrs_valeur, texte,
     h.button attrs_plus
 
 division_html = (di, div, divisions, transposition = 0, colonne_transposition = nil) ->

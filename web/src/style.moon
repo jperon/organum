@@ -373,6 +373,21 @@ CSS = [[
     font-weight: 700;
     font-variant-numeric: tabular-nums;
   }
+  /* La valeur est un bouton (clic = retour à 0) qui garde l'apparence de
+     l'ancien texte : fond transparent, même graisse et chiffres tabulaires,
+     cible d'au moins 44 px, sans déborder sur les bornes voisines. */
+  .transposition .btn.transposition-valeur {
+    min-width: 2.6em;
+    min-height: 44px;
+    padding: 0 6px;
+    background: transparent;
+  }
+  .transposition:not(.active) .btn.transposition-valeur {
+    border-color: transparent;
+  }
+  .transposition .btn.transposition-valeur:hover {
+    border-color: var(--accent);
+  }
   .transposition.active {
     border-color: var(--accent);
     background: rgba(99, 210, 255, 0.12);

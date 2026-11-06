@@ -623,7 +623,12 @@ JS = [[
       transpositionCourante = v;
       var texte = v > 0 ? '+' + v : v < 0 ? '\u2212' + Math.abs(v) : '0';
       var champ = transpositionBloc.querySelector('.transposition-valeur');
-      if (champ) { champ.textContent = texte; }
+      if (champ) {
+        champ.textContent = texte;
+        var libelleValeur = 'Transposition ' + texte + ' : remettre à 0';
+        champ.setAttribute('aria-label', libelleValeur);
+        champ.setAttribute('title', libelleValeur);
+      }
       transpositionBloc.setAttribute('data-transposition', String(v));
       transpositionBloc.classList.toggle('active', v !== 0);
       var moins = transpositionBloc.querySelector('.transposition-moins');
@@ -655,6 +660,12 @@ JS = [[
       if (transpositionPlus) {
         transpositionPlus.addEventListener('click', function () {
           if (transpositionCourante < 12) { reglerTransposition(transpositionCourante + 1); }
+        });
+      }
+      var transpositionValeur = transpositionBloc.querySelector('.transposition-valeur');
+      if (transpositionValeur) {
+        transpositionValeur.addEventListener('click', function () {
+          if (transpositionCourante !== 0) { reglerTransposition(0); }
         });
       }
     }

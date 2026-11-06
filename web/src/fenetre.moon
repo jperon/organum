@@ -1054,7 +1054,11 @@ MAX_ASSOCIATIONS = 16
               v -= 1
               accent = v != 0
             texte_valeur = modele.texte_transposition(v)\gsub "\u{2212}", "-"
-            ui\etat texte_valeur, accent, false
+            clique_valeur = ui\etat texte_valeur, accent, false
+            if clique_valeur != accent and v != 0
+              organum.transposition 0
+              v = 0
+              accent = false
             clique_plus = ui\etat("+", accent, false) != accent
             if clique_plus and v < 12
               organum.transposition v + 1
