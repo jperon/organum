@@ -146,6 +146,11 @@ struct etat_partage {
   // sans que le fil de calcul puisse la voir.
   atomic_uint demandes_temperament, traitees_temperament;
   atomic_int temperament_demande;  // -1 : aucune
+  // Cible publiée par les interfaces : la dernière valeur demandée, -1 hors
+  // application. Distincte de temperament_demande (effacée dès la prise par
+  // le fil de calcul) : elle reste publiée jusqu'à ce que ce fil ait couvert
+  // la dernière demande, succès ou échec.
+  atomic_int temperament_cible;
   atomic_int verrou_temperament;
 };
 
@@ -661,6 +666,12 @@ static void *boucle_temperament(void *arg) {
     verrou_prendre(&g_partage->verrou_temperament);
     atomic_store_explicit(&g_partage->traitees_temperament, demandees,
                           memory_order_release);
+    // La cible reste publiée tant qu'une demande plus récente n'est pas
+    // couverte ; quand ce calcul couvre la dernière, l'application est finie.
+    if (atomic_load_explicit(&g_partage->demandes_temperament,
+                             memory_order_acquire) == demandees)
+      atomic_store_explicit(&g_partage->temperament_cible, -1,
+                            memory_order_release);
     verrou_rendre(&g_partage->verrou_temperament);
     atomic_fetch_add_explicit(&g_etat->seq, 1, memory_order_release);
   }
@@ -1238,6 +1249,7 @@ static int l_demarrer(lua_State *L) {
   atomic_init(&g_partage->demandes_temperament, 0);
   atomic_init(&g_partage->traitees_temperament, 0);
   atomic_init(&g_partage->temperament_demande, -1);
+  atomic_init(&g_partage->temperament_cible, -1);
   mesure_init();
   if (pipe(g_tube) < 0) {
     liberer_demarrage();
@@ -1430,6 +1442,10 @@ static int l_temperament(lua_State *L) {
   verrou_prendre(&g_partage->verrou_temperament);
   atomic_store_explicit(&g_partage->temperament_demande, type,
                         memory_order_release);
+  // Publier la cible avec la même protection que le compteur : une interface
+  // voit la demande et la cible ensemble, jamais l'une sans l'autre.
+  atomic_store_explicit(&g_partage->temperament_cible, type,
+                        memory_order_release);
   atomic_fetch_add_explicit(&g_partage->demandes_temperament, 1,
                             memory_order_acq_rel);
   verrou_rendre(&g_partage->verrou_temperament);
@@ -1533,6 +1549,8 @@ static int l_etat(lua_State *L) {
       atomic_load_explicit(&g_partage->demandes_temperament, memory_order_acquire);
   unsigned traitees_temperament =
       atomic_load_explicit(&g_partage->traitees_temperament, memory_order_acquire);
+  int temperament_cible =
+      atomic_load_explicit(&g_partage->temperament_cible, memory_order_acquire);
 
   lua_createtable(L, 0, 7);
   lua_pushinteger(L, seq), lua_setfield(L, -2, "seq");
@@ -1571,6 +1589,10 @@ static int l_etat(lua_State *L) {
   lua_setfield(L, -2, "temperament");
   lua_pushstring(L, copie.temperament_erreur);
   lua_setfield(L, -2, "temperament_erreur");
+  lua_pushinteger(L, temperament_cible);
+  lua_setfield(L, -2, "temperament_cible");
+  lua_pushboolean(L, demandes_audio != traitees_audio);
+  lua_setfield(L, -2, "application_audio");
   lua_pushboolean(L, demandes_audio != traitees_audio ||
                          demandes_temperament != traitees_temperament);
   lua_setfield(L, -2, "application");
