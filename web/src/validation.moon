@@ -99,8 +99,12 @@ impositions = (env, defaut) ->
 -- Champs acceptés par POST /api/orgue (une seule action par requête).
 ACTIONS_ORGUE = {
   stop: true, cancel: true, step: true, reverb: true, panic: true,
-  gain: true, link: true, qualite: true, volume: true, temperament: true
+  gain: true, link: true, qualite: true, volume: true, temperament: true,
+  transposition: true
 }
+
+-- Bornes du transpositeur global, en demi-tons (voir cosmo/transposition.h).
+TRANSPOSITION_MIN, TRANSPOSITION_MAX = -12, 12
 
 division_valide = (d, divisions) ->
   is_integer(d) and d >= 0 and d < #divisions
@@ -152,6 +156,10 @@ valider_orgue = (data, divisions, nb_etapes, max_temperament) ->
            data.temperament <= max_temperament
       return nil, "tempérament doit être un entier entre 0 et #{max_temperament}"
     "temperament"
+  elseif data.transposition != nil
+    unless entier_borne data.transposition, TRANSPOSITION_MIN, TRANSPOSITION_MAX
+      return nil, "transposition doit être un entier entre -12 et 12"
+    "transposition"
   elseif data.volume != nil
     unless is_finite_number(data.volume) and data.volume >= 0 and data.volume <= 1
       return nil, "volume hors limites"
@@ -209,6 +217,7 @@ valider_connexion_midi = (data) ->
 
 {
   :TAUX_VALIDES, :PERIODES_VALIDES, :DEMARRAGE_DEFAUT, :ACTIONS_ORGUE
+  :TRANSPOSITION_MIN, :TRANSPOSITION_MAX
   :entier_borne, :peripherique_valide, :is_finite_number, :is_integer
   :temperament_depuis_etat
   :qualite_defauts, :qualite_fichier_normalisee, :impositions

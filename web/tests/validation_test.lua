@@ -189,6 +189,17 @@ aide.egal(orgue({temperament = 2.5}), nil, "orgue : tempérament flottant")
 aide.egal(orgue({temperament = "1"}), nil, "orgue : tempérament chaîne")
 aide.egal(orgue({temperament = true}), nil, "orgue : tempérament booléen")
 
+aide.egal(orgue({transposition = -12}), "transposition", "orgue : transposition -12")
+aide.egal(orgue({transposition = 0}), "transposition", "orgue : transposition 0")
+aide.egal(orgue({transposition = 12}), "transposition", "orgue : transposition +12")
+aide.egal(orgue({transposition = -13}), nil, "orgue : transposition -13 refusée")
+aide.egal(orgue({transposition = 13}), nil, "orgue : transposition +13 refusée")
+aide.egal(orgue({transposition = 1.5}), nil, "orgue : transposition flottante")
+aide.egal(orgue({transposition = "3"}), nil, "orgue : transposition chaîne")
+aide.egal(orgue({transposition = true}), nil, "orgue : transposition booléenne")
+aide.egal(v.TRANSPOSITION_MIN, -12, "constantes : transposition min")
+aide.egal(v.TRANSPOSITION_MAX, 12, "constantes : transposition max")
+
 aide.egal(orgue({volume = 0}), "volume", "orgue : volume 0")
 aide.egal(orgue({volume = 1}), "volume", "orgue : volume 1")
 aide.egal(orgue({volume = 0.5}), "volume", "orgue : volume 0,5")
@@ -260,7 +271,8 @@ aide.egal(v.PERIODES_VALIDES[2048], true, "constantes : période 2048")
 aide.egal(v.PERIODES_VALIDES[100], nil, "constantes : période 100 absente")
 aide.egal(v.DEMARRAGE_DEFAUT.periode, 512, "constantes : période par défaut")
 for _, cle in ipairs({"stop", "cancel", "step", "reverb", "panic", "gain",
-                      "link", "qualite", "volume", "temperament"}) do
+                      "link", "qualite", "volume", "temperament",
+                      "transposition"}) do
   aide.egal(v.ACTIONS_ORGUE[cle], true, "constantes : action " .. cle)
 end
 

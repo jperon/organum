@@ -1098,6 +1098,7 @@ etat_orgue = ->
     volume: e.volume, reverb: e.reverb, xruns: e.xruns, midi: e.midi, temps_reel: e.temps_reel
     taux: e.taux, periode: e.periode, nb_periodes: e.nb_periodes, erreurs_ecriture: e.erreurs_ecriture
     temperament: e.temperament
+    transposition: e.transposition or 0
     qualite: qualite_etat!
     divisions: for d in *e.divisions
       {
@@ -1299,6 +1300,8 @@ handle_orgue = ->
       return
     when "temperament"
       organum.temperament data.temperament
+    when "transposition"
+      organum.transposition data.transposition
     when "volume"
       organum.volume data.volume
     when "panic"
