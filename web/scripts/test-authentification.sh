@@ -30,7 +30,7 @@ fi
 TMP="$(mktemp -d)" || exit 2
 ETAT="$TMP/etat.json"
 CONFIG="$TMP/midi.json"
-AUTH="$ETAT.authentification.json"
+AUTH="$ETAT.digest"
 JOURNAL="$TMP/organum.log"
 PID=""
 ECHECS=0
@@ -114,6 +114,41 @@ lancer() {
   echo "ÉCHEC : organum ne répond pas sur $URL_LOCAL" >&2
   sed 's/^/        /' "$JOURNAL" >&2
   return 1
+}
+
+# démarre sans effacer le fichier Digest ; ORGANUM_DIGEST vaut la valeur
+# donnée (__ABSENT__ : variable retirée).
+demarrer_direct() {
+  arreter
+  if [ "$1" = "__ABSENT__" ]; then
+    unset ORGANUM_DIGEST
+  else
+    ORGANUM_DIGEST="$1"
+    export ORGANUM_DIGEST
+  fi
+  ORGANUM_PERIPHERIQUE=null ORGANUM_QUALITE=3 \
+  ORGANUM_ETAT="$ETAT" ORGANUM_CONFIG_MIDI="$CONFIG" ORGANUM_FENETRE=non \
+    "$BIN" -p "$PORT" >"$JOURNAL" 2>&1 &
+  PID=$!
+  i=0
+  while [ "$i" -lt 400 ]; do
+    if curl -s --max-time 1 -o /dev/null "$URL_LOCAL/api/orgue"; then
+      unset ORGANUM_DIGEST
+      return 0
+    fi
+    if ! kill -0 "$PID" 2>/dev/null; then
+      unset ORGANUM_DIGEST
+      return 1
+    fi
+    sleep 0.1
+    i=$((i + 1))
+  done
+  unset ORGANUM_DIGEST
+  return 1
+}
+
+champ() {
+  python3 -c 'import json,sys; print(json.load(sys.stdin).get(sys.argv[1],""))' "$1"
 }
 
 # client <méthode> <chemin> [options curl…] : requête depuis l'adresse non
@@ -202,8 +237,9 @@ if [ -f "$AUTH" ]; then
     ok "mot de passe absent du fichier"
   fi
   ATTENDU=$(python3 -c 'import hashlib;print(hashlib.sha256(b"organiste:organum:secret01").hexdigest())')
-  grep -qF "$ATTENDU" "$AUTH" && ok "HA1 attendu dans le fichier" \
-    || echec "HA1 absent du fichier ($ATTENDU)"
+  grep -qxF "organiste:organum:$ATTENDU" "$AUTH" \
+    && ok "HA1 attendu, ligne utilisateur:organum:HA1" \
+    || echec "HA1 absent ou format inattendu ($ATTENDU)"
   ETAT_AUTH=$(client GET /api/authentification --digest -u organiste:secret01)
   if printf '%s' "$ETAT_AUTH" | grep -qi 'ha1\|secret01'; then
     echec "l'API expose un haché ou le mot de passe : $ETAT_AUTH"
@@ -246,40 +282,71 @@ else
   echec "nonce introuvable dans le défi"
 fi
 
-# 8. ORGANUM_MOT_DE_PASSE prioritaire, non recopié sur disque, verrouille.
-forcer_env() {
-  arreter
-  rm -f "$AUTH"
-  ORGANUM_MOT_DE_PASSE=secret03 \
-  ORGANUM_PERIPHERIQUE=null ORGANUM_QUALITE=3 \
-  ORGANUM_ETAT="$ETAT" ORGANUM_CONFIG_MIDI="$CONFIG" ORGANUM_FENETRE=non \
-  "$BIN" -p "$PORT" >"$JOURNAL" 2>&1 &
-  PID=$!
-  i=0
-  while [ "$i" -lt 400 ]; do
-    curl -s --max-time 1 -o /dev/null "$URL_LOCAL/api/orgue" && return 0
-    kill -0 "$PID" 2>/dev/null || return 1
-    sleep 0.1
-    i=$((i + 1))
-  done
-  return 1
-}
-if forcer_env; then
-  CODE=$(code_client GET /api/orgue --digest -u organiste:secret03)
-  [ "$CODE" = 200 ] && ok "ORGANUM_MOT_DE_PASSE : authentification active" \
-    || echec "ORGANUM_MOT_DE_PASSE : code $CODE"
-  CODE=$(code_client POST /api/authentification --digest -u organiste:secret03 \
-    -H 'Content-Type: application/json' -d '{"mot_de_passe":"autre"}')
-  [ "$CODE" = 409 ] && ok "réglage verrouillé par l'environnement (409)" \
-    || echec "réglage sous environnement : code $CODE"
-  [ ! -f "$AUTH" ] && ok "ORGANUM_MOT_DE_PASSE non recopié sur disque" \
-    || echec "fichier écrit malgré l'environnement"
-  ETAT_AUTH=$(client GET /api/authentification --digest -u organiste:secret03)
-  printf '%s' "$ETAT_AUTH" | grep -qF '"impose":true' \
-    && ok "état : impose=true" || echec "état sous environnement : $ETAT_AUTH"
+# 8. Fichier Digest écrit à la main avec la commande sha256sum documentée.
+arreter
+rm -f "$AUTH"
+HA1_MANUELLE=$(printf 'organiste:organum:%s' 'secret03' | sha256sum | cut -d' ' -f1)
+printf 'organiste:organum:%s\n' "$HA1_MANUELLE" >"$AUTH"
+chmod 600 "$AUTH"
+demarrer_direct __ABSENT__ || { echec "démarrage avec un fichier Digest écrit à la main"; exit 1; }
+CODE=$(code_client GET /api/orgue --digest -u organiste:secret03)
+[ "$CODE" = 200 ] && ok "fichier écrit à la main accepté par curl --digest" \
+  || echec "fichier écrit à la main : code $CODE"
+if grep -qxF "organiste:organum:$HA1_MANUELLE" "$AUTH"; then
+  ok "format texte utilisateur:organum:HA1 conservé"
 else
-  echec "démarrage avec ORGANUM_MOT_DE_PASSE"
+  echec "format du fichier inattendu : $(cat "$AUTH")"
 fi
+
+# 9. Fichier rendu invalide à chaud : 503 pour les sources non locales,
+# accès local conservé, erreur publiée.
+printf 'ligne invalide\n' >"$AUTH"
+CODE=$(code_client GET /api/orgue --digest -u organiste:secret03)
+[ "$CODE" = 503 ] && ok "fichier Digest invalide à chaud : non local 503" \
+  || echec "fichier Digest invalide à chaud : code $CODE"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$URL_LOCAL/api/orgue")
+[ "$CODE" = 200 ] && ok "fichier Digest invalide à chaud : local conservé (200)" \
+  || echec "fichier Digest invalide à chaud : local code $CODE"
+ETAT_AUTH=$(curl -s "$URL_LOCAL/api/authentification")
+printf '%s' "$ETAT_AUTH" | grep -qF '"erreur"'
+[ $? -eq 0 ] && [ -n "$(printf '%s' "$ETAT_AUTH" | champ erreur)" ] \
+  && ok "fichier Digest invalide à chaud : erreur publiée" \
+  || echec "fichier Digest invalide à chaud : aucune erreur publiée ($ETAT_AUTH)"
+
+# 10. ORGANUM_DIGEST vide : repli sur le chemin par défaut (le fichier valide
+# reste honoré).
+printf 'organiste:organum:%s\n' "$HA1_MANUELLE" >"$AUTH"
+demarrer_direct "" || { echec "démarrage avec ORGANUM_DIGEST vide"; exit 1; }
+CODE=$(code_client GET /api/orgue --digest -u organiste:secret03)
+[ "$CODE" = 200 ] && ok "ORGANUM_DIGEST vide : chemin par défaut utilisé" \
+  || echec "ORGANUM_DIGEST vide : code $CODE"
+
+# 11. Fichier invalide au démarrage : refus explicite de démarrer.
+arreter
+printf 'organiste:autre:%s\n' "$HA1_MANUELLE" >"$AUTH"
+ORGANUM_PERIPHERIQUE=null ORGANUM_QUALITE=3 \
+ORGANUM_ETAT="$ETAT" ORGANUM_CONFIG_MIDI="$CONFIG" ORGANUM_FENETRE=non \
+  "$BIN" -p "$PORT" >"$JOURNAL" 2>&1 &
+PID=$!
+i=0
+MORT=0
+while [ "$i" -lt 100 ]; do
+  if ! kill -0 "$PID" 2>/dev/null; then MORT=1; break; fi
+  sleep 0.1
+  i=$((i + 1))
+done
+if [ "$MORT" = 1 ]; then
+  wait "$PID" 2>/dev/null
+  CODE=$?
+  [ "$CODE" -ne 0 ] && ok "fichier Digest invalide au démarrage : arrêt (code $CODE)" \
+    || echec "fichier Digest invalide au démarrage : code 0"
+  grep -qF 'invalide' "$JOURNAL" && grep -qF "$AUTH" "$JOURNAL" \
+    && ok "fichier Digest invalide au démarrage : message explicite" \
+    || echec "fichier Digest invalide au démarrage : message absent"
+else
+  echec "fichier Digest invalide au démarrage : le serveur a démarré"
+fi
+PID=""
 
 arreter
 echo

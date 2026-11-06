@@ -31,8 +31,8 @@ fi
 TMP="$(mktemp -d)" || exit 2
 ETAT="$TMP/etat.json"
 CONFIG="$TMP/midi.json"
-AUTH="$ETAT.authentification.json"
-RESEAUX="$ETAT.reseaux.json"
+AUTH="$ETAT.digest"
+RESEAUX="$ETAT.reseaux"
 JOURNAL="$TMP/organum.log"
 PID=""
 ECHECS=0
@@ -100,20 +100,14 @@ champ() {
   python3 -c 'import json,sys; print(json.load(sys.stdin).get(sys.argv[1],""))' "$1"
 }
 
-# lancer [liste ORGANUM_RESEAUX] : démarre l'orgue, sortie muette.
+# lancer [garder] : démarre l'orgue, sortie muette. Sans « garder », efface
+# les fichiers Digest et réseaux.
 lancer() {
   arreter
-  rm -f "$RESEAUX" "$AUTH"
-  if [ -n "${1:-}" ]; then
-    ORGANUM_RESEAUX="$1" \
-    ORGANUM_PERIPHERIQUE=null ORGANUM_QUALITE=3 \
-    ORGANUM_ETAT="$ETAT" ORGANUM_CONFIG_MIDI="$CONFIG" ORGANUM_FENETRE=non \
-    "$BIN" -p "$PORT" >"$JOURNAL" 2>&1 &
-  else
-    ORGANUM_PERIPHERIQUE=null ORGANUM_QUALITE=3 \
-    ORGANUM_ETAT="$ETAT" ORGANUM_CONFIG_MIDI="$CONFIG" ORGANUM_FENETRE=non \
-    "$BIN" -p "$PORT" >"$JOURNAL" 2>&1 &
-  fi
+  [ "${1:-}" = "garder" ] || rm -f "$RESEAUX" "$AUTH"
+  ORGANUM_PERIPHERIQUE=null ORGANUM_QUALITE=3 \
+  ORGANUM_ETAT="$ETAT" ORGANUM_CONFIG_MIDI="$CONFIG" ORGANUM_FENETRE=non \
+  "$BIN" -p "$PORT" >"$JOURNAL" 2>&1 &
   PID=$!
   i=0
   while [ "$i" -lt 400 ]; do
@@ -134,6 +128,37 @@ lancer() {
   done
   echo "ÉCHEC : organum ne répond pas sur $URL_LOCAL" >&2
   sed 's/^/        /' "$JOURNAL" >&2
+  return 1
+}
+
+# démarre sans effacer les fichiers ; ORGANUM_RESEAUX_FICHIER vaut la valeur
+# donnée (__ABSENT__ : variable retirée).
+demarrer_direct() {
+  arreter
+  if [ "$1" = "__ABSENT__" ]; then
+    unset ORGANUM_RESEAUX_FICHIER
+  else
+    ORGANUM_RESEAUX_FICHIER="$1"
+    export ORGANUM_RESEAUX_FICHIER
+  fi
+  ORGANUM_PERIPHERIQUE=null ORGANUM_QUALITE=3 \
+  ORGANUM_ETAT="$ETAT" ORGANUM_CONFIG_MIDI="$CONFIG" ORGANUM_FENETRE=non \
+    "$BIN" -p "$PORT" >"$JOURNAL" 2>&1 &
+  PID=$!
+  i=0
+  while [ "$i" -lt 400 ]; do
+    if curl -s --max-time 1 -o /dev/null "$URL_LOCAL/api/orgue"; then
+      unset ORGANUM_RESEAUX_FICHIER
+      return 0
+    fi
+    if ! kill -0 "$PID" 2>/dev/null; then
+      unset ORGANUM_RESEAUX_FICHIER
+      return 1
+    fi
+    sleep 0.1
+    i=$((i + 1))
+  done
+  unset ORGANUM_RESEAUX_FICHIER
   return 1
 }
 
@@ -310,33 +335,58 @@ for mauvais in '10.0.0.0/33' '10.35.1.2/16' 'nimportequoi' '2001:db8::/129'; do
     || echec "liste invalide acceptée ($mauvais, code $CODE)"
 done
 
-# Persistance : fichier voisin, 0600, contenu canonique.
+# Persistance : fichier texte voisin, 0600, une entrée par ligne.
 poster_reseaux_local '{"reseaux":"10.35.0.0/16"}' >/dev/null
 if [ -f "$RESEAUX" ]; then
   MODE=$(stat -c '%a' "$RESEAUX")
   [ "$MODE" = 600 ] && ok "fichier de réseaux en 0600" || echec "droits du fichier : $MODE"
-  if python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d.get("reseaux")==["10.35.0.0/16"] else 1)' "$RESEAUX"; then
-    ok "fichier de réseaux : liste enregistrée"
+  if grep -qxF "10.35.0.0/16" "$RESEAUX" && [ "$(grep -cv '^[[:space:]]*$' "$RESEAUX")" = 1 ]; then
+    ok "fichier de réseaux : liste enregistrée en texte"
   else
-    echec "liste absente ou inattendue dans le fichier"
+    echec "liste absente ou format inattendu dans le fichier : $(cat "$RESEAUX")"
   fi
 else
   echec "fichier de réseaux absent"
 fi
 
-# Fichier corrompu : aucun filtrage, mais erreur visible.
-printf '{' >"$RESEAUX"
-[ "$(code_autre GET /api/orgue)" = 200 ] \
-  && ok "fichier illisible : aucun filtrage (200)" \
-  || echec "fichier illisible : code $(code_autre GET /api/orgue)"
+# Fichier rendu invalide à chaud : accès non local refusé (503), local
+# conservé, erreur publiée.
+printf 'pas-un-reseau\n' >"$RESEAUX"
+[ "$(code_autre GET /api/orgue)" = 503 ] \
+  && ok "fichier invalide à chaud : non local 503" \
+  || echec "fichier invalide à chaud : code $(code_autre GET /api/orgue)"
+[ "$(code_local GET /api/orgue)" = 200 ] \
+  && ok "fichier invalide à chaud : local conservé (200)" \
+  || echec "fichier invalide à chaud : local code $(code_local GET /api/orgue)"
 ERREUR=$(client_local GET /api/reseaux | champ erreur)
-[ -n "$ERREUR" ] && ok "fichier illisible : erreur publiée ($ERREUR)" \
-  || echec "fichier illisible : aucune erreur publiée"
+[ -n "$ERREUR" ] && ok "fichier invalide à chaud : erreur publiée ($ERREUR)" \
+  || echec "fichier invalide à chaud : aucune erreur publiée"
 
-# ORGANUM_RESEAUX invalide : arrêt explicite au démarrage.
+# Fichier écrit à la main, commentaires et lignes vides : accepté tel quel.
 arreter
-rm -f "$RESEAUX"
-ORGANUM_RESEAUX='pas-un-reseau' \
+printf '# réseaux de la maison\n\n%s\n' "$RESEAU_NL" >"$RESEAUX"
+chmod 600 "$RESEAUX"
+lancer garder || exit 1
+[ "$(code_nl GET /api/orgue)" = 200 ] \
+  && ok "fichier écrit à la main : source listée acceptée" \
+  || echec "fichier écrit à la main : source listée code $(code_nl GET /api/orgue)"
+[ "$(code_autre GET /api/orgue)" = 403 ] \
+  && ok "fichier écrit à la main : source hors liste refusée" \
+  || echec "fichier écrit à la main : hors liste code $(code_autre GET /api/orgue)"
+grep -qF '# réseaux de la maison' "$RESEAUX" \
+  && ok "fichier écrit à la main : commentaires conservés au démarrage" \
+  || echec "fichier écrit à la main : commentaires perdus"
+
+# ORGANUM_RESEAUX_FICHIER vide : repli sur le chemin par défaut, fichier
+# toujours honoré.
+demarrer_direct "" || { echec "démarrage avec ORGANUM_RESEAUX_FICHIER vide"; exit 1; }
+[ "$(code_nl GET /api/orgue)" = 200 ] \
+  && ok "ORGANUM_RESEAUX_FICHIER vide : chemin par défaut utilisé" \
+  || echec "ORGANUM_RESEAUX_FICHIER vide : source listée code $(code_nl GET /api/orgue)"
+
+# Fichier invalide au démarrage : arrêt explicite.
+arreter
+printf 'pas-un-reseau\n' >"$RESEAUX"
 ORGANUM_PERIPHERIQUE=null ORGANUM_QUALITE=3 \
 ORGANUM_ETAT="$ETAT" ORGANUM_CONFIG_MIDI="$CONFIG" ORGANUM_FENETRE=non \
   "$BIN" -p "$PORT" >"$JOURNAL" 2>&1 &
@@ -354,32 +404,15 @@ done
 if [ "$MORT" = 1 ]; then
   wait "$PID" 2>/dev/null
   CODE=$?
-  [ "$CODE" -ne 0 ] && ok "ORGANUM_RESEAUX invalide : arrêt (code $CODE)" \
-    || echec "ORGANUM_RESEAUX invalide : arrêt avec code 0"
-  grep -qF 'ORGANUM_RESEAUX invalide' "$JOURNAL" \
-    && ok "ORGANUM_RESEAUX invalide : message explicite" \
-    || echec "ORGANUM_RESEAUX invalide : message absent"
+  [ "$CODE" -ne 0 ] && ok "fichier réseaux invalide au démarrage : arrêt (code $CODE)" \
+    || echec "fichier réseaux invalide au démarrage : code 0"
+  grep -qF "$RESEAUX" "$JOURNAL" && grep -qF 'invalide' "$JOURNAL" \
+    && ok "fichier réseaux invalide au démarrage : message explicite" \
+    || echec "fichier réseaux invalide au démarrage : message absent"
 else
-  echec "ORGANUM_RESEAUX invalide : le serveur a démarré"
+  echec "fichier réseaux invalide au démarrage : le serveur a démarré"
 fi
 PID=""
-
-# ORGANUM_RESEAUX prioritaire, non recopié, verrouille le réglage.
-lancer "$RESEAU_NL" || exit 1
-ETAT_RESEAUX=$(client_local GET /api/reseaux)
-printf '%s' "$ETAT_RESEAUX" | grep -qF '"impose":true' \
-  && ok "ORGANUM_RESEAUX : impose=true" || echec "environnement non prioritaire : $ETAT_RESEAUX"
-[ "$(code_nl GET /api/orgue)" = 200 ] \
-  && ok "ORGANUM_RESEAUX : source listée acceptée" \
-  || echec "ORGANUM_RESEAUX : source listée code $(code_nl GET /api/orgue)"
-[ "$(code_autre GET /api/orgue)" = 403 ] \
-  && ok "ORGANUM_RESEAUX : source hors liste refusée" \
-  || echec "ORGANUM_RESEAUX : hors liste code $(code_autre GET /api/orgue)"
-CODE=$(code_local POST /api/reseaux -H 'Content-Type: application/json' -d '{"retirer":true}')
-[ "$CODE" = 409 ] && ok "réglage verrouillé par l'environnement (409)" \
-  || echec "réglage sous environnement : code $CODE"
-[ ! -f "$RESEAUX" ] && ok "ORGANUM_RESEAUX non recopié sur disque" \
-  || echec "fichier écrit malgré l'environnement"
 
 arreter
 echo
