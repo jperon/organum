@@ -680,10 +680,10 @@ MAX_ASSOCIATIONS = 16
       calib = type(q.calibration) == "table" and q.calibration or nil
       -- Rangées : en-tête, niveau, deux cases, spatialisation, polyphonie,
       -- période, taux, limiteur, tempérament (2 rangées), périphérique,
-      -- authentification (1 rangée), réseaux (1 rangée), puis (tête),
-      -- (calibration) et message. Le nombre de cases de la ligne « Niveau »
+      -- périphérique, authentification (1 rangée), réseaux (1 rangée), puis
+      -- (tête), (calibration) et message. Le nombre de cases de la ligne « Niveau »
       -- vaut 6 quand le mode Auto existe (bouton en plus), 5 sinon.
-      rows = 10 + (a_reverb and 1 or 0) + (a_tete and 1 or 0) + (calib and 1 or 0) + 1 + 1
+      rows = 10 + (a_reverb and 1 or 0) + (a_tete and 1 or 0) + (calib and 1 or 0) + 1 + 1 + 1 + 1
       colonnes = (type(q.auto) == "boolean") and 6 or 5
       p = disposer_qualite rows, l, h, colonnes
       if p.police != police

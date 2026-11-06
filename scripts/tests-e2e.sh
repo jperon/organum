@@ -403,7 +403,7 @@ q = e.get("qualite", {})
 a_reverb = 1 if isinstance(e.get("reverb"), (int, float)) else 0
 a_tete = 1 if (isinstance(q.get("tete_reverb"), bool) and isinstance(q.get("tete_reverb_prochain"), bool)) else 0
 a_calib = 1 if isinstance(q.get("calibration"), dict) else 0
-rows = 10 + a_reverb + a_tete + a_calib + 1 + 1
+rows = 10 + a_reverb + a_tete + a_calib + 1 + 1 + 1 + 1
 cols = 6 if isinstance(q.get("auto"), bool) else 5
 print(rows, cols)
 PY
