@@ -9,9 +9,15 @@
 //
 // Sortie : une ligne OK / ÉCHEC par contrôle ; code non nul si échec.
 
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+
 const CDP_PORT = process.env.CDP_PORT;
 const BASE = process.env.BASE_URL;
 const MODE = process.env.MODE || 'full';
+const WID = process.env.WID;
+const CAPTURES = process.env.CAPTURES;
 
 let echecs = 0;
 let total = 0;
@@ -417,6 +423,15 @@ async function testTemperamentRafale() {
     `document.querySelector('#qualite-temperament [data-valeur="${b}"]').textContent`);
 
   await clicGroupe('qualite-temperament', String(a));
+  const cibleA = await attendre(
+    async () => {
+      const e = await api('/api/orgue');
+      return e.qualite.temperament_cible === a ? e : null;
+    },
+    `web /audio : la cible ${a} est publiée dans l’état partagé`,
+    5000
+  );
+  verifie(!!cibleA, `web /audio : état partagé porte la cible ${a} pendant le calcul`);
   const justeA = await etatTemperamentDom();
   verifie(
     justeA && justeA.enCours.includes(a),
@@ -446,7 +461,7 @@ async function testTemperamentRafale() {
   const fin = await attendre(
     async () => {
       const e = await api('/api/orgue');
-      return (e.temperament === b && e.qualite.application === false) ? e : null;
+      return (e.temperament === b && e.qualite.temperament_cible === -1) ? e : null;
     },
     `web /audio : la dernière demande (${b}) aboutit après la rafale`,
     30000
@@ -475,6 +490,77 @@ async function testTemperamentRafale() {
     avant.seq === apres.seq && apres.temperament === b &&
       domReclic && domReclic.enCours.length === 0,
     'web /audio : recliquer le tempérament déjà actif n’envoie aucune demande'
+  );
+}
+
+async function testTemperamentRechargement() {
+  const depart = (await api('/api/orgue')).temperament;
+  const cible = (depart + 5) % 11;
+  await clicGroupe('qualite-temperament', String(cible));
+  const publiee = await attendre(
+    async () => {
+      const e = await api('/api/orgue');
+      return e.qualite.temperament_cible === cible ? e : null;
+    },
+    `web /audio : cible ${cible} publiée côté serveur avant rechargement`,
+    5000
+  );
+  if (!publiee) return;
+  await navigate('/audio');
+  const dom = await etatTemperamentDom();
+  verifie(
+    dom && dom.enCours.includes(cible),
+    `web /audio : rechargement en plein calcul conserve la cible ${cible} (« ${dom && dom.enCours} »)`
+  );
+  verifie(
+    dom && dom.statut.includes('Application'),
+    'web /audio : rechargement en plein calcul affiche « Application… » dans la rangée'
+  );
+  const fin = await attendre(
+    async () => {
+      const e = await api('/api/orgue');
+      return (e.temperament === cible && e.qualite.temperament_cible === -1) ? e : null;
+    },
+    `web /audio : la cible ${cible} aboutit après rechargement`,
+    30000
+  );
+  if (fin) {
+    const final = await attendre(
+      async () => {
+        const d = await etatTemperamentDom();
+        return (d && d.enCours.length === 0 && d.statut === '' && d.actifs.includes(cible)) ? d : null;
+      },
+      `web /audio : état final après rechargement, tempérament ${cible} actif`,
+      5000
+    );
+    verifie(!!final, `web /audio : la cible ${cible} devient active après rechargement`);
+  }
+}
+
+async function testTemperamentPost() {
+  const depart = (await api('/api/orgue')).temperament;
+  const cible = (depart + 2) % 11;
+  const reponse = await poster('/api/orgue', { temperament: cible });
+  verifie(reponse.code === 200, `web /audio : POST tempérament ${cible} accepté`);
+  const dom = await attendre(
+    async () => {
+      const d = await etatTemperamentDom();
+      return d && d.enCours.includes(cible) ? d : null;
+    },
+    `web /audio : changement par POST vu dans la rangée Tempérament (${cible})`,
+    5000
+  );
+  if (dom) {
+    verifie(dom.statut.includes('Application'),
+      'web /audio : le POST affiche aussi « Application… » dans la rangée');
+  }
+  await attendre(
+    async () => {
+      const e = await api('/api/orgue');
+      return (e.temperament === cible && e.qualite.temperament_cible === -1) ? e : null;
+    },
+    `web /audio : tempérament ${cible} appliqué après POST`,
+    30000
   );
 }
 
@@ -590,17 +676,21 @@ async function testAudio() {
     (e) => e.qualite.tete_reverb_prochain !== teteAvant
   );
 
-  let applicationVue = false;
+  let cibleVueRangée = false;
+  let applicationEnBas = false;
   for (let temperament = 0; temperament <= 10; temperament += 1) {
     const avant = (await api('/api/orgue')).temperament;
     await clicGroupe('qualite-temperament', String(temperament));
     const debut = Date.now();
     let applique = false;
     while (Date.now() - debut < 12000) {
+      const dom = await etatTemperamentDom();
+      if (dom && dom.statut.includes('Application')) cibleVueRangée = true;
       const texte = await evaluer('document.getElementById("qualite-message").textContent');
-      if (texte.includes('Application')) applicationVue = true;
+      if (texte.includes('Application')) applicationEnBas = true;
       const etat = await api('/api/orgue');
-      if (etat.temperament === temperament && etat.qualite.application === false) {
+      if (etat.temperament === temperament &&
+          etat.qualite.temperament_cible === -1) {
         applique = true;
         break;
       }
@@ -608,9 +698,13 @@ async function testAudio() {
     }
     verifie(applique, `web /audio : tempérament ${temperament} appliqué par clic (avant ${avant})`);
   }
-  verifie(applicationVue, 'web /audio : « Application… » apparaît pendant un changement de tempérament');
+  verifie(cibleVueRangée, 'web /audio : la cible en cours s’affiche dans la rangée Tempérament');
+  verifie(!applicationEnBas,
+    'web /audio : aucun « Application… » en bas pour un changement de tempérament');
 
   await testTemperamentRafale();
+  await testTemperamentRechargement();
+  await testTemperamentPost();
 
   let messageFinal = '';
   for (let i = 0; i < 60; i += 1) {
@@ -669,6 +763,128 @@ async function testResponsive() {
   }
 }
 
+function capturerNatif(nom) {
+  const fichier = `${CAPTURES}/${nom}.png`;
+  execFileSync('import', ['-display', process.env.DISPLAY, '-window', WID, fichier]);
+  return createHash('md5').update(readFileSync(fichier)).digest('hex');
+}
+
+function clicNatif(x, y) {
+  // Pressions séparées, comme le harnais bash : sans gestionnaire de
+  // fenêtres, Nuklear ne lit parfois qu'un survol sur un clic instantané.
+  execFileSync('xdotool', ['mousemove', '--window', WID, String(x), String(y)]);
+  execFileSync('sleep', ['0.08']);
+  execFileSync('xdotool', ['mousedown', '1']);
+  execFileSync('sleep', ['0.15']);
+  execFileSync('xdotool', ['mouseup', '1']);
+  execFileSync('sleep', ['0.4']);
+}
+
+async function attendreCible(cible, nom, delai = 5000) {
+  return attendre(
+    async () => {
+      const e = await api('/api/orgue');
+      return e.qualite.temperament_cible === cible ? e : null;
+    },
+    nom,
+    delai
+  );
+}
+
+async function attendreApplique(cible, nom, delai = 30000) {
+  return attendre(
+    async () => {
+      const e = await api('/api/orgue');
+      return (e.temperament === cible && e.qualite.temperament_cible === -1) ? e : null;
+    },
+    nom,
+    delai
+  );
+}
+
+async function modeCroise() {
+  await viewport(1100);
+  await navigate('/audio');
+  await attendre(
+    () => evaluer('document.getElementById("qualite-temperament") !== null'),
+    'page /audio affichée (croisé)'
+  );
+
+  // 1. Clic web vu côté natif : la cible partagée change l'affichage natif.
+  let depart = (await api('/api/orgue')).temperament;
+  let cible = (depart + 3) % 11;
+  const avantWeb = capturerNatif('croise-web-natif-avant');
+  await clicGroupe('qualite-temperament', String(cible));
+  const publiee = await attendreCible(
+    cible, `croisé : cible ${cible} publiée après clic web`, 5000
+  );
+  verifie(!!publiee, `croisé : clic web publie la cible ${cible}`);
+  await delay(350);
+  const apresWeb = capturerNatif('croise-web-natif-apres');
+  verifie(
+    avantWeb !== apresWeb,
+    'croisé : un clic web sur le tempérament change l’affichage de la fenêtre native'
+  );
+  const domWeb = await etatTemperamentDom();
+  verifie(
+    domWeb && domWeb.enCours.includes(cible),
+    `croisé : la page web montre aussi la cible ${cible} en cours`
+  );
+  await attendreApplique(cible, `croisé : cible ${cible} appliquée après clic web`);
+
+  // 2. Clic natif vu côté web.
+  depart = (await api('/api/orgue')).temperament;
+  const cibleNatif = depart === 1 ? 3 : 1;
+  const xn = String(cibleNatif === 1 ? process.env.TEMP1_X : process.env.TEMP3_X);
+  const yn = String(cibleNatif === 1 ? process.env.TEMP1_Y : process.env.TEMP3_Y);
+  clicNatif(Number(xn), Number(yn));
+  const publieeNatif = await attendreCible(
+    cibleNatif, `croisé : cible ${cibleNatif} publiée après clic natif`, 5000
+  );
+  verifie(!!publieeNatif, `croisé : clic natif publie la cible ${cibleNatif}`);
+  const domNatif = await attendre(
+    async () => {
+      const d = await etatTemperamentDom();
+      return d && d.enCours.includes(cibleNatif) ? d : null;
+    },
+    `croisé : clic natif vu dans la page web (cible ${cibleNatif})`,
+    5000
+  );
+  verifie(!!domNatif, `croisé : la page web reflète le clic natif (cible ${cibleNatif})`);
+  await attendreApplique(cibleNatif, `croisé : cible ${cibleNatif} appliquée après clic natif`);
+
+  // 3. Changement par POST vu des deux côtés.
+  depart = (await api('/api/orgue')).temperament;
+  cible = (depart + 4) % 11;
+  const avantPost = capturerNatif('croise-post-natif-avant');
+  const reponse = await poster('/api/orgue', { temperament: cible });
+  verifie(reponse.code === 200, `croisé : POST tempérament ${cible} accepté`);
+  const publieePost = await attendreCible(
+    cible, `croisé : cible ${cible} publiée après POST`, 5000
+  );
+  verifie(!!publieePost, `croisé : POST publie la cible ${cible}`);
+  await delay(350);
+  const apresPost = capturerNatif('croise-post-natif-apres');
+  verifie(
+    avantPost !== apresPost,
+    'croisé : un POST de tempérament change l’affichage de la fenêtre native'
+  );
+  const domPost = await attendre(
+    async () => {
+      const d = await etatTemperamentDom();
+      return d && d.enCours.includes(cible) ? d : null;
+    },
+    `croisé : POST vu dans la page web (cible ${cible})`,
+    5000
+  );
+  verifie(!!domPost, `croisé : la page web reflète le POST (cible ${cible})`);
+  await attendreApplique(cible, `croisé : cible ${cible} appliquée après POST`);
+
+  verifie(cdp.erreurs.length === 0, `croisé : aucune erreur console (${cdp.erreurs.length})`);
+  for (const erreur of cdp.erreurs.slice(0, 5)) console.log(`        ${erreur}`);
+  return echecs === 0 ? 0 : 1;
+}
+
 async function modeFill() {
   await viewport(1100);
   await poster('/api/orgue', { reverb: 110 });
@@ -693,6 +909,7 @@ async function modeFill() {
 
 async function principal() {
   cdp = await connecter();
+  if (MODE === 'croise') return modeCroise();
   if (MODE === 'fill') return modeFill();
 
   await testAccueil();
