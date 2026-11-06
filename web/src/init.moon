@@ -617,6 +617,11 @@ if qualite_locale.auto
     cal.niveau = decision.niveau
     cal.tete_reverb = decision.tete_reverb
     cal.estimation_ms = decision.estimation_ms
+    -- Champs internes de la décision : ne pas les publier dans
+    -- qualite.calibration (forme inchangée par rapport à l'ancien C).
+    cal.taux = nil
+    cal.periode = nil
+    cal.voix_forcee = nil
     p = PRESELECTIONS[cal.niveau + 1]
     qualite_demarrage = {
       spatialisation: p.spatialisation
