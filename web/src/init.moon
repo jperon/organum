@@ -948,6 +948,7 @@ qualite_etat = ->
   etat_qualite = {
     temperament: e.temperament
     temperament_erreur: e.qualite.temperament_erreur or ""
+    temperament_cible: e.qualite.temperament_cible or -1
     bruit_attaque: e.qualite.bruit_attaque == true
     instabilite: e.qualite.instabilite == true
     spatialisation: e.qualite.spatialisation
@@ -970,6 +971,7 @@ qualite_etat = ->
     audio_repli: AUDIO_REPLI
     audio_erreur: e.qualite.audio_erreur or ""
     application: e.qualite.application == true
+    application_audio: e.qualite.application_audio == true
     charge: e.qualite.charge or 0
     charge_pointe: e.qualite.charge_pointe or 0
     charge_evaluee: e.qualite.charge_evaluee == true
