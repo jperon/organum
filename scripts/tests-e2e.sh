@@ -394,7 +394,7 @@ q = e.get("qualite", {})
 a_reverb = 1 if isinstance(e.get("reverb"), (int, float)) else 0
 a_tete = 1 if (isinstance(q.get("tete_reverb"), bool) and isinstance(q.get("tete_reverb_prochain"), bool)) else 0
 a_calib = 1 if isinstance(q.get("calibration"), dict) else 0
-rows = 9 + a_reverb + a_tete + a_calib + 2 + 3 + 3
+rows = 10 + a_reverb + a_tete + a_calib + 2 + 3 + 3
 cols = 6 if isinstance(q.get("auto"), bool) else 5
 print(rows, cols)
 PY
@@ -493,9 +493,9 @@ elseif mode == "qualite" then
   local xr = colonne(3, 0)
   print("retour_x=" .. arrondi(xr)); print("retour_y=" .. y(0))
   local xt = colonne(6, 2)
-  print("temp_x=" .. arrondi(xt)); print("temp_y=" .. y(8))
+  print("temp_x=" .. arrondi(xt)); print("temp_y=" .. y(9))
   local xt3 = colonne(6, 4)
-  print("temp3_x=" .. arrondi(xt3)); print("temp3_y=" .. y(8))
+  print("temp3_x=" .. arrondi(xt3)); print("temp3_y=" .. y(9))
   local xrv, w = colonne(2, 1)
   local frac = tonumber(os.getenv("REVERB_FRAC") or "0.25")
   print("reverb_x=" .. arrondi(MARGE + 1 * (w + ESPACE) + w * frac))
@@ -767,6 +767,33 @@ PY
   else
     echec "natif : l'état change après Panique sans clic"
   fi
+
+  # --- Interface croisée : web et natif sur le même serveur --------------
+  # La cible du tempérament est publiée par le serveur : un clic dans une
+  # interface doit se voir dans l'autre, et un POST doit être reflété par
+  # les deux. La fenêtre native est déjà ouverte sur ce serveur.
+  redimensionner 1920 1080
+  read -r R1 R2 <<<"$(parametres_console)"
+  eval "$(coords console 1920 1080 "$R1" "$R2")"
+  clic_xy "$audio_x" "$audio_y"
+  read -r QROWS QCOLS <<<"$(parametres_qualite)"
+  eval "$(coords qualite 1920 1080 "$QROWS" "$QCOLS")"
+  if demarrer_chromium; then
+    WID="$WID" DISPLAY="$DISPLAY" CAPTURES="$CAPTURES" \
+    TEMP1_X="$temp_x" TEMP1_Y="$temp_y" TEMP3_X="$temp3_x" TEMP3_Y="$temp3_y" \
+    CDP_PORT="$CDP_PORT" BASE_URL="$URL" MODE=croise \
+      node "$RACINE/scripts/e2e-web.mjs" >"$TMP/croise.log" 2>&1
+    CODE_CROISE=$?
+    sed 's/^/        /' "$TMP/croise.log"
+    if [ "$CODE_CROISE" -eq 0 ]; then
+      OKS=$((OKS + 1))
+    else
+      ECHECS=$((ECHECS + 1))
+    fi
+  else
+    echec "e2e croisé : Chromium ne démarre pas"
+  fi
+  arreter_chromium
 else
   echec "e2e natif : Xvfb, organum ou fenêtre indisponible"
 fi
