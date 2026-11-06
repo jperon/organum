@@ -122,10 +122,12 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   tête de `_G.OnHttpRequest` (toutes les routes, attente longue comprise),
   exempte uniquement `127.0.0.1` et `::1` via `GetClientAddr`, et publie
   `/api/authentification` (GET/POST, retrait). Fichier absent ou sans entrée :
-  pas de contrôle ; fichier présent mais invalide ou illisible : refus de
-  démarrer (`kLogFatal`) ; devenu invalide à chaud, puisqu'il est relu à
-  chaque requête : `503` pour les sources non locales, erreur publiée, accès
-  local conservé. Durée du nonce réglable seulement par
+  pas de contrôle ; fichier présent mais invalide ou illisible : l'orgue
+  démarre quand même, mais `503` pour les sources non locales, erreur publiée
+  dans l'API et les deux interfaces, accès local conservé. Le fichier est relu
+  à chaque requête ; depuis `127.0.0.1` ou `::1`, `GET /audio` et
+  `GET`/`POST /api/authentification` restent utilisables et un POST valide
+  écrase le fichier invalide et rétablit le contrôle. Durée du nonce réglable seulement par
   `ORGANUM_AUTH_NONCE_DUREE` pour les tests, 5 min par défaut. Seule la page
   web règle le mot de passe ; la fenêtre native n'affiche qu'une ligne d'état
   en lecture seule et ne saisit plus de texte. Tests :
@@ -151,16 +153,21 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   Persistance dans un fichier texte éditable à la main, voisin d'`etat.json`
   : `etat.json.reseaux` (0600) ou le chemin donné par
   `ORGANUM_RESEAUX_FICHIER` (absent ou vide : chemin par défaut), un
-  sous-réseau par ligne, lignes vides et commentaires `#` admis, lecture à
-  chaque requête ; fichier absent ou sans entrée = aucun filtrage. Fichier
-  présent mais invalide ou illisible : refus de démarrer (`kLogFatal`) ;
-  devenu invalide à chaud : `503` pour les sources non locales, erreur
-  publiée, accès local conservé (jamais d'ouverture silencieuse de l'accès).
-  Routes `GET/POST /api/reseaux` ; une liste non vide qui exclut la source
-  HTTP courante est refusée (400), sauf source locale. L'écriture depuis le
-  web réécrit le fichier et perd ses commentaires (signalé dans l'interface).
-  Panneau Audio web (`page_audio.moon`) ; la fenêtre native (`fenetre.moon`)
-  n'affiche qu'une ligne d'état en lecture seule. Tests réels :
+  sous-réseau par ligne suivi d'un commentaire facultatif
+  (`10.35.0.0/16 # chapelle`), lignes vides et lignes de commentaire admises,
+  lecture à chaque requête ; fichier absent ou sans entrée = aucun filtrage.
+  Fichier présent mais invalide ou illisible : l'orgue démarre quand même,
+  mais `503` pour les sources non locales, erreur publiée, accès local
+  conservé ; un POST local valide rétablit le contrôle. Le commentaire
+  n'entre jamais dans le contrôle d'accès. Routes `GET/POST /api/reseaux`
+  par entrées `{reseau, commentaire}` (commentaire ≤ 200 octets, sans saut de
+  ligne) ; une liste non vide qui exclut la source HTTP courante est refusée
+  (400), sauf source locale. L'écriture depuis le web conserve les
+  commentaires d'entrée mais perd les lignes qui ne sont qu'un commentaire
+  (signalé dans l'interface). Panneau Audio web (`page_audio.moon`) : une
+  rangée par sous-réseau (sous-réseau, commentaire, retrait) plus un bouton
+  d'ajout, cibles ≥ 44 px. La fenêtre native (`fenetre.moon`) n'affiche
+  qu'une ligne d'état en lecture seule, sans commentaires. Tests réels :
   `web/scripts/test-reseaux.sh`, lancé par `scripts/tests-longs.sh`.
 
 - Puce d'adaptation à la machine : le fil audio mesure le rendu avec deux

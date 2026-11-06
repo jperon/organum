@@ -57,10 +57,12 @@ printf 'organiste:organum:%s' 'motdepasse' | sha256sum
 
 Les lignes vides et les commentaires `#` sont admis ; plusieurs entrées sont
 refusées. `ORGANUM_DIGEST` donne un autre chemin (absent ou vide : chemin par
-défaut). Un fichier présent mais invalide ou illisible empêche le démarrage ;
-s'il devient invalide en cours d'exécution, toute source non locale reçoit
-`503`. Les adresses locales `127.0.0.1` et `::1` restent exemptées, et la
-fenêtre native n'emprunte pas HTTP.
+défaut). Un fichier présent mais invalide ou illisible n'empêche pas le
+démarrage : l'orgue joue, mais toute source non locale reçoit `503` et
+l'erreur est publiée. Les adresses locales `127.0.0.1` et `::1` restent
+exemptées : `GET /audio`, `GET`/`POST /api/authentification` et
+`GET`/`POST /api/reseaux` y fonctionnent, et un POST valide écrase le fichier
+invalide et rétablit le contrôle. La fenêtre native n'emprunte pas HTTP.
 
 L'authentification est HTTP Digest SHA-256 (RFC 7616, `qop=auth`) : elle
 vérifie les droits, sans chiffrer le contenu. Servie en HTTP, la page envoie
@@ -74,8 +76,9 @@ son nonce de 5 minutes est valide.
 Réglage facultatif, indépendant de l'authentification. Il se règle dans le
 panneau **Audio** de la page web (la fenêtre native affiche l'état) et se
 conserve dans un fichier texte voisin d'`etat.json` (`etat.json.reseaux`,
-droits `0600`), à raison d'un sous-réseau par ligne ; lignes vides et
-commentaires `#` sont admis. `ORGANUM_RESEAUX_FICHIER` donne un autre chemin
+droits `0600`), à raison d'un sous-réseau par ligne, suivi d'un commentaire
+facultatif : `10.35.0.0/16 # chapelle`. Les lignes vides et les lignes qui ne
+sont qu'un commentaire sont admises. `ORGANUM_RESEAUX_FICHIER` donne un autre chemin
 (absent ou vide : chemin par défaut). Une liste vide ne filtre rien. Sinon,
 une adresse source hors liste reçoit `403` **avant** toute analyse Digest,
 sans en-tête `WWW-Authenticate`. Quand les deux réglages sont actifs, le
@@ -90,9 +93,11 @@ HTTP.
 | remplie | aucun | sous-réseau seul |
 | remplie | défini | sous-réseau puis Digest |
 
-Le fichier (ou le champ du panneau web, qui accepte aussi des virgules ou des
-espaces) contient par exemple `10.35.0.0/16` et `2001:470:ca35::/48`, un par
-ligne. Une adresse seule vaut `/32` (IPv4) ou
+Le fichier contient par exemple `10.35.0.0/16 # chapelle` et
+`2001:470:ca35::/48`, un par ligne. Le panneau web présente une rangée par
+sous-réseau (champ sous-réseau, commentaire facultatif, bouton de retrait) et
+un bouton d'ajout ; les cibles tactiles font au moins 44 px. Le commentaire
+n'entre jamais dans le contrôle d'accès. Une adresse seule vaut `/32` (IPv4) ou
 `/128` (IPv6). Les formes compressées et la casse IPv6 sont admises, une
 adresse `::ffff:a.b.c.d` est traitée comme IPv4, et la zone d'une adresse
 lien-local (`fe80::…%wlo1`) n'entre pas dans la comparaison (le serveur
@@ -103,13 +108,16 @@ message clair : une faute de saisie ne doit pas élargir silencieusement un
 sous-réseau. Enregistrer une liste non vide qui exclut l'adresse source
 courante est refusé (`400`), sauf si cette source est locale.
 
-Un fichier présent mais invalide ou illisible empêche le démarrage avec un
-message explicite, car il exprime une intention de sécurité. S'il devient
-invalide en cours d'exécution (le fichier est relu à chaque requête), les
-sources non locales reçoivent `503` et l'erreur est publiée ; l'accès local
-reste possible. Enregistrer depuis la page web réécrit le fichier et perd ses
-commentaires. `GET /api/reseaux` expose l'état et l'adresse source ;
-`POST /api/reseaux` accepte `{"reseaux": "…"}` ou `{"retirer": true}`.
+Un fichier présent mais invalide ou illisible n'empêche pas le démarrage :
+les sources non locales reçoivent `503` et l'erreur est publiée, tandis que
+l'accès local reste possible pour corriger (le fichier est relu à chaque
+requête). Enregistrer depuis la page web conserve les commentaires d'entrée
+mais perd les lignes qui ne sont qu'un commentaire. `GET /api/reseaux` expose
+l'état et l'adresse source ; les entrées sont des objets
+`{reseau, commentaire}`. `POST /api/reseaux` accepte
+`{"reseaux": [{"reseau": "…", "commentaire": "…"}]}` ou
+`{"retirer": true}` ; un commentaire de plus de 200 octets ou contenant un
+saut de ligne est refusé (`400`).
 
 ### Craquements et temps réel
 
