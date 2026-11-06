@@ -1398,7 +1398,7 @@ script = [[
                 h.span class: "qualite-note", id: "reseaux-source", "Source : —"
               )
             )
-            h.div class: "reseaux-entrees", id: "reseaux-entrees"
+            h.div "", class: "reseaux-entrees", id: "reseaux-entrees"
             h.div(
               class: "qualite-ligne qualite-ligne-pleine"
               h.div(
