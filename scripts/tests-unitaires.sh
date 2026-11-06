@@ -180,6 +180,24 @@ else
   ignore "C : gcc absent, règle sortie_null non testée"
 fi
 
+# --- Filtre de transposition MIDI -------------------------------------------
+if command -v gcc >/dev/null 2>&1; then
+  if gcc -O2 -I "$RACINE/cosmo" "$RACINE/cosmo/tests/transposition.c" \
+       -o "$TMP/transposition" 2>"$TMP/gcc-transposition.log"; then
+    if "$TMP/transposition" >"$TMP/transposition.log" 2>&1; then
+      ok "C : filtre de transposition (décalage, tenue, canaux)"
+    else
+      cat "$TMP/transposition.log"
+      echec "C : filtre de transposition"
+    fi
+  else
+    cat "$TMP/gcc-transposition.log" >&2
+    echec "C : compilation transposition"
+  fi
+else
+  ignore "C : gcc absent, filtre de transposition non testé"
+fi
+
 # --- Tables C++ des tempéraments --------------------------------------------
 # Compilation mise en cache : scale.cpp et le test ne changent pas entre deux
 # exécutions. La première compilation (quelques secondes) est hors du budget

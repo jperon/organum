@@ -35,6 +35,7 @@
 #include "../plateforme/midi.h"
 #include "charge_niveau.h"
 #include "sortie_null.h"
+#include "transposition.h"
 
 #define MAX_DIVISIONS 8
 #define MAX_JEUX 64
@@ -49,7 +50,7 @@ enum {
   CMD_JEU, CMD_GAIN, CMD_VOLUME, CMD_REVERB, CMD_MIDI, CMD_PANIQUE,
   CMD_CANAUX_DIVISION, CMD_CANAUX_CONTROLE, CMD_CANAUX_EXPRESSION,
   CMD_ASSOCIATION, CMD_NB_ASSOCIATIONS, CMD_LIEN, CMD_QUALITE,
-  CMD_LIMITEUR, CMD_TETE, CMD_RECONFIG,
+  CMD_LIMITEUR, CMD_TETE, CMD_RECONFIG, CMD_TRANSPOSITION,
 };
 
 // Demande de reconfiguration audio : le tube ne transporte que des
@@ -119,6 +120,7 @@ struct etat {
   int periode, nb_periodes;  // effectifs de l'ouverture courante
   char peripherique[PERIPH_MAX + 1];  // effectif ("" = défaut)
   int limiteur;  // effectif
+  int transposition;  // effectif, -12..12 (jamais persisté)
   char audio_erreur[ERREUR_MAX];  // dernier échec de reconfiguration
   int temperament;  // valeur effective (enum Scale::Type)
   char temperament_erreur[ERREUR_MAX];  // dernier échec d'application
@@ -168,6 +170,10 @@ static int g_periode;
 static int g_taux;
 static char g_peripherique[PERIPH_MAX + 1];
 static int g_limiteur = 1;
+// Transposition effective, fil audio uniquement ; publiée dans g_etat.
+static int g_transposition;
+// Notes réellement envoyées, fil audio uniquement (voir transposition.h).
+static struct transposition_etat g_transposition_etat;
 static char g_audio_erreur[ERREUR_MAX];
 static int g_xruns_base;  // xruns cumulés des descripteurs déjà fermés
 static struct demande_audio g_demande_pendante;
@@ -441,6 +447,8 @@ static void publier(void) {
   if (g_taux != e->taux) e->taux = g_taux, change = 1;
   if (g_periode != e->periode) e->periode = g_periode, change = 1;
   if (g_limiteur != e->limiteur) e->limiteur = g_limiteur, change = 1;
+  if (g_transposition != e->transposition)
+    e->transposition = g_transposition, change = 1;
   if (strcmp(g_peripherique, e->peripherique) != 0) {
     strlcpy(e->peripherique, g_peripherique, sizeof(e->peripherique));
     change = 1;
@@ -502,11 +510,24 @@ static void publier(void) {
   if (change) atomic_fetch_add_explicit(&e->seq, 1, memory_order_release);
 }
 
+// Envoie un message MIDI au moteur après le filtre de transposition. Appelé
+// uniquement dans le fil audio ; la table retient les notes réellement
+// envoyées. Aucun verrou, aucune allocation.
+static void envoyer_midi_filtre(const unsigned char entree[3]) {
+  unsigned char sortie[3];
+  if (transposition_filtrer(&g_transposition_etat, g_transposition, entree,
+                            sortie))
+    aeolus_midi(g_moteur, sortie, 3);
+}
+
 static void panique(void) {
   for (int canal = 0; canal < 16; ++canal) {
     unsigned char m[3] = {0xB0 | canal, 123, 0};
     aeolus_midi(g_moteur, m, 3);
   }
+  // Toutes les notes sont relâchées : la table ne doit retenir aucune note,
+  // sinon un relâchement ultérieur viserait une note qui n'existe plus.
+  transposition_reinitialiser(&g_transposition_etat);
 }
 
 static void appliquer(const struct commande *c) {
@@ -525,7 +546,7 @@ static void appliquer(const struct commande *c) {
       break;
     case CMD_MIDI: {
       unsigned char m[3] = {c->a, c->b, c->c};
-      aeolus_midi(g_moteur, m, 3);
+      envoyer_midi_filtre(m);
       break;
     }
     case CMD_PANIQUE:
@@ -572,6 +593,12 @@ static void appliquer(const struct commande *c) {
       g_xruns_blocage =
           g_echantillons + (unsigned long long)g_taux * XRUNS_BLOCAGE_SECONDES;
       mesure_reinitialiser();
+      break;
+    case CMD_TRANSPOSITION:
+      // Valeur signée portée par l'octet a (complément à deux). La table de
+      // notes tenues n'est pas remise à zéro : chacune garde sa hauteur
+      // jusqu'à son relâchement.
+      g_transposition = (int8_t)c->a;
       break;
     case CMD_RECONFIG:
       // Traité par boucle_audio, qui possède les tampons de rendu.
@@ -782,6 +809,9 @@ static int recreer_moteur(int taux) {
     void *ancien = g_moteur;
     g_moteur = nouveau;
     aeolus_detruire(ancien);
+    // Le nouveau moteur n'a aucune note tenue : oublier la table évite de
+    // viser une note absente au prochain relâchement (aucune note bloquée).
+    transposition_reinitialiser(&g_transposition_etat);
     ok = 1;
   }
   free(s.json);
@@ -966,7 +996,7 @@ static void *boucle_audio(void *arg) {
           g_echeances[canal] = g_echantillons + (unsigned long long)(g_taux * 250 + 999) / 1000;
         }
         if ((m[0] & 0xF0) == 0xB0 && associer(m[0], m[1], m[2])) continue;
-        aeolus_midi(g_moteur, m, 3);
+        envoyer_midi_filtre(m);
       }
     ssize_t lu;
     while ((lu = read(g_tube[0], cmds, sizeof(cmds))) > 0)
@@ -1256,6 +1286,9 @@ static int l_demarrer(lua_State *L) {
 
   g_moteur = aeolus_creer(taux);
   g_limiteur = limiteur;
+  // Transposition remise à zéro à chaque démarrage (jamais persistée).
+  g_transposition = 0;
+  transposition_reinitialiser(&g_transposition_etat);
   g_taux = taux;
   g_xruns_base = 0;
   g_audio_erreur[0] = '\0';
@@ -1366,6 +1399,7 @@ static int l_demarrer(lua_State *L) {
   e->periode = g_periode;
   e->nb_periodes = nb_periodes;
   e->limiteur = limiteur;
+  e->transposition = 0;
   strlcpy(e->peripherique, g_peripherique, sizeof(e->peripherique));
   e->netapes = aeolus_nb_etapes(g_moteur);
   midi_adresse(g_midi, &e->midi_client, &e->midi_port);
@@ -1413,6 +1447,17 @@ static int l_demarrer(lua_State *L) {
 // organum.limiteur(actif) : applique à chaud, dans le fil audio.
 static int l_limiteur(lua_State *L) {
   envoyer(L, (struct commande){CMD_LIMITEUR, .a = lua_toboolean(L, 1) ? 1 : 0});
+  return 0;
+}
+
+// organum.transposition(n) : décale toutes les notes MIDI de n demi-tons
+// (-12..12). Jamais persisté : remis à 0 à chaque démarrage.
+static int l_transposition(lua_State *L) {
+  lua_Integer n = luaL_checkinteger(L, 1);
+  if (n < TRANSPOSITION_MIN || n > TRANSPOSITION_MAX)
+    return luaL_error(L, "transposition hors limites (-12..12)");
+  envoyer(L, (struct commande){CMD_TRANSPOSITION,
+                               .a = (unsigned char)(n & 0xFF)});
   return 0;
 }
 
@@ -1561,6 +1606,8 @@ static int l_etat(lua_State *L) {
   lua_pushinteger(L, copie.taux), lua_setfield(L, -2, "taux");
   lua_pushinteger(L, copie.temperament);
   lua_setfield(L, -2, "temperament");
+  lua_pushinteger(L, copie.transposition);
+  lua_setfield(L, -2, "transposition");
   lua_pushfstring(L, "%d:%d", copie.midi_client, copie.midi_port);
   lua_setfield(L, -2, "midi");
   lua_pushinteger(L, copie.canaux_controle), lua_setfield(L, -2, "canaux_controle");
@@ -1868,6 +1915,7 @@ static const luaL_Reg kFonctions[] = {
     {"qualite", l_qualite}, {"calibrer", l_calibrer},
     {"charge_niveau", l_charge_niveau_diag},
     {"limiteur", l_limiteur}, {"tete_reverb", l_tete_reverb},
+    {"transposition", l_transposition},
     {"temperament", l_temperament},
     {"oublier_audio", l_oublier_audio},
     {"reconfigurer_audio", l_reconfigurer_audio},
