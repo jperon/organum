@@ -41,6 +41,10 @@ static inline int transposition_filtrer(struct transposition_etat *t,
   const int canal = statut & 0x0F;
   const int type = statut & 0xF0;
 
+  // Note hors 0..127 : ne jamais indexer la table retenue.
+  if ((type == 0x80 || type == 0x90 || type == 0xA0) && entree[1] > 127)
+    return 0;
+
   // Appui : vélocité strictement positive. Une vélocité nulle est un
   // relâchement (traitée plus bas).
   if (type == 0x90 && entree[2] > 0) {

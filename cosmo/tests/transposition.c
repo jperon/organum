@@ -76,6 +76,22 @@ int main(void) {
   verifier(filtrer(&t, 0, 0x80, 5, 0, s) == 0,
            "note rejetée : aucun relâchement retenu");
 
+  // Numéro de note hors 0..127 dans le message : jamais d'indexation de la
+  // table, quel que soit le type concerné.
+  transposition_reinitialiser(&t);
+  verifier(filtrer(&t, 0, 0x90, 200, 100, s) == 0,
+           "note 200 : appui ignoré");
+  verifier(filtrer(&t, 0, 0x80, 200, 0, s) == 0,
+           "note 200 : relâchement ignoré");
+  verifier(filtrer(&t, 0, 0x90, 200, 0, s) == 0,
+           "note 200 : vélocité nulle ignorée");
+  verifier(filtrer(&t, 0, 0xA0, 200, 50, s) == 0,
+           "note 200 : pression polyphonique ignorée");
+  verifier(filtrer(&t, 0, 0x90, 128, 100, s) == 0,
+           "note 128 : appui ignoré");
+  verifier(filtrer(&t, 0, 0xA0, 128, 50, s) == 0,
+           "note 128 : pression ignorée");
+
   // Canaux indépendants, y compris pour la même note.
   transposition_reinitialiser(&t);
   verifier(filtrer(&t, 5, 0x90, 60, 100, s) == 1, "canal 0 : appui");
