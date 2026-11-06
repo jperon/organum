@@ -122,10 +122,13 @@ if [ -x "$RACINE/web/build/organum.com" ]; then
     sh "$RACINE/web/scripts/test-authentification.sh"
   executer "contrôle d'accès par sous-réseau (web/scripts/test-reseaux.sh)" \
     sh "$RACINE/web/scripts/test-reseaux.sh"
+  executer "transposition (web/scripts/test-transposition.sh)" \
+    sh "$RACINE/web/scripts/test-transposition.sh"
 else
   ignore "API qualité (web/build/organum.com absent ; lancer web/scripts/build.sh)"
   ignore "authentification Digest (web/build/organum.com absent ; lancer web/scripts/build.sh)"
   ignore "contrôle d'accès par sous-réseau (web/build/organum.com absent ; lancer web/scripts/build.sh)"
+  ignore "transposition (web/build/organum.com absent ; lancer web/scripts/build.sh)"
 fi
 
 # --- Couche plate-forme sans carte -----------------------------------------
