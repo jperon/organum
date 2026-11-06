@@ -925,17 +925,9 @@ lancer_fenetre = ->
     }
     auth = {
       etat: auth_etat
-      regler: (p) ->
-        res, raison = regler_authentification p
-        error raison unless res
-        res
     }
     reseaux = {
       etat: reseaux_etat
-      regler: (p) ->
-        res, raison = regler_reseaux p
-        error raison unless res
-        res
     }
     ouvert, raison = lancer organum, nk, {titre: "organum", :volume, :midi, :qualite, authentification: auth, :reseaux, continuer: -> unix.getppid! == maitre}
     Log kLogWarn, "fenêtre : #{raison}" unless ouvert

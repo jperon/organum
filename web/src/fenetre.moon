@@ -12,8 +12,8 @@
 -- page web ; à défaut, le curseur règle le volume interne du moteur.
 --
 -- authentification et reseaux (facultatifs) : même contrat que la page web
--- (etat/regler) ; la fenêtre est locale, donc jamais filtrée par
--- ORGANUM_RESEAUX.
+-- pour la lecture seule (etat) ; la fenêtre est locale, donc jamais filtrée
+-- par le fichier de réseaux.
 --
 -- midi (facultatif) : active le panneau MIDI (bouton « MIDI » dans la barre
 -- de réglages). etat renvoie la configuration au format d'etat_midi
@@ -69,21 +69,15 @@ MAX_ASSOCIATIONS = 16
   -- publie le moteur. message_qualite affiche un échec ou un redémarrage.
   qualite_opt = options.qualite
   message_qualite = nil
-  -- Authentification facultative : même contrat que la page web. La fenêtre
-  -- ne passe pas par HTTP ; elle règle le mot de passe par le module.
+  -- Authentification facultative : même contrat que la page web pour la
+  -- lecture seule. La fenêtre ne saisit plus de texte : la configuration se
+  -- fait depuis la page web.
   auth_opt = options.authentification
-  auth_utilisateur = "organiste"
-  auth_mot_de_passe = ""
-  auth_charge = false
   auth_courant = nil
-  message_auth = nil
-  -- Contrôle d'accès par sous-réseau source : la fenêtre est locale, donc
-  -- jamais filtrée ; elle règle la liste par le module, sans HTTP.
+  -- Contrôle d'accès par sous-réseau source : lecture seule, la fenêtre est
+  -- locale et ne modifie pas la liste.
   reseaux_opt = options.reseaux
-  reseaux_texte = ""
-  reseaux_charge = false
   reseaux_courant = nil
-  message_reseaux = nil
   -- Tempérament : la cible en cours est publiée par le serveur
   -- (qualite.temperament_cible), donc identique à celle des autres
   -- interfaces. temperament_cible ne garde qu'un retour immédiat au clic,
@@ -373,41 +367,14 @@ MAX_ASSOCIATIONS = 16
       ok, a = pcall auth_opt.etat
       if ok and type(a) == "table"
         return a
-    {active: false, utilisateur: "organiste", impose: true, source: "aucune"}
-
-  regler_auth = (payload) ->
-    message_auth = nil
-    unless auth_opt and auth_opt.regler
-      message_auth = "Authentification indisponible"
-      return
-    ok, res = pcall auth_opt.regler, payload
-    unless ok
-      message_auth = "Échec : #{res}"
-      return
-    auth_mot_de_passe = ""
-    auth_charge = false
-    auth_courant = etat_auth!
-    seq = nil
+    {active: false, utilisateur: "organiste", source: "aucune", erreur: nil}
 
   etat_reseaux = ->
     if reseaux_opt and reseaux_opt.etat
       ok, r = pcall reseaux_opt.etat
       if ok and type(r) == "table"
         return r
-    {active: false, texte: "", impose: true, source: nil, erreur: nil}
-
-  regler_reseaux = (payload) ->
-    message_reseaux = nil
-    unless reseaux_opt and reseaux_opt.regler
-      message_reseaux = "Contrôle d'accès indisponible"
-      return
-    ok, res = pcall reseaux_opt.regler, payload
-    unless ok
-      message_reseaux = "Échec : #{res}"
-      return
-    reseaux_charge = false
-    reseaux_courant = etat_reseaux!
-    seq = nil
+    {active: false, texte: "", source: nil, erreur: nil}
 
   while continuer!
     ouverte, sale = ui\evenements 50
@@ -713,10 +680,10 @@ MAX_ASSOCIATIONS = 16
       calib = type(q.calibration) == "table" and q.calibration or nil
       -- Rangées : en-tête, niveau, deux cases, spatialisation, polyphonie,
       -- période, taux, limiteur, tempérament (2 rangées), périphérique,
-      -- authentification (2 + 3 rangées), réseaux (3 rangées), puis (tête),
+      -- authentification (1 rangée), réseaux (1 rangée), puis (tête),
       -- (calibration) et message. Le nombre de cases de la ligne « Niveau »
       -- vaut 6 quand le mode Auto existe (bouton en plus), 5 sinon.
-      rows = 10 + (a_reverb and 1 or 0) + (a_tete and 1 or 0) + (calib and 1 or 0) + 2 + 3 + 3
+      rows = 10 + (a_reverb and 1 or 0) + (a_tete and 1 or 0) + (calib and 1 or 0) + 1 + 1
       colonnes = (type(q.auto) == "boolean") and 6 or 5
       p = disposer_qualite rows, l, h, colonnes
       if p.police != police
@@ -884,77 +851,28 @@ MAX_ASSOCIATIONS = 16
           texte_periph = texte_periph .. " (en cours : #{actuel})"
         ui\texte tronquer(texte_periph, l - 2 * MARGE - ESPACE)
 
-        -- Authentification facultative. Le mot de passe n'est jamais relu :
-        -- l'état ne porte que le nom d'utilisateur et le verrouillage par
-        -- l'environnement. La saisie est en clair, comme sur la page web
-        -- lorsque celle-ci est servie en HTTP.
+        -- Authentification et réseaux : une ligne d'état en lecture seule
+        -- chacun. La configuration se fait depuis la page web ; la fenêtre ne
+        -- saisit plus de texte.
         a_auth = auth_courant or etat_auth!
-        unless auth_charge
-          auth_utilisateur = if type(a_auth.utilisateur) == "string" and a_auth.utilisateur != ""
-            a_auth.utilisateur else "organiste"
-          auth_mot_de_passe = ""
-          auth_charge = true
-        ui\ligne ligne, 1
-        texte_auth = if a_auth.active == true
+        texte_auth = if type(a_auth.erreur) == "string" and a_auth.erreur != ""
+          "Authentification : configuration invalide (#{a_auth.erreur})"
+        else if a_auth.active == true
           "Authentification : activée pour « #{a_auth.utilisateur} »"
         else
           "Authentification : désactivée"
-        ui\texte tronquer(texte_auth, l - 2 * MARGE - ESPACE)
-        if a_auth.impose == true
-          ui\ligne ligne, 1
-          ui\texte tronquer("Mot de passe imposé par ORGANUM_MOT_DE_PASSE", l - 2 * MARGE - ESPACE)
-          ui\ligne ligne, 1
-          ui\texte ""
-        else
-          ui\ligne ligne, 2
-          ui\texte "Utilisateur", "droite"
-          auth_utilisateur = ui\saisie auth_utilisateur, 64, false
-          ui\ligne ligne, 4
-          ui\texte "Mot de passe", "droite"
-          valeur_mot, valide_mot = ui\saisie auth_mot_de_passe, 128, true
-          auth_mot_de_passe = valeur_mot
-          if ui\bouton "Enregistrer"
-            if auth_mot_de_passe == ""
-              message_auth = "Saisir un mot de passe"
-            else
-              regler_auth {utilisateur: auth_utilisateur, mot_de_passe: auth_mot_de_passe}
-          if a_auth.active == true
-            if ui\bouton "Retirer"
-              regler_auth {retirer: true}
-          else
-            ui\texte ""
-
-        -- Contrôle d'accès par sous-réseau source. Une liste vide ne filtre
-        -- rien ; la fenêtre est locale, donc toujours exemptée. Même
-        -- persistance et même verrouillage par l'environnement que la page
-        -- web. Trois rangées, quel que soit l'état.
-        a_reseaux = reseaux_courant or etat_reseaux!
-        unless reseaux_charge
-          reseaux_texte = if type(a_reseaux.texte) == "string" then a_reseaux.texte else ""
-          reseaux_charge = true
-        if type(a_reseaux.erreur) == "string" and a_reseaux.erreur != ""
-          message_reseaux or= "Réseaux : #{a_reseaux.erreur} (aucun filtrage)"
         ui\ligne ligne, 1
-        texte_reseaux = if a_reseaux.active == true
-          "Réseaux autorisés : #{a_reseaux.texte}"
+        ui\texte tronquer(texte_auth, l - 2 * MARGE - ESPACE)
+
+        a_reseaux = reseaux_courant or etat_reseaux!
+        texte_reseaux = if type(a_reseaux.erreur) == "string" and a_reseaux.erreur != ""
+          "Réseaux autorisés : configuration invalide (#{a_reseaux.erreur})"
+        else if a_reseaux.active == true
+          "Réseaux autorisés : #{a_reseaux.texte} · source : #{a_reseaux.source or "locale"}"
         else
-          "Réseaux autorisés : tous"
-        ui\texte tronquer("#{texte_reseaux} · source : #{a_reseaux.source or "locale"}", l - 2 * MARGE - ESPACE)
-        ui\ligne ligne, 2
-        if a_reseaux.impose == true
-          ui\texte tronquer("Liste imposée par ORGANUM_RESEAUX", (l - 2 * MARGE) / 2 - ESPACE)
-          ui\texte ""
-        else
-          ui\texte "Sous-réseaux", "droite"
-          reseaux_texte = ui\saisie reseaux_texte, 1024, false
-        ui\ligne ligne, 2
-        if a_reseaux.impose == true
-          ui\texte ""
-          ui\texte tronquer(message_reseaux or "", (l - 2 * MARGE) / 2 - ESPACE)
-        else
-          if ui\bouton "Enregistrer"
-            regler_reseaux {reseaux: reseaux_texte}
-          ui\texte tronquer(message_reseaux or "", (l - 2 * MARGE) / 2 - ESPACE)
+          "Réseaux autorisés : tous · source : #{a_reseaux.source or "locale"}"
+        ui\ligne ligne, 1
+        ui\texte tronquer(texte_reseaux, l - 2 * MARGE - ESPACE)
 
         if a_tete
           ui\ligne ligne, 1
@@ -999,7 +917,6 @@ MAX_ASSOCIATIONS = 16
         if q.application_audio == true
           message_affiche = "Application…"
         message_affiche or= message_qualite
-        message_affiche or= message_auth
         if not message_affiche and type(q.temperament_erreur) == "string" and q.temperament_erreur != ""
           message_affiche = "Tempérament : #{q.temperament_erreur}"
         if not message_affiche and type(q.audio_erreur) == "string" and q.audio_erreur != ""
@@ -1061,8 +978,6 @@ MAX_ASSOCIATIONS = 16
       if clique_qualite
         mode = "qualite"
         message_qualite = nil
-        message_auth = nil
-        auth_charge = false
         auth_courant = etat_auth!
         seq = nil
       if midi and ui\bouton "MIDI"

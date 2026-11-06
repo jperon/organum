@@ -12,7 +12,6 @@ enum {
   FEN_RIEN,
   FEN_DEPLACEMENT,  // x, y
   FEN_BOUTON,       // bouton (1 gauche, 2 milieu, 3 droit, 4/5 molette), appui, x, y
-  FEN_TOUCHE,       // code evdev, appui
   FEN_TAILLE,       // largeur, hauteur
   FEN_EXPOSITION,
   FEN_FERMETURE,
@@ -21,7 +20,7 @@ enum {
 typedef struct {
   int type;
   int x, y;
-  int bouton, appui, code;
+  int bouton, appui;
   int largeur, hauteur;
 } fenetre_ev_t;
 

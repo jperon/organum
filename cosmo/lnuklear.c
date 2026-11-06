@@ -146,107 +146,10 @@ static int ui_protocole(lua_State *L) {
   return 1;
 }
 
-// Saisie de texte : Nuklear reçoit des caractères Unicode et quelques
-// touches de contrôle. Les serveurs d'affichage fournissent des codes
-// evdev (X11 : keycode X moins 8) ; la disposition supposée est US, comme
-// le reste de l'interface (aucune table xkb n'est chargée).
-static int touche_maj(int code) {
-  switch (code) {
-    case 16: return 'q'; case 17: return 'w'; case 18: return 'e';
-    case 19: return 'r'; case 20: return 't'; case 21: return 'y';
-    case 22: return 'u'; case 23: return 'i'; case 24: return 'o';
-    case 25: return 'p';
-    case 30: return 'a'; case 31: return 's'; case 32: return 'd';
-    case 33: return 'f'; case 34: return 'g'; case 35: return 'h';
-    case 36: return 'j'; case 37: return 'k'; case 38: return 'l';
-    case 44: return 'z'; case 45: return 'x'; case 46: return 'c';
-    case 47: return 'v'; case 48: return 'b'; case 49: return 'n';
-    case 50: return 'm';
-    case 2: return '1'; case 3: return '2'; case 4: return '3';
-    case 5: return '4'; case 6: return '5'; case 7: return '6';
-    case 8: return '7'; case 9: return '8'; case 10: return '9';
-    case 11: return '0';
-    case 12: return '-'; case 13: return '=';
-    case 26: return '['; case 27: return ']';
-    case 39: return ';'; case 40: return '\''; case 41: return '`';
-    case 43: return '\\'; case 51: return ','; case 52: return '.';
-    case 53: return '/'; case 57: return ' ';
-    default: return 0;
-  }
-}
-
-static int touche_majuscule(int code) {
-  int c = touche_maj(code);
-  if (c >= 'a' && c <= 'z') return c - 'a' + 'A';
-  switch (c) {
-    case '1': return '!'; case '2': return '@'; case '3': return '#';
-    case '4': return '$'; case '5': return '%'; case '6': return '^';
-    case '7': return '&'; case '8': return '*'; case '9': return '(';
-    case '0': return ')'; case '-': return '_'; case '=': return '+';
-    case '[': return '{'; case ']': return '}'; case ';': return ':';
-    case '\'': return '"'; case '`': return '~'; case '\\': return '|';
-    case ',': return '<'; case '.': return '>'; case '/': return '?';
-    default: return c;
-  }
-}
-
-static void touche_envoyer(ui_t *u, int code, int appui, int *maj) {
-  struct nk_context *ctx = u->ctx;
-  if (code == 42 || code == 54) { *maj = appui; return; }
-  if (!appui) {
-    switch (code) {
-      case 14: nk_input_key(ctx, NK_KEY_BACKSPACE, 0); break;
-      case 28: nk_input_key(ctx, NK_KEY_ENTER, 0); break;
-      case 15: nk_input_key(ctx, NK_KEY_TAB, 0); break;
-      case 111: nk_input_key(ctx, NK_KEY_DEL, 0); break;
-      case 105: nk_input_key(ctx, NK_KEY_LEFT, 0); break;
-      case 106: nk_input_key(ctx, NK_KEY_RIGHT, 0); break;
-      case 102: nk_input_key(ctx, NK_KEY_TEXT_START, 0); break;
-      case 107: nk_input_key(ctx, NK_KEY_TEXT_END, 0); break;
-    }
-    return;
-  }
-  switch (code) {
-    case 14: nk_input_key(ctx, NK_KEY_BACKSPACE, 1); return;
-    case 28: nk_input_key(ctx, NK_KEY_ENTER, 1); return;
-    case 15: nk_input_key(ctx, NK_KEY_TAB, 1); return;
-    case 111: nk_input_key(ctx, NK_KEY_DEL, 1); return;
-    case 105: nk_input_key(ctx, NK_KEY_LEFT, 1); return;
-    case 106: nk_input_key(ctx, NK_KEY_RIGHT, 1); return;
-    case 102: nk_input_key(ctx, NK_KEY_TEXT_START, 1); return;
-    case 107: nk_input_key(ctx, NK_KEY_TEXT_END, 1); return;
-    default: break;
-  }
-  int c = *maj ? touche_majuscule(code) : touche_maj(code);
-  if (c) nk_input_char(ctx, (nk_rune)c);
-}
-
-static int ui_saisie(lua_State *L) {
-  ui_t *u = luaL_checkudata(L, 1, "nk.ui");
-  size_t n;
-  const char *s = luaL_checklstring(L, 2, &n);
-  int max = (int)luaL_optinteger(L, 3, 128);
-  if (max < 1) max = 1;
-  if (max > 1023) max = 1023;
-  int masque = lua_toboolean(L, 4);
-  char buf[1024];
-  size_t len = n < (size_t)max ? n : (size_t)max;
-  memcpy(buf, s, len);
-  buf[len] = 0;
-  int longueur = (int)len;
-  nk_flags flags = NK_EDIT_FIELD | NK_EDIT_SIG_ENTER | NK_EDIT_CLIPBOARD;
-  nk_flags ev = nk_edit_string(u->ctx, flags, buf, &longueur, max,
-                               masque ? nk_filter_ascii : nk_filter_default);
-  lua_pushlstring(L, buf, (size_t)longueur);
-  lua_pushboolean(L, (ev & NK_EDIT_COMMITED) != 0);
-  return 2;
-}
-
 static int ui_evenements(lua_State *L) {
   ui_t *u = luaL_checkudata(L, 1, "nk.ui");
   int att = (int)luaL_checkinteger(L, 2);
   struct nk_context *ctx = u->ctx;
-  static int maj = 0;
   nk_input_begin(ctx);
   int recu = 0, fin = 0;
   fenetre_ev_t ev;
@@ -255,7 +158,6 @@ static int ui_evenements(lua_State *L) {
     switch (ev.type) {
       case FEN_FERMETURE: fin = 1; break;
       case FEN_DEPLACEMENT: nk_input_motion(ctx, ev.x, ev.y); break;
-      case FEN_TOUCHE: touche_envoyer(u, ev.code, ev.appui, &maj); break;
       case FEN_BOUTON:
         if (ev.bouton == 1) nk_input_button(ctx, NK_BUTTON_LEFT, ev.x, ev.y, ev.appui);
         else if (ev.bouton == 4 && ev.appui) nk_input_scroll(ctx, nk_vec2(0, 1));
@@ -553,7 +455,6 @@ static const struct luaL_Reg uifuncs[] = {
   {"ligne", ui_ligne},
   {"ligne_ratio", ui_ligne_ratio},
   {"texte", ui_texte},
-  {"saisie", ui_saisie},
   {"bouton", ui_bouton},
   {"choix", ui_choix},
   {"choix_deux", ui_choix_deux},

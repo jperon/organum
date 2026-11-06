@@ -249,11 +249,15 @@ demarrer_organum_auth() {
   URL="http://$HOTE_AUTH:$PORT"
   ETAT="$TMP/etat-auth-$PORT.json"
   CONFIG="$TMP/midi-auth-$PORT.json"
+  AUTH="$ETAT.digest"
   JOURNAL="$TMP/organum-auth-$PORT.log"
+  HA1=$(printf 'organiste:organum:%s' 'secret01' | sha256sum | cut -d' ' -f1)
+  printf 'organiste:organum:%s\n' "$HA1" >"$AUTH"
+  chmod 600 "$AUTH"
   setsid env -u DISPLAY -u WAYLAND_DISPLAY ORGANUM_FENETRE=non \
     PATH="$TMP/bin:$PATH" ORGANUM_VOLUME=wpctl ORGANUM_PERIPHERIQUE=null \
     ORGANUM_QUALITE=3 ORGANUM_ETAT="$ETAT" ORGANUM_CONFIG_MIDI="$CONFIG" \
-    ORGANUM_MOT_DE_PASSE=secret01 \
+    ORGANUM_DIGEST="$AUTH" \
     "$BIN" -p "$PORT" >"$JOURNAL" 2>&1 &
   PID_ORGANUM=$!
   for _ in $(seq 1 300); do
@@ -399,7 +403,7 @@ q = e.get("qualite", {})
 a_reverb = 1 if isinstance(e.get("reverb"), (int, float)) else 0
 a_tete = 1 if (isinstance(q.get("tete_reverb"), bool) and isinstance(q.get("tete_reverb_prochain"), bool)) else 0
 a_calib = 1 if isinstance(q.get("calibration"), dict) else 0
-rows = 10 + a_reverb + a_tete + a_calib + 2 + 3 + 3
+rows = 10 + a_reverb + a_tete + a_calib + 1 + 1
 cols = 6 if isinstance(q.get("auto"), bool) else 5
 print(rows, cols)
 PY
