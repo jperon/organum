@@ -235,6 +235,8 @@ for _, cas in ipairs({
   {{niveau = 4}, "niveau haut"},
   {{auto = "non"}, "auto non booléen"},
   {{periode = 100}, "période invalide"},
+  {{periode = 769}, "période 769 refusée"},
+  {{periode = 1537}, "période 1537 refusée"},
   {{periode = "512"}, "période chaîne"},
   {{taux = 22050}, "taux invalide"},
   {{taux = "48000"}, "taux chaîne"},
@@ -246,6 +248,8 @@ for _, cas in ipairs({
   aide.egal(action, nil, "qualité : refus " .. cas[2])
 end
 aide.egal(qualite({niveau = 0}), true, "qualité : un seul champ suffit")
+aide.egal(qualite({periode = 768}), true, "qualité : période 768 admise")
+aide.egal(qualite({periode = 1536}), true, "qualité : période 1536 admise")
 
 -- valider_connexion_midi
 aide.egal(v.valider_connexion_midi({client = 0, port = 0, connecte = true}), true,
@@ -268,6 +272,8 @@ end
 aide.egal(v.TAUX_VALIDES[44100], true, "constantes : taux 44100")
 aide.egal(v.TAUX_VALIDES[22050], nil, "constantes : taux 22050 absent")
 aide.egal(v.PERIODES_VALIDES[2048], true, "constantes : période 2048")
+aide.egal(v.PERIODES_VALIDES[768], true, "constantes : période 768")
+aide.egal(v.PERIODES_VALIDES[1536], true, "constantes : période 1536")
 aide.egal(v.PERIODES_VALIDES[100], nil, "constantes : période 100 absente")
 aide.egal(v.DEMARRAGE_DEFAUT.periode, 512, "constantes : période par défaut")
 for _, cle in ipairs({"stop", "cancel", "step", "reverb", "panic", "gain",

@@ -422,8 +422,8 @@ coords() {
         UNIT_LUA_PATH="$TMP/lua/?.lua" redbean -i "$TMP/coords.lua"
       ;;
     qualite)
-      rows=$1; cols=$2; frac=${3:-0.25}
-      L="$l" H="$h" MODE=qualite ROWS="$rows" COLS="$cols" REVERB_FRAC="$frac" \
+      rows=$1; cols=$2; frac=${3:-0.25}; per=${4:-5}
+      L="$l" H="$h" MODE=qualite ROWS="$rows" COLS="$cols" REVERB_FRAC="$frac" PERIODE_ROW="$per" \
         UNIT_LUA_PATH="$TMP/lua/?.lua" redbean -i "$TMP/coords.lua"
       ;;
     midi)
@@ -452,7 +452,8 @@ a_tete = 1 if (isinstance(q.get("tete_reverb"), bool) and isinstance(q.get("tete
 a_calib = 1 if isinstance(q.get("calibration"), dict) else 0
 rows = 10 + a_reverb + a_tete + a_calib + 1 + 1 + 1 + 1
 cols = 6 if isinstance(q.get("auto"), bool) else 5
-print(rows, cols)
+per = 6 if a_reverb else 5
+print(rows, cols, per)
 PY
 }
 
@@ -587,6 +588,11 @@ elseif mode == "qualite" then
   local rows = tonumber(os.getenv("ROWS")); local cols = tonumber(os.getenv("COLS"))
   local p = d.disposer_qualite(rows, l, h, cols)
   local function y(k) return arrondi(ligne_y(k, p.ligne)) end
+  -- Rangée Période : libellé puis sept valeurs, soit 8 colonnes. 768 est la
+  -- quatrième valeur, 512 la troisième.
+  local per = tonumber(os.getenv("PERIODE_ROW") or "5")
+  print("periode_512_x=" .. arrondi(colonne(8, 3))); print("periode_512_y=" .. y(per))
+  print("periode_768_x=" .. arrondi(colonne(8, 4))); print("periode_768_y=" .. y(per))
   local xr = colonne(3, 0)
   print("retour_x=" .. arrondi(xr)); print("retour_y=" .. y(0))
   local xt = colonne(6, 2)
@@ -715,8 +721,8 @@ if demarrer_xvfb && demarrer_organum oui && attendre_fenetre; then
       ok "natif $largeur×$hauteur : panneau Audio ouvert par clic"
     fi
 
-    read -r QROWS QCOLS <<<"$(parametres_qualite)"
-    eval "$(coords qualite "$largeur" "$hauteur" "$QROWS" "$QCOLS")"
+    read -r QROWS QCOLS QPER <<<"$(parametres_qualite)"
+    eval "$(coords qualite "$largeur" "$hauteur" "$QROWS" "$QCOLS" 0.25 "$QPER")"
     clic_xy "$retour_x" "$retour_y"
     capturer "console-retour-$largeur-$hauteur"
 
@@ -796,8 +802,8 @@ if demarrer_xvfb && demarrer_organum oui && attendre_fenetre; then
   attendre_api '"transposition":0' 50
 
   clic_xy "$audio_x" "$audio_y"
-  read -r QROWS QCOLS <<<"$(parametres_qualite)"
-  eval "$(coords qualite 1920 1080 "$QROWS" "$QCOLS")"
+  read -r QROWS QCOLS QPER <<<"$(parametres_qualite)"
+  eval "$(coords qualite 1920 1080 "$QROWS" "$QCOLS" 0.25 "$QPER")"
 
   ecrire_json_api '{"temperament":5}'
   attendre_api '"temperament":5' 100
@@ -851,9 +857,9 @@ v = float(sys.argv[1])
 print("0.75" if v < 0.5 else "0.25")
 PY
 )
-  eval "$(coords qualite 1920 1080 "$QROWS" "$QCOLS" "$REVERB_AVANT")"
+  eval "$(coords qualite 1920 1080 "$QROWS" "$QCOLS" "$REVERB_AVANT" "$QPER")"
   REVERB_X_AVANT=$reverb_x
-  eval "$(coords qualite 1920 1080 "$QROWS" "$QCOLS" "$REVERB_FRAC")"
+  eval "$(coords qualite 1920 1080 "$QROWS" "$QCOLS" "$REVERB_FRAC" "$QPER")"
   glisser_xy "$REVERB_X_AVANT" "$reverb_y" "$reverb_x" "$reverb_y"
   REVERB_APRES=$(lire_api | python3 -c 'import json,sys; print(json.load(sys.stdin)["reverb"])' 2>/dev/null || echo 0)
   if python3 - "$REVERB_AVANT" "$REVERB_APRES" <<'PY'
@@ -916,8 +922,21 @@ PY
   read -r NDIV MAXJEUX LIENS <<<"$(parametres_transposition)"
   eval "$(NDIV=$NDIV MAXJEUX=$MAXJEUX LIENS=$LIENS COL=0 coords console 1920 1080 "$R1" "$R2")"
   clic_xy "$audio_x" "$audio_y"
-  read -r QROWS QCOLS <<<"$(parametres_qualite)"
-  eval "$(coords qualite 1920 1080 "$QROWS" "$QCOLS")"
+  read -r QROWS QCOLS QPER <<<"$(parametres_qualite)"
+  eval "$(coords qualite 1920 1080 "$QROWS" "$QCOLS" 0.25 "$QPER")"
+  # Période 768 : clic réel sur la quatrième des sept valeurs, relu par l'API.
+  clic_xy "$periode_768_x" "$periode_768_y"
+  if attendre_api '"periode":768' 200; then
+    ok "natif : période 768 choisie par clic et relue dans /api/orgue"
+  else
+    echec "natif : le clic sur la période 768 n'a pas appliqué la valeur"
+  fi
+  clic_xy "$periode_512_x" "$periode_512_y"
+  if attendre_api '"periode":512' 200; then
+    ok "natif : retour à la période 512 par clic"
+  else
+    echec "natif : le retour à la période 512 par clic a échoué"
+  fi
   if demarrer_chromium; then
     WID="$WID" DISPLAY="$DISPLAY" CAPTURES="$CAPTURES" \
     TEMP1_X="$temp_x" TEMP1_Y="$temp_y" TEMP3_X="$temp3_x" TEMP3_Y="$temp3_y" \

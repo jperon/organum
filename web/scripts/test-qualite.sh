@@ -789,14 +789,28 @@ S=$(attendre_etat '"audio_erreur":""' 100) || true
 S=$(attendre_etat '"application":false' 100) || true
 verifie "périphérique rétabli : audio_erreur vidé" '"audio_erreur":""' "$S"
 
-echo "== application : 5 demandes de période rapprochées"
-for p in 256 1024 128 2048 512; do
+echo "== application : 7 demandes de période rapprochées"
+for p in 256 1024 128 2048 768 1536 512; do
   post "{\"qualite\":{\"periode\":$p}}" >/dev/null
   sleep 0.02
 done
 S=$(attendre_etat '"application":false' 200) || true
-verifie "5 demandes rapprochées : application finit à faux" '"application":false' "$S"
-verifie "5 demandes rapprochées : période finale = 512" '"periode":512' "$S"
+verifie "7 demandes rapprochées : application finit à faux" '"application":false' "$S"
+verifie "7 demandes rapprochées : période finale = 512" '"periode":512' "$S"
+
+echo "== application : périodes 768 et 1536 à chaud"
+for p in 768 1536; do
+  post "{\"qualite\":{\"periode\":$p}}" >/dev/null
+  S=$(attendre_etat "\"periode\":$p" 50) || true
+  verifie "période effective = $p sans relance" "\"periode\":$p" "$S"
+  verifie "période enregistrée = $p" "\"periode_prochain\":$p" "$S"
+  verifie "période $p : pas d'erreur audio" '"audio_erreur":""' "$S"
+done
+S=$(attendre_etat '"application":false' 100) || true
+verifie "périodes 768/1536 : application revient à faux" '"application":false' "$S"
+post '{"qualite":{"periode":512}}' >/dev/null
+S=$(attendre_etat '"periode":512' 50) || true
+verifie "retour à la période 512" '"periode":512' "$S"
 
 echo "== application : échec de POST avant la commande"
 CODE=$(code_post '{"qualite":{"taux":22050}}')

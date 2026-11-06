@@ -126,7 +126,7 @@ for i, nom in ipairs(temperaments) do
     "page audio : tempérament " .. (i - 1) .. " dans l'ordre")
   position = p or position
 end
-for _, valeur in ipairs({"128", "256", "512", "1024", "2048"}) do
+for _, valeur in ipairs({"128", "256", "512", "768", "1024", "1536", "2048"}) do
   aide.verifie(audio:find(">" .. valeur .. "<", 1, true) ~= nil,
     "page audio : période " .. valeur)
 end

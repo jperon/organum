@@ -733,7 +733,7 @@ async function testAudio() {
     (e) => e.qualite.polyphonie_max > 0
   );
 
-  for (const periode of [128, 256, 512, 1024, 2048]) {
+  for (const periode of [128, 256, 512, 768, 1024, 1536, 2048]) {
     await clicGroupe('qualite-periode', String(periode));
     await attendreChamp(
       `web /audio : période ${periode} par clic`,
