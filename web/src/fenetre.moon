@@ -760,15 +760,15 @@ MAX_ASSOCIATIONS = 16
           regler_qualite {polyphonie_max: math.floor poly + 0.5}
         ui\texte (if (q.polyphonie_max or 0) == 0 then "Illimitée" else "#{q.polyphonie_max} voix"), "droite"
 
-        -- Période : cinq valeurs, plus le libellé (6 cases).
-        ui\ligne ligne, 6
+        -- Période : sept valeurs, plus le libellé (8 cases).
+        ui\ligne ligne, 8
         etiquette_periode = "Période"
         if q.periode_impose == true
           etiquette_periode = "Période (imposée)"
         elseif q.periode_prochain != q.periode
           etiquette_periode = "Période (en cours)"
-        ui\texte tronquer(etiquette_periode, (l - 2 * MARGE) / 6 - ESPACE)
-        for valeur in *{128, 256, 512, 1024, 2048}
+        ui\texte tronquer(etiquette_periode, (l - 2 * MARGE) / 8 - ESPACE)
+        for valeur in *{128, 256, 512, 768, 1024, 1536, 2048}
           actif = q.periode_prochain == valeur
           change = ui\choix(tostring(valeur), actif) != actif
           if change and q.periode_impose != true

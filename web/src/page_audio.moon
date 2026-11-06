@@ -240,7 +240,7 @@ duree_periode = (periode, taux = 48000) ->
   texte = string.format "%.1f", tonumber(periode) * 1000 / taux
   texte\gsub "%.", ","
 
-periodes = {"128", "256", "512", "1024", "2048"}
+periodes = {"128", "256", "512", "768", "1024", "1536", "2048"}
 taux_valides = {"44100", "48000"}
 
 libelle_periode = (valeur) ->

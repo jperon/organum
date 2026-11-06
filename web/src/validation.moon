@@ -4,7 +4,7 @@
 -- ou normaliser une valeur.
 
 TAUX_VALIDES = {[44100]: true, [48000]: true}
-PERIODES_VALIDES = {[128]: true, [256]: true, [512]: true, [1024]: true, [2048]: true}
+PERIODES_VALIDES = {[128]: true, [256]: true, [512]: true, [768]: true, [1024]: true, [1536]: true, [2048]: true}
 DEMARRAGE_DEFAUT = {periode: 512, taux: 48000, peripherique: "", limiteur: true}
 
 entier_borne = (v, min, max) ->
@@ -197,7 +197,7 @@ valider_qualite = (q) ->
   if q.auto != nil and type(q.auto) != "boolean"
     return nil, "qualite.auto doit être un booléen"
   if q.periode != nil and not (type(q.periode) == "number" and PERIODES_VALIDES[q.periode] == true)
-    return nil, "qualite.periode doit valoir 128, 256, 512, 1024 ou 2048"
+    return nil, "qualite.periode doit valoir 128, 256, 512, 768, 1024, 1536 ou 2048"
   if q.taux != nil and not (type(q.taux) == "number" and TAUX_VALIDES[q.taux] == true)
     return nil, "qualite.taux doit valoir 44100 ou 48000"
   if q.peripherique != nil and not peripherique_valide q.peripherique
