@@ -20,7 +20,12 @@ unset WAYLAND_DISPLAY DISPLAY
 RACINE="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$RACINE/web/build/organum.com"
 TMP="$(mktemp -d)" || exit 2
-CAPTURES="$(mktemp -d)" || exit 2
+if [ -n "${ORGANUM_CAPTURES:-}" ]; then
+  CAPTURES="$ORGANUM_CAPTURES"
+  mkdir -p "$CAPTURES" || exit 2
+else
+  CAPTURES="$(mktemp -d)" || exit 2
+fi
 mkdir -p "$TMP/lua" "$TMP/bin"
 ECHECS=0
 IGNORES=0
