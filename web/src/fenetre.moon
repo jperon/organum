@@ -84,9 +84,11 @@ MAX_ASSOCIATIONS = 16
   reseaux_charge = false
   reseaux_courant = nil
   message_reseaux = nil
-  -- Tempérament demandé : tenu localement tant que le fil audio n'a pas
-  -- publié la valeur effective. Il distingue la cible en cours (libellé
-  -- suivi de « … ») du tempérament réellement en service (bouton accentué).
+  -- Tempérament : la cible en cours est publiée par le serveur
+  -- (qualite.temperament_cible), donc identique à celle des autres
+  -- interfaces. temperament_cible ne garde qu'un retour immédiat au clic,
+  -- le temps de la lecture suivante ; il distingue la cible en cours
+  -- (libellé suivi de « … ») du tempérament réellement en service.
   temperament_cible = nil
   cible_apprentissage = "volume"
   -- Apprentissage : {i: n} refait l'association n, {nouveau: true} attend un
@@ -290,6 +292,7 @@ MAX_ASSOCIATIONS = 16
     {
       temperament: e.temperament or 5
       temperament_erreur: base.temperament_erreur or ""
+      temperament_cible: base.temperament_cible or -1
       bruit_attaque: base.bruit_attaque == true
       instabilite: base.instabilite == true
       spatialisation: base.spatialisation or 0
@@ -311,6 +314,7 @@ MAX_ASSOCIATIONS = 16
       limiteur_impose: false
       audio_repli: ""
       application: base.application == true
+      application_audio: base.application_audio == true
       charge: base.charge or 0
       charge_pointe: base.charge_pointe or 0
       charge_evaluee: base.charge_evaluee == true
@@ -691,23 +695,28 @@ MAX_ASSOCIATIONS = 16
     if mode == "qualite"
       l, h = ui\taille!
       q = etat_qualite e
-      if temperament_cible != nil
-        if q.temperament == temperament_cible
-          -- Valeur effective publiée : la demande est aboutie.
-          temperament_cible = nil
-          message_qualite = nil
-        elseif q.application != true and type(q.temperament_erreur) == "string" and q.temperament_erreur != ""
-          -- Calcul terminé, valeur inchangée et erreur publiée.
+      -- Cible affichée : celle que publie le serveur, partagée par toutes
+      -- les interfaces. Le retour local du clic ne sert que si aucune cible
+      -- n'est encore publiée et qu'une demande est en cours.
+      cible_temperament = nil
+      if type(q.temperament_cible) == "number" and q.temperament_cible >= 0
+        cible_temperament = q.temperament_cible
+        temperament_cible = nil
+      elseif temperament_cible != nil
+        if q.application == true
+          cible_temperament = temperament_cible
+        else
+          -- Plus aucune demande en cours : le retour local est périmé.
           temperament_cible = nil
       a_tete = type(q.tete_reverb) == "boolean" and type(q.tete_reverb_prochain) == "boolean"
       a_reverb = type(q.reverb) == "number"
       calib = type(q.calibration) == "table" and q.calibration or nil
       -- Rangées : en-tête, niveau, deux cases, spatialisation, polyphonie,
-      -- période, taux + limiteur, tempérament (2 rangées), périphérique,
+      -- période, taux, limiteur, tempérament (2 rangées), périphérique,
       -- authentification (2 + 3 rangées), réseaux (3 rangées), puis (tête),
       -- (calibration) et message. Le nombre de cases de la ligne « Niveau »
       -- vaut 6 quand le mode Auto existe (bouton en plus), 5 sinon.
-      rows = 9 + (a_reverb and 1 or 0) + (a_tete and 1 or 0) + (calib and 1 or 0) + 2 + 3 + 3
+      rows = 10 + (a_reverb and 1 or 0) + (a_tete and 1 or 0) + (calib and 1 or 0) + 2 + 3 + 3
       colonnes = (type(q.auto) == "boolean") and 6 or 5
       p = disposer_qualite rows, l, h, colonnes
       if p.police != police
@@ -798,7 +807,7 @@ MAX_ASSOCIATIONS = 16
           if change and q.periode_impose != true
             regler_qualite {periode: valeur}
 
-        -- Taux d'échantillonnage et limiteur (4 cases).
+        -- Taux d'échantillonnage (4 cases).
         ui\ligne ligne, 4
         etiquette_taux = "Taux"
         if q.taux_impose == true
@@ -811,11 +820,19 @@ MAX_ASSOCIATIONS = 16
           change = ui\choix(tostring(valeur), actif) != actif
           if change and q.taux_impose != true
             regler_qualite {taux: valeur}
+
+        -- Limiteur sur sa propre rangée : libellé explicite et bascule.
+        ui\ligne ligne, 2
         if q.limiteur_impose == true
-          ui\texte (if q.limiteur == true then "Limiteur actif (imposé)" else "Limiteur coupé (imposé)")
+          texte_limiteur = if q.limiteur == true
+            "Limiteur (imposé : actif)" else "Limiteur (imposé : coupé)"
+          ui\texte tronquer(texte_limiteur, (l - 2 * MARGE) / 2 - ESPACE)
+          ui\texte ""
         else
+          libelle_limiteur = "Limiteur — évite la saturation sur les gros accords"
+          ui\texte tronquer(libelle_limiteur, (l - 2 * MARGE) / 2 - ESPACE), "droite"
           actif_limiteur = q.limiteur_prochain == true
-          nouveau = ui\choix "Limiteur", actif_limiteur
+          nouveau = ui\choix "Actif", actif_limiteur
           regler_qualite {limiteur: nouveau} if nouveau != actif_limiteur
 
         -- Tempérament : 11 valeurs sur deux rangées (libellé + 5 boutons,
@@ -823,13 +840,13 @@ MAX_ASSOCIATIONS = 16
         -- cours porte « … » dans son libellé, la valeur en service reste le
         -- bouton accentué.
         etiquette_temperament = "Tempérament"
-        if temperament_cible != nil
-          etiquette_temperament = "Application de #{modele.TEMPERAMENTS[temperament_cible + 1]}…"
+        if cible_temperament != nil
+          etiquette_temperament = "Application de #{modele.TEMPERAMENTS[cible_temperament + 1]}…"
         ui\ligne ligne, 6
         ui\texte tronquer(etiquette_temperament, (l - 2 * MARGE) / 6 - ESPACE), "droite"
         for i = 1, 5
           actif = q.temperament == i - 1
-          en_cours = temperament_cible == i - 1
+          en_cours = cible_temperament == i - 1
           libelle = modele.TEMPERAMENTS[i]
           libelle = libelle .. " …" if en_cours
           if en_cours
@@ -838,19 +855,19 @@ MAX_ASSOCIATIONS = 16
             ui\etat libelle, false, true
           else
             choix = ui\choix libelle, actif
-            if choix != actif and choix and q.temperament != i - 1 and temperament_cible != i - 1
+            if choix != actif and choix and q.temperament != i - 1 and cible_temperament != i - 1
               regler_qualite {temperament: i - 1}
         ui\ligne ligne, 6
         for i = 6, 11
           actif = q.temperament == i - 1
-          en_cours = temperament_cible == i - 1
+          en_cours = cible_temperament == i - 1
           libelle = modele.TEMPERAMENTS[i]
           libelle = libelle .. " …" if en_cours
           if en_cours
             ui\etat libelle, false, true
           else
             choix = ui\choix libelle, actif
-            if choix != actif and choix and q.temperament != i - 1 and temperament_cible != i - 1
+            if choix != actif and choix and q.temperament != i - 1 and cible_temperament != i - 1
               regler_qualite {temperament: i - 1}
 
         -- Périphérique : lecture seule (le module nk n'expose pas de champ
@@ -979,7 +996,7 @@ MAX_ASSOCIATIONS = 16
         -- message le plus important est « Application… » ; une fois terminée,
         -- un échec éventuel reprend la ligne.
         message_affiche = nil
-        if q.application == true
+        if q.application_audio == true
           message_affiche = "Application…"
         message_affiche or= message_qualite
         message_affiche or= message_auth
