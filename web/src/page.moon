@@ -39,7 +39,7 @@ transposition_html = (valeur) ->
   attrs_plus = {type: "button", class: "btn small transposition-plus", ["aria-label"]: "Transposition +1 demi-ton", "+"}
   attrs_moins.disabled = true if v <= -12
   attrs_plus.disabled = true if v >= 12
-  h.div class: classes, ["data-transposition"]: tostring(v),
+  h.div class: classes, id: "transposition", ["data-transposition"]: tostring(v),
     h.span class: "transposition-libelle", "Transposition",
     h.button attrs_moins,
     h.span class: "transposition-valeur", ["aria-live"]: "polite", texte,
