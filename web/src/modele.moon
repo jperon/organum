@@ -14,6 +14,26 @@ abrege = (nom) ->
   nom = tostring nom
   nom\match("^[Mm]anual%s+(%S+)$") or (nom\match("^[Pp]ed") and "P") or nom
 
+-- Valeur signée du transpositeur : « 0 », « +3 », « −2 ».
+texte_transposition = (valeur) ->
+  v = math.tointeger tonumber valeur
+  v = 0 if v == nil
+  v = math.max -12, math.min 12, v
+  if v > 0 then "+#{v}" elseif v < 0 then "\u{2212}#{math.abs v}" else "0"
+
+-- Colonne qui reçoit la commande de transposition : le Manuel III (il n'a
+-- pas d'accouplement, donc de la place libre en bas de sa colonne). Repli sur
+-- la première division sans accouplement quand un autre orgue n'a pas de
+-- Manuel III ; nil si toutes les colonnes ont des accouplements.
+colonne_transposition = (divisions) ->
+  return nil unless type(divisions) == "table"
+  for i, d in ipairs divisions
+    return i if abrege(d.nom or d.name) == "III"
+  for i, d in ipairs divisions
+    liens = d.liens or d.links
+    return i if type(liens) == "table" and #liens == 0
+  nil
+
 -- Nom de jeu sur une seule ligne : les noms d'Aeolus contiennent parfois des
 -- retours à la ligne.
 nom_jeu = (jeu) ->
@@ -191,6 +211,8 @@ etat_port = (p) ->
 
 {
   :abrege
+  :texte_transposition
+  :colonne_transposition
   :nom_jeu
   :canaux_liste
   :canaux_masque

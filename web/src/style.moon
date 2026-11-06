@@ -345,6 +345,47 @@ CSS = [[
 
   .links { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 2px; }
   .links .link { flex: 1 1 4em; }
+  /* Transposition globale, en bas de la colonne du Manuel III. */
+  .transposition {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding: 4px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+  }
+  .transposition-libelle {
+    flex: 1 1 100%;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+  }
+  .transposition .btn.small {
+    min-width: 48px;
+    min-height: 44px;
+    padding: 0 10px;
+  }
+  .transposition-valeur {
+    min-width: 2.6em;
+    text-align: center;
+    font-size: 1.15rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .transposition.active {
+    border-color: var(--accent);
+    background: rgba(99, 210, 255, 0.12);
+  }
+  .transposition.active .transposition-valeur,
+  .transposition.active .transposition-libelle {
+    color: var(--accent-bright);
+  }
+  .transposition .btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    border-color: var(--border);
+  }
   .stops-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
@@ -504,6 +545,8 @@ CSS = [[
     grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
   }
   .stop, .link { min-height: 40px; padding: 2px 4px; border-width: 1px; border-radius: 4px; }
+  .transposition { margin-top: 2px; gap: 4px; padding: 2px; }
+  .transposition .btn.small { min-width: 44px; min-height: 44px; }
   .cancel-division { min-height: 30px; }
 
   @media (min-width: 900px) {

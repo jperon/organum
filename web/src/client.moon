@@ -443,6 +443,9 @@ JS = [[
 
     function applyOrgueData(data) {
       majLienQualite(data && typeof data === 'object' ? data.qualite : null);
+      if (data && typeof data === 'object' && typeof data.transposition === 'number' && isFinite(data.transposition)) {
+        if (window.majTransposition) { window.majTransposition(data.transposition); }
+      }
       if (data && typeof data === 'object' && typeof data.volume === 'number' && isFinite(data.volume)) {
         var pourcent = Math.round(Math.max(0, Math.min(1, data.volume)) * 100);
         if (!pedalManip) { paintPedale(pourcent); }
@@ -604,6 +607,56 @@ JS = [[
       panicBtn.addEventListener('click', function () {
         postOrgue({ panic: true });
       });
+    }
+
+    // Transposition globale : −, valeur signée, +. La valeur vient de l'API
+    // (GET ou attente longue), donc un changement fait dans la fenêtre native
+    // apparaît ici, et réciproquement.
+    var transpositionCourante = 0;
+    var transpositionBloc = document.getElementById('transposition');
+    function paintTransposition(valeur) {
+      if (!transpositionBloc) { return; }
+      var v = Math.round(Number(valeur));
+      if (!isFinite(v)) { return; }
+      if (v < -12) { v = -12; }
+      if (v > 12) { v = 12; }
+      transpositionCourante = v;
+      var texte = v > 0 ? '+' + v : v < 0 ? '\u2212' + Math.abs(v) : '0';
+      var champ = transpositionBloc.querySelector('.transposition-valeur');
+      if (champ) { champ.textContent = texte; }
+      transpositionBloc.setAttribute('data-transposition', String(v));
+      transpositionBloc.classList.toggle('active', v !== 0);
+      var moins = transpositionBloc.querySelector('.transposition-moins');
+      var plus = transpositionBloc.querySelector('.transposition-plus');
+      if (moins) {
+        moins.disabled = v <= -12;
+        moins.setAttribute('aria-disabled', v <= -12 ? 'true' : 'false');
+      }
+      if (plus) {
+        plus.disabled = v >= 12;
+        plus.setAttribute('aria-disabled', v >= 12 ? 'true' : 'false');
+      }
+    }
+    function reglerTransposition(valeur) {
+      paintTransposition(valeur);
+      postOrgue({ transposition: transpositionCourante });
+    }
+    window.majTransposition = paintTransposition;
+    if (transpositionBloc) {
+      var initialTransposition = parseInt(transpositionBloc.getAttribute('data-transposition'), 10);
+      paintTransposition(isFinite(initialTransposition) ? initialTransposition : 0);
+      var transpositionMoins = transpositionBloc.querySelector('.transposition-moins');
+      var transpositionPlus = transpositionBloc.querySelector('.transposition-plus');
+      if (transpositionMoins) {
+        transpositionMoins.addEventListener('click', function () {
+          if (transpositionCourante > -12) { reglerTransposition(transpositionCourante - 1); }
+        });
+      }
+      if (transpositionPlus) {
+        transpositionPlus.addEventListener('click', function () {
+          if (transpositionCourante < 12) { reglerTransposition(transpositionCourante + 1); }
+        });
+      }
     }
 
     // Volume de chaque clavier (via le socket d'Aeolus).

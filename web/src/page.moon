@@ -27,7 +27,25 @@ etat_jeu = (jeu) ->
 
 -- Abréviation d'un clavier pour les accouplements : voir modele.abrege.
 
-division_html = (di, div, divisions) ->
+-- Commande de transposition : −, valeur signée, +. La valeur 0 s'affiche
+-- « 0 » ; une valeur non nulle met le bloc en évidence (classes CSS) et les
+-- bornes désactivent le bouton correspondant.
+transposition_html = (valeur) ->
+  v = tonumber(valeur) or 0
+  v = math.max -12, math.min 12, math.floor v
+  texte = modele.texte_transposition v
+  classes = if v != 0 then "transposition active" else "transposition"
+  attrs_moins = {type: "button", class: "btn small transposition-moins", ["aria-label"]: "Transposition −1 demi-ton", "−"}
+  attrs_plus = {type: "button", class: "btn small transposition-plus", ["aria-label"]: "Transposition +1 demi-ton", "+"}
+  attrs_moins.disabled = true if v <= -12
+  attrs_plus.disabled = true if v >= 12
+  h.div class: classes, ["data-transposition"]: tostring(v),
+    h.span class: "transposition-libelle", "Transposition",
+    h.button attrs_moins,
+    h.span class: "transposition-valeur", ["aria-live"]: "polite", texte,
+    h.button attrs_plus
+
+division_html = (di, div, divisions, transposition = 0, colonne_transposition = nil) ->
   d = tostring di
   liens = for i, l in ipairs div.links or {}
     cible = divisions[l.division + 1]
@@ -36,15 +54,20 @@ division_html = (di, div, divisions) ->
   btns = for i, jeu in ipairs div.stops
     h.button class: "stop", ["data-division"]: d, ["data-index"]: tostring(i - 1), ["data-state"]: etat_jeu(jeu), type: "button", display jeu.name
   gain = math.floor((tonumber(div.gain) or 0.5) * 100 + 0.5)
+  commande_transposition = ""
+  if di + 1 == colonne_transposition and #liens == 0
+    commande_transposition = transposition_html transposition
   h.section class: "division",
     h.div class: "division-tete",
       h.h2 class: "division-nom", display div.name,
       h.input type: "range", class: "gain", ["data-division"]: d, min: "0", max: "100", step: "1", value: tostring(gain), ["aria-label"]: "Volume #{escape div.name}",
     h.div class: "stops-grid", table.unpack btns,
     #liens > 0 and h.div(class: "links", table.unpack liens) or "",
+    commande_transposition,
     h.button class: "btn small cancel-division", ["data-division"]: d, type: "button", "Tout annuler"
 
-(divisions, steps = 32) ->
+(divisions, steps = 32, transposition = 0) ->
+  colonne_transposition = modele.colonne_transposition divisions
   page = h.html lang: "fr",
     h.head {},
       h.meta charset: "utf-8",
@@ -77,7 +100,7 @@ division_html = (di, div, divisions) ->
             h.a class: "btn small", href: "/midi", "MIDI",
             h.a class: "btn small lien-qualite charge-gris", href: "/audio", id: "lien-qualite", ["aria-label"]: "Audio — #{escape modele.CHARGE_NIVEAUX[1].libelle}", ["data-charge-classe-0"]: modele.CHARGE_NIVEAUX[1].classe, ["data-charge-classe-1"]: modele.CHARGE_NIVEAUX[2].classe, ["data-charge-classe-2"]: modele.CHARGE_NIVEAUX[3].classe, ["data-charge-classe-3"]: modele.CHARGE_NIVEAUX[4].classe, ["data-charge-libelle-0"]: escape(modele.CHARGE_NIVEAUX[1].libelle), ["data-charge-libelle-1"]: escape(modele.CHARGE_NIVEAUX[2].libelle), ["data-charge-libelle-2"]: escape(modele.CHARGE_NIVEAUX[3].libelle), ["data-charge-libelle-3"]: escape(modele.CHARGE_NIVEAUX[4].libelle), "Audio",
           h.p class: "note", "L'affichage reflète l'état mémorisé par le serveur ; il peut différer si les jeux sont tirés ailleurs.",
-          h.div class: "divisions", table.unpack [division_html di - 1, div, divisions for di, div in ipairs divisions],
+          h.div class: "divisions", table.unpack [division_html(di - 1, div, divisions, transposition, colonne_transposition) for di, div in ipairs divisions],
           h.p class: "note", h.a(href: "https://github.com/jperon/organum", "Code source (AGPL-3.0)"),
       h.script client
 

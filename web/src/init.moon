@@ -1408,7 +1408,7 @@ page = require "page"
 
 divisions_page = ->
   e = etat_orgue!
-  e.divisions, e.steps
+  e.divisions, e.steps, e.transposition or 0
 
 -- Chaque fils de requête hérite des descripteurs PCM du processus principal.
 -- Les lâcher avant de servir : sinon le périphérique reste occupé après une

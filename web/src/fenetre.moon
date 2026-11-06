@@ -1000,6 +1000,13 @@ MAX_ASSOCIATIONS = 16
 
       -- Claviers, un par colonne, sur toute la hauteur restante.
       reste = h - 2 * MARGE - (1 + p.lignes_combi) * (p.entete + ESPACE) - ESPACE
+      -- Transposition dans la colonne du Manuel III (sans accouplement). La
+      -- rangée des accouplements n'existe que si au moins un clavier en a :
+      -- elle fournit alors la place libre en bas de sa colonne.
+      colonne_transposition = modele.colonne_transposition e.divisions
+      a_des_liens = false
+      for dd in *e.divisions
+        a_des_liens = true if #dd.liens > 0
       ui\ligne reste, #e.divisions
       for d, div in ipairs e.divisions
         if ui\groupe_debut "clavier #{d}"
@@ -1031,6 +1038,23 @@ MAX_ASSOCIATIONS = 16
               cible = e.divisions[lien.division]
               etiquette = "#{modele.abrege div.nom}+#{modele.abrege cible and cible.nom or '?'}"
               organum.lien d, i, not lien.actif if ui\choix(etiquette, lien.actif) != lien.actif
+          elseif d == colonne_transposition and a_des_liens
+            -- Une seule rangée disponible : −, valeur signée, +. La valeur
+            -- non nulle accentue les trois cellules (couleur de sélection).
+            v = math.tointeger(e.transposition) or 0
+            accent = v != 0
+            ui\ligne_ratio p.jeu, {2, 1, 1.2, 1}
+            largeur_colonne = (l - 2 * MARGE) / #e.divisions - 2 * MARGE_GROUPE - ESPACE
+            ui\texte tronquer("Transposition", largeur_colonne * 2 / 5.2 - ESPACE)
+            clique_moins = ui\etat("\u{2212}", accent, false) != accent
+            if clique_moins and v > -12
+              organum.transposition v - 1
+              v -= 1
+              accent = v != 0
+            ui\etat modele.texte_transposition(v), accent, false
+            clique_plus = ui\etat("+", accent, false) != accent
+            if clique_plus and v < 12
+              organum.transposition v + 1
           ui\groupe_fin!
     ui\fin!
     ui\dessiner 30, 30, 30

@@ -174,4 +174,21 @@ aide.egal(m.etat_port({destination = true}), "destination", "etat_port : destina
 aide.egal(m.etat_port({}), "disponible", "etat_port : disponible")
 aide.egal(m.etat_port(nil), "disponible", "etat_port : nil")
 
+aide.egal(m.texte_transposition(0), "0", "transposition : zéro")
+aide.egal(m.texte_transposition(3), "+3", "transposition : positif")
+aide.egal(m.texte_transposition(-2), "\226\136\1462", "transposition : négatif (moins U+2212)")
+aide.egal(m.texte_transposition(20), "+12", "transposition : borne haute")
+aide.egal(m.texte_transposition(-20), "\226\136\14612", "transposition : borne basse")
+aide.egal(m.texte_transposition(nil), "0", "transposition : nil -> 0")
+
+aide.egal(m.colonne_transposition({{name = "Manual III", links = {}}, {name = "Manual II", links = {{}}}, {name = "Pedal", links = {{}}}}), 1,
+  "transposition : Manuel III par son nom")
+aide.egal(m.colonne_transposition({{name = "Grand Orgue", links = {{}}}, {name = "Récit", links = {}}}), 2,
+  "transposition : repli sur la division sans accouplement")
+aide.egal(m.colonne_transposition({{nom = "Manual III", liens = {}}}), 1,
+  "transposition : forme native (nom/liens)")
+aide.egal(m.colonne_transposition({{name = "I", links = {{}}}, {name = "II", links = {{}}}}), nil,
+  "transposition : aucune colonne libre")
+aide.egal(m.colonne_transposition(nil), nil, "transposition : divisions absentes")
+
 aide.termine()
