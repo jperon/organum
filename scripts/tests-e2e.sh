@@ -776,6 +776,13 @@ if demarrer_xvfb && demarrer_organum oui && attendre_fenetre; then
   else
     ok "natif : valeur non nulle mise en évidence (capture changée)"
   fi
+  # Depuis +1, un clic sur la valeur centrale remet la transposition à 0.
+  clic_xy "$trans_valeur_x" "$trans_y"
+  if attendre_api '"transposition":0' 50; then
+    ok "natif : clic sur la valeur remet la transposition à 0"
+  else
+    echec "natif : le clic sur la valeur n'a pas remis la transposition à 0"
+  fi
   ecrire_json_api '{"transposition":12}'
   attendre_api '"transposition":12' 50
   clic_xy "$trans_plus_x" "$trans_y"

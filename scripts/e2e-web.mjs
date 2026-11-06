@@ -400,6 +400,23 @@ async function testAccueil() {
     'web / : valeur -2 venue de l’API affichée dans la page'
   );
   verifie(!!venuApi, 'web / : changement d’une autre interface reflété (valeur −2)');
+  await clic('document.querySelector(".transposition-valeur")');
+  const retourValeurZero = await attendre(
+    async () => {
+      const e = await api('/api/orgue');
+      const texte = await evaluer('document.querySelector(".transposition-valeur").textContent');
+      const actif = await evaluer('document.querySelector(".transposition").classList.contains("active")');
+      return (e.transposition === 0 && texte === '0' && !actif) ? e : null;
+    },
+    'web / : clic sur la valeur remet la transposition à 0'
+  );
+  verifie(!!retourValeurZero, 'web / : clic sur la valeur ramène à 0 sans accent');
+  await clic('document.querySelector(".transposition-valeur")');
+  const resteZero = await attendre(
+    async () => (await api('/api/orgue')).transposition === 0,
+    'web / : un clic sur la valeur à 0 ne change rien'
+  );
+  verifie(!!resteZero, 'web / : clic sur la valeur à 0 reste à 0');
   await poster('/api/orgue', { transposition: 12 });
   await attendre(async () => (await api('/api/orgue')).transposition === 12,
     'web / : borne +12 posée par l’API');
