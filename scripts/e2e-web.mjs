@@ -190,23 +190,44 @@ async function rect(expression) {
   })()`);
 }
 
+// Un état relu peut déplacer les rangées entre la mesure du rectangle et
+// l'envoi des événements : un clic parti aux anciennes coordonnées tombe à
+// côté, sans aucune erreur. Vérifier la cible sous le point, et remesurer si
+// le document a bougé.
+async function cibleSousPoint(expression, x, y) {
+  return evaluer(`(() => {
+    const c = document.elementFromPoint(${x}, ${y});
+    const t = (${expression});
+    return !!(c && t && (c === t || t.contains(c)));
+  })()`);
+}
+
 async function clic(expression, fx = 0.5, fy = 0.5) {
-  const r = await rect(expression);
-  if (!r) {
-    echec(`élément introuvable : ${expression}`);
-    return false;
+  for (let essai = 0; essai < 3; essai += 1) {
+    const r = await rect(expression);
+    if (!r) {
+      echec(`élément introuvable : ${expression}`);
+      return false;
+    }
+    const x = r.x + r.w * fx;
+    const y = r.y + r.h * fy;
+    if (!(await cibleSousPoint(expression, x, y))) {
+      if (essai === 0) console.log(`        clic recalé : ${expression}`);
+      await delay(80);
+      continue;
+    }
+    await cdp.envoyer('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+    await cdp.envoyer('Input.dispatchMouseEvent', {
+      type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1
+    });
+    await cdp.envoyer('Input.dispatchMouseEvent', {
+      type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1
+    });
+    await delay(180);
+    return true;
   }
-  const x = r.x + r.w * fx;
-  const y = r.y + r.h * fy;
-  await cdp.envoyer('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
-  await cdp.envoyer('Input.dispatchMouseEvent', {
-    type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1
-  });
-  await cdp.envoyer('Input.dispatchMouseEvent', {
-    type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1
-  });
-  await delay(180);
-  return true;
+  echec(`élément non cliquable (une autre cible reçoit le clic) : ${expression}`);
+  return false;
 }
 
 function selecteur(groupe, valeur) {
@@ -443,6 +464,19 @@ async function testMidi() {
 
 async function attendreChamp(nom, lecture, predicat, delai = 12000) {
   return attendre(async () => (predicat(await lecture()) ? true : null), nom, delai);
+}
+
+async function etatLimiteurDom() {
+  return evaluer(`(() => {
+    const b = document.getElementById('qualite-limiteur');
+    const n = document.getElementById('qualite-limiteur-note');
+    if (!b) return null;
+    return {
+      pressed: b.getAttribute('aria-pressed'),
+      disabled: b.disabled === true,
+      note: n && !n.hidden ? n.textContent : ''
+    };
+  })()`);
 }
 
 async function etatTemperamentDom() {
@@ -711,13 +745,32 @@ async function testAudio() {
     25000
   );
 
-  const limiteurAvant = (await api('/api/orgue')).qualite.limiteur;
+  const avantLimiteur = await api('/api/orgue');
+  const limiteurAvant = avantLimiteur.qualite.limiteur;
+  const domLimiteurAvant = await etatLimiteurDom();
   await clic('document.getElementById("qualite-limiteur")');
-  await attendreChamp(
+  const basculeLimiteur = await attendreChamp(
     'web /audio : limiteur bascule par clic',
     () => api('/api/orgue'),
     (e) => e.qualite.limiteur !== limiteurAvant
   );
+  if (!basculeLimiteur) {
+    const apresLimiteur = await api('/api/orgue');
+    const domLimiteurApres = await etatLimiteurDom();
+    console.log('        diagnostic limiteur : ' + JSON.stringify({
+      avant: {
+        limiteur: avantLimiteur.qualite.limiteur,
+        limiteur_prochain: avantLimiteur.qualite.limiteur_prochain,
+        dom: domLimiteurAvant
+      },
+      apres: {
+        limiteur: apresLimiteur.qualite.limiteur,
+        limiteur_prochain: apresLimiteur.qualite.limiteur_prochain,
+        seq: apresLimiteur.seq,
+        dom: domLimiteurApres
+      }
+    }));
+  }
 
   const teteAvant = (await api('/api/orgue')).qualite.tete_reverb_prochain;
   await clic('document.getElementById("qualite-tete")');
