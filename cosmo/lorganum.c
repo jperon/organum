@@ -1179,11 +1179,10 @@ static int l_calibrer(lua_State *L) {
     if (lua_isinteger(L, -1)) periode = (int)lua_tointeger(L, -1);
     lua_pop(L, 2);
   }
-  if (taux <= 0 || periode <= 0) {
-    lua_pushnil(L);
-    lua_pushstring(L, "calibration : taux ou période invalide");
-    return 2;
-  }
+  // Le taux et la période viennent de validation.impositions
+  // (web/src/validation.moon), qui n'accepte que TAUX_VALIDES et
+  // PERIODES_VALIDES ; aeolus_calibrer garde en C le dernier rempart pour
+  // des paramètres invalides (aucune mesure, champs neutres).
   aeolus_calibrage c;
   memset(&c, 0, sizeof(c));
   aeolus_calibrer(taux, periode, &c);
