@@ -4,27 +4,27 @@
 extern "C" {
 #endif
 
-/* Résultat de la calibration automatique de la qualité (étape Q3a).
+/* Mesures de la calibration automatique de la qualité (étape Q3a).
    Les coûts « cout_spat* » sont exprimés par voix et par sous-trame de
    64 échantillons, en microsecondes ; les coûts de réverbération sont par
-   bloc de `periode` trames, en millisecondes. estimation_ms[i] est le temps
-   de bloc estimé pour le niveau i (0..3) tel que défini par la spécification. */
+   bloc de `periode` trames, en millisecondes. La décision (niveau 0..3,
+   tête de réverbération, estimations) est prise côté MoonScript, dans
+   web/src/calibration.moon, à partir de ces seules mesures. */
 typedef struct {
-    int niveau;
-    int tete_reverb;
     double echeance_ms;
     double cout_spat2_us;
     double cout_spat1_us;
     double cout_reverb_tete_ms;
     double cout_reverb_sans_tete_ms;
-    double estimation_ms[4];
     int voix_ref;
+    int voix_forcee;  /* ORGANUM_CALIBRATION_VOIX défini : pas de plafond */
     double duree_calibration_ms;
 } aeolus_calibrage;
 
 /* Micro-banc autonome (aucune instance du moteur) : mesure le coût par voix
-   des spatialisations et de la réverbération, puis renvoie le niveau 0..3
-   recommandé et remplit `sortie`. `periode` en trames, `taux` en Hz. */
+   des spatialisations et de la réverbération, puis remplit `sortie`.
+   `periode` en trames, `taux` en Hz. Ne choisit plus de niveau : la décision
+   est appliquée par web/src/calibration.moon. Renvoie 0. */
 int aeolus_calibrer(int taux, int periode, aeolus_calibrage* sortie);
 
 void* aeolus_creer(int taux);

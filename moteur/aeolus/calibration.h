@@ -4,7 +4,8 @@
 //
 // Ce module n'instancie PAS aeolus::Engine : il mesure uniquement les classes
 // dsp du moteur (SpatialSource, BiquadFilter, Convolver) sur des données
-// factices, puis applique un modèle de coût pour choisir un niveau 0..3.
+// factices. Le modèle de coût et le choix du niveau 0..3 sont appliqués côté
+// MoonScript (web/src/calibration.moon).
 //
 // L'API publique est la fonction C `aeolus_calibrer` déclarée dans
 // api/aeolus_c.h (avec la structure `aeolus_calibrage`).

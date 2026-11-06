@@ -2,7 +2,8 @@
 //
 // Aucune instance d'aeolus::Engine n'est créée : on mesure les classes dsp
 // réelles (SpatialSource, BiquadFilter, Convolver) sur des données factices
-// pseudo-aléatoires, puis on applique le modèle de coût de la spécification.
+// pseudo-aléatoires. La décision (niveaux, tête, estimations) est prise par
+// web/src/calibration.moon à partir de ces mesures.
 //
 // Hypothèses documentées (voir aussi rapport-Q3a.md) :
 //  - Le coût « reste » (lecture de la table d'onde, bruit d'attaque, mélange,
@@ -275,15 +276,8 @@ int lire_env_entier(const char* nom, int defaut)
     return (int)x;
 }
 
-// Constantes du modèle, documentées en tête de fichier.
-constexpr double K_RESTE = 1.7;
+// Constant du modèle, documentée en tête de fichier.
 constexpr int VOIX_REF = 250;
-constexpr double FRACTION_ECHEANCE = 0.6;
-
-// Table de la spécification §3.
-constexpr int NIVEAU_SPATIAL[4] = {0, 1, 1, 2};
-constexpr int NIVEAU_POLYPHONIE[4] = {64, 128, 192, 0}; // 0 = illimité
-constexpr int NIVEAU_TETE[4] = {0, 0, 1, 1};
 
 } // namespace
 
@@ -295,10 +289,8 @@ extern "C" int aeolus_calibrer(int taux, int periode, aeolus_calibrage* sortie)
     const double debut_calibration = maintenant_ms();
 
     if (taux <= 0 || periode <= 0) {
-        // Paramètres invalides : on renvoie prudemment le niveau le plus bas.
+        // Paramètres invalides : aucune mesure, champs neutres.
         std::memset(sortie, 0, sizeof(*sortie));
-        sortie->niveau = 0;
-        sortie->tete_reverb = 0;
         sortie->echeance_ms = 0.0;
         sortie->voix_ref = VOIX_REF;
         return 0;
@@ -336,48 +328,14 @@ extern "C" int aeolus_calibrer(int taux, int periode, aeolus_calibrage* sortie)
     cout_reverb_tete_ms *= facteur;
     cout_reverb_sans_tete_ms *= facteur;
 
-    const double echeance_ms = (double)periode / (double)taux * 1000.0;
-    const double reste_us = K_RESTE * cout_spat2_us;
-    const double ratio_periode = (double)periode / 64.0;
-
-    double estimation_ms[4];
-    int meilleur = 0;
-
-    for (int niveau = 0; niveau < 4; ++niveau) {
-        const int plafond = NIVEAU_POLYPHONIE[niveau];
-        int voix = voix_ref;
-        if (!voix_forcee && plafond > 0 && voix > plafond)
-            voix = plafond;
-
-        double cout_spatial_us = 0.0;
-        if (NIVEAU_SPATIAL[niveau] == 2)
-            cout_spatial_us = cout_spat2_us;
-        else if (NIVEAU_SPATIAL[niveau] == 1)
-            cout_spatial_us = cout_spat1_us;
-
-        const double cout_voix_ms =
-            (double)voix * (cout_spatial_us + reste_us) * ratio_periode / 1000.0;
-        const double cout_reverb_ms = NIVEAU_TETE[niveau]
-                                          ? cout_reverb_tete_ms
-                                          : cout_reverb_sans_tete_ms;
-
-        estimation_ms[niveau] = cout_voix_ms + cout_reverb_ms;
-
-        if (estimation_ms[niveau] <= FRACTION_ECHEANCE * echeance_ms)
-            meilleur = niveau;
-    }
-
-    sortie->niveau = meilleur;
-    sortie->tete_reverb = NIVEAU_TETE[meilleur];
-    sortie->echeance_ms = echeance_ms;
+    sortie->echeance_ms = (double)periode / (double)taux * 1000.0;
     sortie->cout_spat2_us = cout_spat2_us;
     sortie->cout_spat1_us = cout_spat1_us;
     sortie->cout_reverb_tete_ms = cout_reverb_tete_ms;
     sortie->cout_reverb_sans_tete_ms = cout_reverb_sans_tete_ms;
-    for (int i = 0; i < 4; ++i)
-        sortie->estimation_ms[i] = estimation_ms[i];
     sortie->voix_ref = voix_ref;
+    sortie->voix_forcee = voix_forcee ? 1 : 0;
     sortie->duree_calibration_ms = maintenant_ms() - debut_calibration;
 
-    return meilleur;
+    return 0;
 }

@@ -1166,9 +1166,10 @@ static int l_qualite(lua_State *L) {
   return 0;
 }
 
-// organum.calibrer{taux=48000, periode=512} → table de calibration, ou nil,
+// organum.calibrer{taux=48000, periode=512} → mesures de calibration, ou nil,
 // erreur. Le micro-banc ne crée aucune instance du moteur : à appeler AVANT
-// organum.demarrer (la calibration ne dépend pas du moteur déjà créé).
+// organum.demarrer (la calibration ne dépend pas du moteur déjà créé). La
+// décision (niveau, tête, estimations) est prise par web/src/calibration.moon.
 static int l_calibrer(lua_State *L) {
   int taux = 48000, periode = 512;
   if (lua_istable(L, 1)) {
@@ -1186,16 +1187,10 @@ static int l_calibrer(lua_State *L) {
   aeolus_calibrage c;
   memset(&c, 0, sizeof(c));
   aeolus_calibrer(taux, periode, &c);
-  lua_createtable(L, 0, 11);
-  lua_pushinteger(L, c.niveau), lua_setfield(L, -2, "niveau");
-  lua_pushboolean(L, c.tete_reverb), lua_setfield(L, -2, "tete_reverb");
+  lua_createtable(L, 0, 15);
+  lua_pushinteger(L, taux), lua_setfield(L, -2, "taux");
+  lua_pushinteger(L, periode), lua_setfield(L, -2, "periode");
   lua_pushnumber(L, c.echeance_ms), lua_setfield(L, -2, "echeance_ms");
-  lua_createtable(L, 4, 0);
-  for (int i = 0; i < 4; ++i) {
-    lua_pushnumber(L, c.estimation_ms[i]);
-    lua_rawseti(L, -2, i + 1);
-  }
-  lua_setfield(L, -2, "estimation_ms");
   lua_pushnumber(L, c.cout_spat2_us), lua_setfield(L, -2, "cout_spat2_us");
   lua_pushnumber(L, c.cout_spat1_us), lua_setfield(L, -2, "cout_spat1_us");
   lua_pushnumber(L, c.cout_reverb_tete_ms);
@@ -1203,6 +1198,7 @@ static int l_calibrer(lua_State *L) {
   lua_pushnumber(L, c.cout_reverb_sans_tete_ms);
   lua_setfield(L, -2, "cout_reverb_sans_tete_ms");
   lua_pushinteger(L, c.voix_ref), lua_setfield(L, -2, "voix_ref");
+  lua_pushboolean(L, c.voix_forcee), lua_setfield(L, -2, "voix_forcee");
   lua_pushnumber(L, c.duree_calibration_ms);
   lua_setfield(L, -2, "duree_calibration_ms");
   return 1;

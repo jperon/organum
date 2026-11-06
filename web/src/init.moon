@@ -4,6 +4,7 @@
 
 -- Validations et fusions pures, partagées avec les tests unitaires.
 validation = require "validation"
+calibration = require "calibration"
 authentification = require "authentification"
 controle_acces = require "controle_acces"
 
@@ -605,11 +606,17 @@ if qualite_locale.auto
     taux: taux_demarrage
     periode: periode_demarrage
   })
-  valide = ok_cal and type(cal) == "table" and
-    entier_borne(cal.niveau, 0, 3) and
+  ok_dec, decision = false, nil
+  if ok_cal and type(cal) == "table"
+    ok_dec, decision = pcall calibration.choisir, cal
+  valide = ok_dec and type(decision) == "table" and
+    entier_borne(decision.niveau, 0, 3) and
     type(cal.duree_calibration_ms) == "number" and
     cal.duree_calibration_ms <= 1500
   if valide
+    cal.niveau = decision.niveau
+    cal.tete_reverb = decision.tete_reverb
+    cal.estimation_ms = decision.estimation_ms
     p = PRESELECTIONS[cal.niveau + 1]
     qualite_demarrage = {
       spatialisation: p.spatialisation
