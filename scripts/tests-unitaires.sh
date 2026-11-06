@@ -184,7 +184,15 @@ fi
 # Compilation mise en cache : scale.cpp et le test ne changent pas entre deux
 # exécutions. La première compilation (quelques secondes) est hors du budget
 # de 15 s « une fois compilée ».
-if command -v g++ >/dev/null 2>&1; then
+if [ ! -d "$RACINE/externe/JUCE/modules" ] || \
+   [ ! -f "$RACINE/moteur/o/binarydata/BinaryData.h" ]; then
+  # scale.cpp inclut aeolus/scale.h, qui tire globals.h -> JuceHeader.h ->
+  # les modules JUCE et BinaryData : ces dépendances ne sont pas suivies par
+  # git (dossier externe/ ignoré, moteur/o/ produit). Dans un worktree
+  # propre, le banc ne peut pas être compilé sans elles ; on l'ignore avec
+  # sa raison plutôt que d'échouer à tort.
+  ignore "C++ : tables des 11 tempéraments (dépendances externes absentes : externe/JUCE, moteur/o/binarydata)"
+elif command -v g++ >/dev/null 2>&1; then
   FLAGS=(-O2 -std=c++17 -DNDEBUG -I"$RACINE/moteur/compat" -I"$RACINE/moteur"
     -I"$RACINE/moteur/api" -I"$RACINE/moteur/o/binarydata"
     -I"$RACINE/externe/JUCE/modules"
