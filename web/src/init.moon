@@ -357,11 +357,16 @@ etat_sauve = do
   ok and type(e) == "table" and e or {}
 
 -- Authentification facultative (HTTP Digest SHA-256, RFC 7616). Désactivée
--- tant qu'aucun mot de passe n'est enregistré. Seul HA1 est conservé, dans
--- un fichier voisin d'etat.json à droits 0600 ; le mot de passe lui-même
--- n'est jamais écrit. ORGANUM_MOT_DE_PASSE est prioritaire et n'est pas
--- recopié sur disque : il verrouille alors le réglage.
-AUTH_FICHIER = os.getenv("ORGANUM_AUTH") or "#{ETAT_FICHIER}.authentification.json"
+-- tant qu'aucun mot de passe n'est enregistré. Le fichier est un texte
+-- éditable à la main, partagé par tous les fils, voisin d'etat.json et à
+-- droits 0600 ; il ne contient qu'une ligne utilisateur:organum:HA1, jamais
+-- le mot de passe. ORGANUM_DIGEST donne son chemin (absent ou vide : chemin
+-- par défaut).
+chemin_environnement = (nom, defaut) ->
+  valeur = os.getenv nom
+  if valeur and valeur != "" then valeur else defaut
+
+AUTH_FICHIER = chemin_environnement "ORGANUM_DIGEST", "#{ETAT_FICHIER}.digest"
 AUTH = authentification
 -- Secret du nonce : tiré une fois, dans le processus principal, avant que
 -- redbean ne crée les processus de requêtes ; chacun en hérite par fork.
@@ -370,37 +375,33 @@ SECRET_NONCE = GetRandomBytes 32
 -- éprouver la péremption sans attendre cinq minutes dans les tests.
 AUTH_NONCE_DUREE = tonumber(os.getenv "ORGANUM_AUTH_NONCE_DUREE") or AUTH.DUREE_NONCE
 
--- Contrôle d'accès par sous-réseau source, facultatif et indépendant de
--- l'authentification. Liste vide : aucun filtrage. Fichier voisin d'etat.json
--- (même motif que l'authentification), relu à chaque requête pour qu'un
--- réglage s'applique à chaud. ORGANUM_RESEAUX (liste séparée par virgules ou
--- espaces) est prioritaire et n'est jamais recopié sur disque : il verrouille
--- alors le réglage. Une valeur d'environnement invalide arrête le démarrage :
--- elle exprime une intention de sécurité, qu'il ne faut pas remplacer
--- silencieusement par « aucun filtre ». Un fichier illisible, en revanche, ne
--- filtre rien (pour ne pas enfermer l'utilisateur dehors) et son erreur est
--- publiée dans l'état.
-RESEAUX_FICHIER = "#{ETAT_FICHIER}.reseaux.json"
-RESEAUX_ENV = os.getenv "ORGANUM_RESEAUX"
-RESEAUX_ENV_ACTIF = RESEAUX_ENV != nil and RESEAUX_ENV != ""
-RESEAUX_ENV_LISTE = {}
-if RESEAUX_ENV_ACTIF
-  liste, err = controle_acces.normaliser_liste RESEAUX_ENV
-  unless liste
-    Log kLogFatal, "organum : ORGANUM_RESEAUX invalide : #{err}"
-    unix.exit 1
-  RESEAUX_ENV_LISTE = liste
+-- Fichier texte voisin d'etat.json, ou ORGANUM_RESEAUX_FICHIER (absent ou
+-- vide : chemin par défaut). Un sous-réseau par ligne, commentaires « # » et
+-- lignes vides admis.
+RESEAUX_FICHIER = chemin_environnement "ORGANUM_RESEAUX_FICHIER", "#{ETAT_FICHIER}.reseaux"
 
-auth_fichier = (chemin) ->
-  contenu = Slurp chemin
-  return nil unless contenu
-  ok, t = pcall DecodeJson, contenu
-  return nil unless ok and type(t) == "table"
-  return nil unless type(t.ha1) == "string" and #t.ha1 == 64 and t.ha1\match "^%x+$"
-  utilisateur = t.utilisateur
-  unless type(utilisateur) == "string" and #utilisateur >= 1 and #utilisateur <= 64
-    utilisateur = AUTH.UTILISATEUR_DEFAUT
-  {utilisateur: utilisateur, ha1: t.ha1}
+-- Lecture stricte partagée : nil sans erreur si le fichier n'existe pas,
+-- sinon son contenu ; une erreur explicite s'il existe mais reste illisible
+-- (permissions comprises).
+lire_fichier_texte = (chemin) ->
+  return nil, nil unless unix.stat chemin
+  contenu, err = Slurp chemin
+  unless contenu
+    return nil, "fichier illisible (#{err or "lecture impossible"})"
+  contenu, nil
+
+auth_config = ->
+  contenu, erreur = lire_fichier_texte AUTH_FICHIER
+  if erreur
+    return {active: false, utilisateur: AUTH.UTILISATEUR_DEFAUT, ha1: nil, erreur: erreur}
+  unless contenu
+    return {active: false, utilisateur: AUTH.UTILISATEUR_DEFAUT, ha1: nil, erreur: nil}
+  entree, err = AUTH.analyser_fichier contenu
+  if entree == nil
+    return {active: false, utilisateur: AUTH.UTILISATEUR_DEFAUT, ha1: nil, erreur: err}
+  unless entree
+    return {active: false, utilisateur: AUTH.UTILISATEUR_DEFAUT, ha1: nil, erreur: nil}
+  {active: true, utilisateur: entree.utilisateur, ha1: entree.ha1, erreur: nil}
 
 auth_utilisateur_valide = (u) ->
   type(u) == "string" and #u >= 1 and #u <= 64 and not u\match "[:%c]"
@@ -408,41 +409,23 @@ auth_utilisateur_valide = (u) ->
 auth_mot_de_passe_valide = (m) ->
   type(m) == "string" and #m >= 1 and #m <= 1024 and not m\find "\0", 1, true
 
-auth_env = os.getenv "ORGANUM_MOT_DE_PASSE"
-AUTH_ENV_ACTIF = auth_env != nil and auth_env != ""
-AUTH_ENV_UTILISATEUR = AUTH.UTILISATEUR_DEFAUT
-AUTH_ENV_HA1 = nil
-if AUTH_ENV_ACTIF
-  fichier = auth_fichier AUTH_FICHIER
-  AUTH_ENV_UTILISATEUR = fichier.utilisateur if fichier
-  AUTH_ENV_HA1 = AUTH.ha1 AUTH_ENV_UTILISATEUR, AUTH.ROYAUME, auth_env
-
-auth_config = ->
-  if AUTH_ENV_ACTIF
-    return {active: true, utilisateur: AUTH_ENV_UTILISATEUR, ha1: AUTH_ENV_HA1, impose: true}
-  fichier = auth_fichier AUTH_FICHIER
-  unless fichier
-    return {active: false, utilisateur: AUTH.UTILISATEUR_DEFAUT, ha1: nil, impose: false}
-  {active: true, utilisateur: fichier.utilisateur, ha1: fichier.ha1, impose: false}
-
 auth_etat = ->
   config = auth_config!
   {
     active: config.active
     utilisateur: config.utilisateur
-    impose: config.impose
-    source: if config.impose then "environnement" elseif config.active then "fichier" else "aucune"
+    source: if config.active then "fichier" else "aucune"
+    erreur: config.erreur
   }
 
 auth_enregistrer = (utilisateur, mot_de_passe) ->
-  return nil, "imposé par ORGANUM_MOT_DE_PASSE" if AUTH_ENV_ACTIF
   return nil, "utilisateur invalide" unless auth_utilisateur_valide utilisateur
   return nil, "mot de passe invalide" unless auth_mot_de_passe_valide mot_de_passe
   dossier = AUTH_FICHIER\match "^(.*)/[^/]*$"
   unix.makedirs dossier, tonumber("755", 8) if dossier
   tmp = "#{AUTH_FICHIER}.tmp.#{unix.getpid!}"
   ha1 = AUTH.ha1 utilisateur, AUTH.ROYAUME, mot_de_passe
-  contenu = EncodeJson {utilisateur: utilisateur, ha1: ha1}
+  contenu = AUTH.formater_fichier utilisateur, ha1
   ok = Barf tmp, contenu, tonumber("600", 8)
   unless ok
     pcall unix.unlink, tmp
@@ -455,7 +438,6 @@ auth_enregistrer = (utilisateur, mot_de_passe) ->
   true
 
 auth_retirer = ->
-  return nil, "imposé par ORGANUM_MOT_DE_PASSE" if AUTH_ENV_ACTIF
   pcall unix.unlink, AUTH_FICHIER
   true
 
@@ -472,6 +454,25 @@ regler_authentification = (data) ->
   return nil, err unless ok
   auth_etat!
 
+-- Refus explicite au démarrage : un fichier présent mais invalide ou
+-- illisible exprime une intention de sécurité, qu'il ne faut pas remplacer
+-- silencieusement par « aucun contrôle ».
+do
+  config = auth_config!
+  if config.erreur
+    Log kLogFatal, "organum : #{AUTH_FICHIER} invalide : #{config.erreur}"
+    unix.exit 1
+  contenu, erreur = lire_fichier_texte RESEAUX_FICHIER
+  if erreur
+    Log kLogFatal, "organum : #{RESEAUX_FICHIER} invalide : #{erreur}"
+    unix.exit 1
+  if contenu
+    liste, err = controle_acces.analyser_fichier contenu
+    unless liste
+      Log kLogFatal, "organum : #{RESEAUX_FICHIER} invalide : #{err}"
+      unix.exit 1
+
+
 -- Source HTTP réelle : GetClientAddr, et non GetRemoteAddr, pour qu'un
 -- en-tête X-Forwarded-For venu d'une adresse de confiance ne puisse ni
 -- exempter du filtre de sous-réseau ni contourner l'authentification. La
@@ -487,6 +488,11 @@ auth_cible = ->
 
 auth_autoriser = ->
   config = auth_config!
+  if config.erreur
+    SetStatus 503
+    SetHeader "Content-Type", "application/json"
+    Write EncodeJson {error: "configuration de l'authentification invalide : #{config.erreur}"}
+    return false
   return true unless config.active
   ok, stale, raison = AUTH.verifier {
     entete: GetHeader "Authorization"
@@ -730,22 +736,20 @@ CONFIG_MIDI = os.getenv("ORGANUM_CONFIG_MIDI") or "#{os.getenv 'HOME'}/.config/o
 -- Présentation partagée avec l'interface native (modele.moon).
 modele = require "modele"
 
--- Lecture tolérante du fichier de réseaux : absent, illisible ou invalide
--- donne une liste vide et, le cas échéant, un message publié dans l'état.
+-- Lecture du fichier de réseaux : absent ou sans entrée donne une liste vide
+-- (aucun contrôle) ; un fichier illisible ou invalide donne une liste vide et
+-- une erreur, qui refuse l'accès non local (503) plutôt que de l'ouvrir.
 reseaux_fichier = ->
-  contenu = Slurp RESEAUX_FICHIER
+  contenu, erreur = lire_fichier_texte RESEAUX_FICHIER
+  return {}, erreur if erreur
   return {}, nil unless contenu
-  ok, t = pcall DecodeJson, contenu
-  return {}, "fichier illisible (JSON invalide)" unless ok and type(t) == "table"
-  liste, err = controle_acces.normaliser_liste t.reseaux
-  return {}, "liste invalide : #{err}" unless liste
+  liste, err = controle_acces.analyser_fichier contenu
+  return {}, err unless liste
   liste, nil
 
 reseaux_config = ->
-  if RESEAUX_ENV_ACTIF
-    return {liste: RESEAUX_ENV_LISTE, impose: true, erreur: nil}
   liste, erreur = reseaux_fichier!
-  {liste: liste, impose: false, erreur: erreur}
+  {liste: liste, erreur: erreur}
 
 -- État publié (API et panneaux). ip est la valeur brute de GetClientAddr
 -- quand elle est connue ; la fenêtre native n'a pas de source HTTP.
@@ -755,13 +759,12 @@ reseaux_etat = (ip) ->
     active: #config.liste > 0
     texte: controle_acces.formater_liste config.liste
     reseaux: modele.liste_json [r.texte for r in *config.liste]
-    impose: config.impose
     source: if ip != nil then controle_acces.texte_source ip else nil
     erreur: config.erreur
   }
 
 reseaux_ecrire = (liste) ->
-  contenu = EncodeJson {reseaux: [r.texte for r in *liste]}
+  contenu = controle_acces.formater_fichier liste
   dossier = RESEAUX_FICHIER\match "^(.*)/[^/]*$"
   unix.makedirs dossier, tonumber("755", 8) if dossier
   tmp = "#{RESEAUX_FICHIER}.tmp.#{unix.getpid!}"
@@ -777,10 +780,9 @@ reseaux_ecrire = (liste) ->
 
 -- Enregistre une liste. ip est la source HTTP courante : une liste non vide
 -- qui l'exclut est refusée, sauf si cette source est locale (elle passe
--- toujours). La fenêtre native n'appelle sans ip : elle est locale.
+-- toujours). Les commentaires du fichier sont perdus à l'écriture.
 regler_reseaux = (data, ip = nil) ->
   return nil, "objet attendu" unless type(data) == "table"
-  return nil, "imposé par ORGANUM_RESEAUX" if RESEAUX_ENV_ACTIF
   if data.retirer == true
     pcall unix.unlink, RESEAUX_FICHIER
     return reseaux_etat ip
@@ -801,9 +803,15 @@ regler_reseaux = (data, ip = nil) ->
 
 -- Garde de sous-réseau : 403 avant toute analyse Digest, sans défi. Une
 -- liste vide ne filtre rien ; les adresses locales ne sont jamais soumises
--- à ce filtre (l'appelant les exempte).
+-- à ce filtre (l'appelant les exempte). Un fichier invalide en cours
+-- d'exécution refuse l'accès non local (503) au lieu de l'ouvrir.
 reseaux_autoriser = (ip) ->
   config = reseaux_config!
+  if config.erreur
+    SetStatus 503
+    SetHeader "Content-Type", "application/json"
+    Write EncodeJson {error: "configuration des réseaux invalide : #{config.erreur}"}
+    return false
   return true if #config.liste == 0
   return true if controle_acces.autorise config.liste, ip
   SetStatus 403
@@ -811,9 +819,6 @@ reseaux_autoriser = (ip) ->
   Write EncodeJson {error: "adresse source non autorisée"}
   false
 
-do
-  config = reseaux_config!
-  Log kLogWarn, "organum : #{RESEAUX_FICHIER} : #{config.erreur} ; aucun filtrage" if config.erreur
 
 etat_midi = ->
   e = organum.etat!
@@ -1210,9 +1215,7 @@ handle_authentification = ->
   if reponse
     send_json 200, reponse
   else
-    -- 409 : la variable d'environnement verrouille le réglage.
-    status = if err == "imposé par ORGANUM_MOT_DE_PASSE" then 409 else 400
-    send_json status, {error: err}
+    send_json 400, {error: err}
 
 handle_reseaux = ->
   ip = GetClientAddr!
@@ -1231,8 +1234,7 @@ handle_reseaux = ->
   if reponse
     send_json 200, reponse
   else
-    status = if err == "imposé par ORGANUM_RESEAUX" then 409 else 400
-    send_json status, {error: err}
+    send_json 400, {error: err}
 
 handle_orgue_attendre = ->
   unless GetMethod! == "GET"
