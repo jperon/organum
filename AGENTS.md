@@ -110,20 +110,28 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
 - Authentification facultative HTTP Digest SHA-256 (RFC 7616, `qop=auth`,
   royaume `organum`) : désactivée sans mot de passe ; ne sert qu'à vérifier
   les droits, sans chiffrement. Règles pures dans
-  `web/src/authentification.moon` (analyse de l'en-tête, réponse, nonce sans
-  état horodaté et signé par HMAC-SHA256, comparaisons à temps constant),
-  testées avec le vecteur de la RFC. `web/src/init.moon` conserve seulement
-  HA1 dans `etat.json.authentification.json` (0600), applique la garde en
+  `web/src/authentification.moon` (analyse de l'en-tête, de la réponse et du
+  fichier texte, nonce sans état horodaté et signé par HMAC-SHA256,
+  comparaisons à temps constant), testées avec le vecteur de la RFC.
+  Persistance dans un fichier texte éditable à la main, voisin d'`etat.json`
+  : `etat.json.digest` (0600) ou le chemin donné par `ORGANUM_DIGEST`
+  (absent ou vide : chemin par défaut). Une seule entrée
+  `utilisateur:organum:HA1`, HA1 = SHA-256 hexadécimal de
+  `utilisateur:organum:motdepasse` ; lignes vides et commentaires `#`
+  admis, plusieurs entrées refusées. `web/src/init.moon` applique la garde en
   tête de `_G.OnHttpRequest` (toutes les routes, attente longue comprise),
   exempte uniquement `127.0.0.1` et `::1` via `GetClientAddr`, et publie
-  `/api/authentification` (GET/POST, retrait). `ORGANUM_MOT_DE_PASSE`
-  prioritaire, non recopié, verrouille le réglage (409) ; durée du nonce
-  réglable seulement par `ORGANUM_AUTH_NONCE_DUREE` pour les tests, 5 min par
-  défaut. Le panneau Audio web et natif règle le mot de passe ; la fenêtre
-  native passe par le module, jamais par HTTP. La saisie de texte native
-  (`nk.saisie`) suppose une disposition US ; Wayland demande `wl_keyboard`.
-  Tests : `web/scripts/test-authentification.sh` (curl --digest, 401,
-  stale=true, exemption locale, fichier 0600, environnement) et
+  `/api/authentification` (GET/POST, retrait). Fichier absent ou sans entrée :
+  pas de contrôle ; fichier présent mais invalide ou illisible : refus de
+  démarrer (`kLogFatal`) ; devenu invalide à chaud, puisqu'il est relu à
+  chaque requête : `503` pour les sources non locales, erreur publiée, accès
+  local conservé. Durée du nonce réglable seulement par
+  `ORGANUM_AUTH_NONCE_DUREE` pour les tests, 5 min par défaut. Seule la page
+  web règle le mot de passe ; la fenêtre native n'affiche qu'une ligne d'état
+  en lecture seule et ne saisit plus de texte. Tests :
+  `web/scripts/test-authentification.sh` (curl --digest, 401, stale=true,
+  exemption locale, fichier écrit à la main avec `sha256sum`, fichier 0600,
+  fichier invalide au démarrage et à chaud, variable vide) et
   `scripts/e2e-auth.mjs` (Chromium headless sur adresse non locale).
 - Contrôle d'accès facultatif par sous-réseau source, indépendant de
   l'authentification : `web/src/controle_acces.moon` (module pur, analysé par
@@ -140,14 +148,19 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   adresses invalides refusés, **bits d'hôte non nuls refusés** (choix
   documenté). Comparaison bit à bit, sans bibliothèque ajoutée ; `ParseIp`
   n'est pas utilisé (trop permissif : `1.2.3` et `1.2.3.4.5` passent).
-  Persistance dans `etat.json.reseaux.json` (0600), clé `reseaux`, lecture à
-  chaque requête ; fichier illisible = aucun filtrage avec erreur publiée
-  (ne pas bloquer l'utilisateur dehors), `ORGANUM_RESEAUX` prioritaire, non
-  recopié, verrouille (`409`) et une valeur d'environnement invalide arrête
-  le démarrage (intention de sécurité). Routes `GET/POST /api/reseaux` ;
-  une liste non vide qui exclut la source HTTP courante est refusée (400),
-  sauf source locale. Panneaux Audio web (`page_audio.moon`) et natif
-  (`fenetre.moon`, `nk.saisie`). Tests réels :
+  Persistance dans un fichier texte éditable à la main, voisin d'`etat.json`
+  : `etat.json.reseaux` (0600) ou le chemin donné par
+  `ORGANUM_RESEAUX_FICHIER` (absent ou vide : chemin par défaut), un
+  sous-réseau par ligne, lignes vides et commentaires `#` admis, lecture à
+  chaque requête ; fichier absent ou sans entrée = aucun filtrage. Fichier
+  présent mais invalide ou illisible : refus de démarrer (`kLogFatal`) ;
+  devenu invalide à chaud : `503` pour les sources non locales, erreur
+  publiée, accès local conservé (jamais d'ouverture silencieuse de l'accès).
+  Routes `GET/POST /api/reseaux` ; une liste non vide qui exclut la source
+  HTTP courante est refusée (400), sauf source locale. L'écriture depuis le
+  web réécrit le fichier et perd ses commentaires (signalé dans l'interface).
+  Panneau Audio web (`page_audio.moon`) ; la fenêtre native (`fenetre.moon`)
+  n'affiche qu'une ligne d'état en lecture seule. Tests réels :
   `web/scripts/test-reseaux.sh`, lancé par `scripts/tests-longs.sh`.
 
 - Puce d'adaptation à la machine : le fil audio mesure le rendu avec deux

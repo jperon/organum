@@ -45,29 +45,41 @@ changer de port ou `-l 127.0.0.1` pour n'écouter qu'en local.
 ### Authentification facultative
 
 Aucun mot de passe n'est demandé par défaut. Il se définit, se change et se
-retire depuis le panneau **Audio** (page web ou fenêtre native) ; seul
-`SHA-256(utilisateur:organum:mot de passe)` est conservé, dans
-`etat.json.authentification.json` (droits `0600`). Les adresses locales
-`127.0.0.1` et `::1` restent exemptées, et la fenêtre native n'emprunte pas
-HTTP.
+retire depuis le panneau **Audio** de la page web ; la fenêtre native affiche
+seulement l'état. Le fichier est un texte éditable à la main, voisin
+d'`etat.json` (`etat.json.digest`, droits `0600`), qui ne contient qu'une
+ligne `utilisateur:organum:HA1`, où HA1 est
+`SHA-256(utilisateur:organum:mot de passe)` en hexadécimal :
 
-`ORGANUM_MOT_DE_PASSE` impose le mot de passe (utilisateur enregistré, ou
-`organiste`), n'est jamais recopié sur disque et verrouille le réglage.
+```bash
+printf 'organiste:organum:%s' 'motdepasse' | sha256sum
+```
+
+Les lignes vides et les commentaires `#` sont admis ; plusieurs entrées sont
+refusées. `ORGANUM_DIGEST` donne un autre chemin (absent ou vide : chemin par
+défaut). Un fichier présent mais invalide ou illisible empêche le démarrage ;
+s'il devient invalide en cours d'exécution, toute source non locale reçoit
+`503`. Les adresses locales `127.0.0.1` et `::1` restent exemptées, et la
+fenêtre native n'emprunte pas HTTP.
+
 L'authentification est HTTP Digest SHA-256 (RFC 7616, `qop=auth`) : elle
-vérifie les droits, sans chiffrer le contenu. Servie en HTTP, la page
-envoie le mot de passe en clair lors de sa définition ; utiliser HTTPS ou un
-réseau de confiance si cela compte. Le compteur `nc` du client n'est pas
-mémorisé (aucune table de nonces) : une requête capturée peut être rejouée
-tant que son nonce de 5 minutes est valide.
+vérifie les droits, sans chiffrer le contenu. Servie en HTTP, la page envoie
+le mot de passe en clair lors de sa définition ; utiliser HTTPS ou un réseau
+de confiance si cela compte. Le compteur `nc` du client n'est pas mémorisé
+(aucune table de nonces) : une requête capturée peut être rejouée tant que
+son nonce de 5 minutes est valide.
 
 ### Contrôle d'accès par sous-réseau source
 
 Réglage facultatif, indépendant de l'authentification. Il se règle dans le
-panneau **Audio** (page web ou fenêtre native) et se conserve dans
-`etat.json.reseaux.json` (droits `0600`). Une liste vide ne filtre rien.
-Sinon, une adresse source hors liste reçoit `403` **avant** toute analyse
-Digest, sans en-tête `WWW-Authenticate`. Quand les deux réglages sont actifs,
-le sous-réseau est vérifié d'abord, puis l'authentification. Les adresses
+panneau **Audio** de la page web (la fenêtre native affiche l'état) et se
+conserve dans un fichier texte voisin d'`etat.json` (`etat.json.reseaux`,
+droits `0600`), à raison d'un sous-réseau par ligne ; lignes vides et
+commentaires `#` sont admis. `ORGANUM_RESEAUX_FICHIER` donne un autre chemin
+(absent ou vide : chemin par défaut). Une liste vide ne filtre rien. Sinon,
+une adresse source hors liste reçoit `403` **avant** toute analyse Digest,
+sans en-tête `WWW-Authenticate`. Quand les deux réglages sont actifs, le
+sous-réseau est vérifié d'abord, puis l'authentification. Les adresses
 `127.0.0.1` et `::1` passent toujours, et la fenêtre native n'emprunte pas
 HTTP.
 
@@ -78,8 +90,9 @@ HTTP.
 | remplie | aucun | sous-réseau seul |
 | remplie | défini | sous-réseau puis Digest |
 
-Le champ accepte une liste séparée par des virgules ou des espaces :
-`10.35.0.0/16, 2001:470:ca35::/48`. Une adresse seule vaut `/32` (IPv4) ou
+Le fichier (ou le champ du panneau web, qui accepte aussi des virgules ou des
+espaces) contient par exemple `10.35.0.0/16` et `2001:470:ca35::/48`, un par
+ligne. Une adresse seule vaut `/32` (IPv4) ou
 `/128` (IPv6). Les formes compressées et la casse IPv6 sont admises, une
 adresse `::ffff:a.b.c.d` est traitée comme IPv4, et la zone d'une adresse
 lien-local (`fe80::…%wlo1`) n'entre pas dans la comparaison (le serveur
@@ -90,14 +103,13 @@ message clair : une faute de saisie ne doit pas élargir silencieusement un
 sous-réseau. Enregistrer une liste non vide qui exclut l'adresse source
 courante est refusé (`400`), sauf si cette source est locale.
 
-`ORGANUM_RESEAUX` (liste séparée par virgules ou espaces) est prioritaire,
-n'est jamais recopié sur disque et verrouille le réglage (`409`). Une valeur
-d'environnement invalide arrête le démarrage avec un message explicite, car
-elle exprime une intention de sécurité. Un **fichier** de réseaux illisible
-ne filtre rien, en revanche : l'erreur est publiée dans le panneau et l'API
-plutôt que d'enfermer l'utilisateur dehors. `GET /api/reseaux` expose l'état
-et l'adresse source ; `POST /api/reseaux` accepte `{"reseaux": "…"}` ou
-`{"retirer": true}`.
+Un fichier présent mais invalide ou illisible empêche le démarrage avec un
+message explicite, car il exprime une intention de sécurité. S'il devient
+invalide en cours d'exécution (le fichier est relu à chaque requête), les
+sources non locales reçoivent `503` et l'erreur est publiée ; l'accès local
+reste possible. Enregistrer depuis la page web réécrit le fichier et perd ses
+commentaires. `GET /api/reseaux` expose l'état et l'adresse source ;
+`POST /api/reseaux` accepte `{"reseaux": "…"}` ou `{"retirer": true}`.
 
 ### Craquements et temps réel
 
@@ -270,7 +282,8 @@ livrer le son à temps. Ne pas la relever au-dessus de PipeWire.
 | `ORGANUM_REVERB_TETE` | oui | `non` (ou `0`) coupe la tête zéro latence de la réverbération, prioritaire sur `tete_reverb` |
 | `ORGANUM_CALIBRATION_FACTEUR` | `1` | Réservé aux tests : multiplie tous les coûts mesurés par la calibration (simule une machine plus lente) |
 | `ORGANUM_CALIBRATION_VOIX` | `250` | Réservé aux tests : nombre de voix de référence de la calibration |
-| `ORGANUM_RESEAUX` | vide | Sous-réseaux source autorisés (virgules ou espaces), prioritaire et non recopié ; une valeur invalide arrête le démarrage |
+| `ORGANUM_DIGEST` | `etat.json.digest` | Fichier texte `utilisateur:organum:HA1` (absent ou vide : chemin par défaut) |
+| `ORGANUM_RESEAUX_FICHIER` | `etat.json.reseaux` | Fichier texte des sous-réseaux autorisés, un par ligne (absent ou vide : chemin par défaut) |
 
 Le limiteur de sortie est actif par défaut. Les pilotes audio convertissent
 les échantillons flottants en entiers et **écrêtent dur** au-delà de 1.0 :
