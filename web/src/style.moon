@@ -381,6 +381,10 @@ CSS = [[
   .transposition.active .transposition-libelle {
     color: var(--accent-bright);
   }
+  .transposition.active .btn.small {
+    border-color: var(--accent);
+    color: var(--accent-bright);
+  }
   .transposition .btn:disabled {
     opacity: 0.4;
     cursor: not-allowed;
