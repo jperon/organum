@@ -1046,12 +1046,15 @@ MAX_ASSOCIATIONS = 16
             ui\ligne_ratio p.jeu, {2, 1, 1.2, 1}
             largeur_colonne = (l - 2 * MARGE) / #e.divisions - 2 * MARGE_GROUPE - ESPACE
             ui\texte tronquer("Transposition", largeur_colonne * 2 / 5.2 - ESPACE)
-            clique_moins = ui\etat("\u{2212}", accent, false) != accent
+            -- Le jeu de police embarqué ne couvre que le latin : le signe
+            -- moins U+2212 y manque, on garde l'hyphen ASCII côté natif.
+            clique_moins = ui\etat("-", accent, false) != accent
             if clique_moins and v > -12
               organum.transposition v - 1
               v -= 1
               accent = v != 0
-            ui\etat modele.texte_transposition(v), accent, false
+            texte_valeur = modele.texte_transposition(v)\gsub "\u{2212}", "-"
+            ui\etat texte_valeur, accent, false
             clique_plus = ui\etat("+", accent, false) != accent
             if clique_plus and v < 12
               organum.transposition v + 1

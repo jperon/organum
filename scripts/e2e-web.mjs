@@ -97,7 +97,8 @@ class Cdp {
       } else if (message.method === 'Log.entryAdded') {
         const entree = message.params.entry || {};
         if (entree.level === 'error' && !(entree.url || '').includes('favicon')) {
-          this.erreurs.push(`${entree.source || 'log'} : ${entree.text || ''}`);
+          const ou = entree.url ? ` (${entree.url})` : '';
+          this.erreurs.push(`${entree.source || 'log'} : ${entree.text || ''}${ou}`);
         }
       } else if (message.method === 'Runtime.consoleAPICalled') {
         if (message.params.type === 'error') {
@@ -336,6 +337,56 @@ async function testAccueil() {
     },
     'web / : curseur de pédale à ~70 % par clic'
   );
+
+  // Transposition globale : boutons réels, valeur relue dans l'API, accent
+  // et bornes. Un POST doit aussi se refléter dans le DOM (autre interface).
+  verifie(
+    await evaluer('document.querySelector(".transposition") !== null'),
+    'web / : commande de transposition affichée'
+  );
+  await poster('/api/orgue', { transposition: 0 });
+  await attendre(
+    async () => (await api('/api/orgue')).transposition === 0,
+    'web / : transposition remise à 0 avant le test'
+  );
+  await clic('document.querySelector(".transposition-plus")');
+  const plusUn = await attendre(
+    async () => {
+      const e = await api('/api/orgue');
+      const texte = await evaluer('document.querySelector(".transposition-valeur").textContent');
+      const actif = await evaluer('document.querySelector(".transposition").classList.contains("active")');
+      return (e.transposition === 1 && texte === '+1' && actif) ? e : null;
+    },
+    'web / : + transposite de +1, valeur « +1 » et accent visibles'
+  );
+  verifie(!!plusUn, 'web / : + transposite de +1 avec mise en évidence');
+  await clic('document.querySelector(".transposition-moins")');
+  const retourZero = await attendre(
+    async () => {
+      const e = await api('/api/orgue');
+      const actif = await evaluer('document.querySelector(".transposition").classList.contains("active")');
+      return (e.transposition === 0 && !actif) ? e : null;
+    },
+    'web / : − ramène à 0 et retire l’accent'
+  );
+  verifie(!!retourZero, 'web / : retour à 0 par clic');
+  await poster('/api/orgue', { transposition: -2 });
+  const venuApi = await attendre(
+    async () => {
+      const texte = await evaluer('document.querySelector(".transposition-valeur").textContent');
+      return texte === '\u22122' ? texte : null;
+    },
+    'web / : valeur -2 venue de l’API affichée dans la page'
+  );
+  verifie(!!venuApi, 'web / : changement d’une autre interface reflété (valeur −2)');
+  await poster('/api/orgue', { transposition: 12 });
+  await attendre(async () => (await api('/api/orgue')).transposition === 12,
+    'web / : borne +12 posée par l’API');
+  const plusDesactive = await evaluer('document.querySelector(".transposition-plus").disabled === true');
+  verifie(plusDesactive, 'web / : + inactif à la borne +12');
+  await poster('/api/orgue', { transposition: 0 });
+  await attendre(async () => (await api('/api/orgue')).transposition === 0,
+    'web / : transposition remise à 0 après le test');
 
   const remplissages = await evaluer(`(() => {
     function mesure(id) {
@@ -796,15 +847,32 @@ async function testResponsive() {
           return { attendu: (v - min) / (max - min) * 100,
                    vu: parseFloat(e.style.getPropertyValue('--fill')) };
         }
+        const petitsTrans = [];
+        if (${JSON.stringify(chemin)} === '/') {
+          for (const e of document.querySelectorAll('.transposition .btn')) {
+            if (e.offsetParent === null) continue;
+            const r = e.getBoundingClientRect();
+            if (r.height < 44 || r.width < 44) {
+              petitsTrans.push((e.className || 'bouton') + '=' + r.width.toFixed(0) + 'x' + r.height.toFixed(0));
+            }
+          }
+        }
         return {
           debord,
           petits,
+          petitsTrans,
           remplissages: ${JSON.stringify(chemin)} === '/audio'
             ? [remplissage('reverb'), remplissage('qualite-polyphonie')]
             : (${JSON.stringify(chemin)} === '/' ? [remplissage('volume'), remplissage('volume-pedale')] : [])
         };
       })()`);
       verifie(mesure.debord <= 1, `web ${chemin} à ${largeur} px : aucun débordement horizontal (${mesure.debord} px)`);
+      if (chemin === '/') {
+        verifie(
+          mesure.petitsTrans.length === 0,
+          `web / à ${largeur} px : cibles de transposition ≥ 44 px (${mesure.petitsTrans.join(', ') || 'toutes'})`
+        );
+      }
       if (chemin === '/audio') {
         verifie(
           mesure.petits.length === 0,
@@ -942,8 +1010,63 @@ async function modeCroise() {
   verifie(!!domPost, `croisé : la page web reflète le POST (cible ${cible})`);
   await attendreApplique(cible, `croisé : cible ${cible} appliquée après POST`);
 
-  verifie(cdp.erreurs.length === 0, `croisé : aucune erreur console (${cdp.erreurs.length})`);
-  for (const erreur of cdp.erreurs.slice(0, 5)) console.log(`        ${erreur}`);
+  // 4. Transposition croisée : natif de retour sur la console, web sur /.
+  clicNatif(Number(process.env.RETOUR_X), Number(process.env.RETOUR_Y));
+  await delay(400);
+  await navigate('/');
+  await attendre(
+    () => evaluer('document.querySelector(".transposition") !== null'),
+    'page / affichée (transposition croisée)'
+  );
+  await poster('/api/orgue', { transposition: 0 });
+  await attendre(async () => (await api('/api/orgue')).transposition === 0,
+    'croisé : transposition remise à 0');
+
+  const avantTrans = capturerNatif('croise-trans-avant');
+  await clic('document.querySelector(".transposition-plus")');
+  const transWeb = await attendre(
+    async () => (await api('/api/orgue')).transposition === 1,
+    'croisé : clic web + transposite et publie +1', 5000
+  );
+  verifie(!!transWeb, 'croisé : clic web + publié dans /api/orgue');
+  await delay(350);
+  const apresTrans = capturerNatif('croise-trans-apres');
+  verifie(
+    avantTrans !== apresTrans,
+    'croisé : le clic web sur la transposition change l’affichage natif'
+  );
+
+  clicNatif(Number(process.env.TRANS_PLUS_X), Number(process.env.TRANS_PLUS_Y));
+  const transNatif = await attendre(
+    async () => (await api('/api/orgue')).transposition === 2,
+    'croisé : clic natif + transposite et publie +2', 5000
+  );
+  verifie(!!transNatif, 'croisé : clic natif + publié dans /api/orgue');
+  const domTrans = await attendre(
+    async () => {
+      const texte = await evaluer('document.querySelector(".transposition-valeur").textContent');
+      const actif = await evaluer('document.querySelector(".transposition").classList.contains("active")');
+      return (texte === '+2' && actif) ? texte : null;
+    },
+    'croisé : la page web reflète le clic natif (+2 accentué)', 5000
+  );
+  verifie(!!domTrans, 'croisé : valeur +2 venue du natif affichée et accentuée');
+  await poster('/api/orgue', { transposition: 0 });
+  await attendre(async () => (await api('/api/orgue')).transposition === 0,
+    'croisé : transposition remise à 0 après le test');
+
+  // Le serveur du croisé tourne avec ORGANUM_VOLUME=aucun (la fenêtre native
+  // ne doit pas toucher au volume système) : la page / reçoit alors un 500
+  // attendu de /api/volume. On ne tolère que celui-là ; toute autre erreur
+  // console fait échouer le croisé.
+  const erreursInattendues = cdp.erreurs.filter(
+    (e) => !(e.includes('500') && e.includes('/api/volume'))
+  );
+  verifie(
+    erreursInattendues.length === 0,
+    `croisé : aucune erreur console hors volume système désactivé (${erreursInattendues.length})`
+  );
+  for (const erreur of erreursInattendues.slice(0, 5)) console.log(`        ${erreur}`);
   return echecs === 0 ? 0 : 1;
 }
 

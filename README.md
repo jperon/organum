@@ -22,6 +22,10 @@ exécutable [cosmopolitan](https://github.com/jart/cosmopolitan)/redbean.
   testé sous Windows.
 - **Page MIDI** (`/midi`) : canaux MIDI ↔ claviers, contrôleurs ↔ réglages
   (par exemple la molette sur le volume), avec apprentissage.
+- **Transposition** : de −12 à +12 demi-tons sur toutes les notes MIDI
+  entrantes, réglable dans la page web et la fenêtre native en bas de la
+  colonne du Manuel III. La valeur repart à 0 à chaque démarrage : elle n'est
+  jamais enregistrée, ni dans `etat.json` ni dans une combinaison.
 - **Persistance** : registration, combinaisons et réglages sont restaurés
   au démarrage.
 

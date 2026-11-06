@@ -162,15 +162,21 @@ creer_faux_wpctl() {
 etat="$ETAT_VOLUME"
 vol=\$(sed -n 1p "\$etat" 2>/dev/null || echo 0.50)
 muet=\$(sed -n 2p "\$etat" 2>/dev/null || echo 0)
+# Lecture tolérante : un autre processus peut avoir tronqué le fichier
+# entre deux commandes ; une valeur vide retombe sur le défaut.
+[ -n "\$vol" ] || vol=0.50
+[ -n "\$muet" ] || muet=0
 case "\$1" in
   get-volume)
     if [ "\$muet" = 1 ]; then echo "Volume: \$vol [MUTED]"; else echo "Volume: \$vol"; fi
     ;;
   set-volume)
-    printf '%s\n%s\n' "\$3" "\$muet" >"\$etat"; echo "Volume: \$3"
+    printf '%s\n%s\n' "\$3" "\$muet" >"\$etat.tmp.\$\$"; mv "\$etat.tmp.\$\$" "\$etat"
+    echo "Volume: \$3"
     ;;
   set-mute)
-    printf '%s\n%s\n' "\$vol" "\$3" >"\$etat"; echo "Volume: \$vol"
+    printf '%s\n%s\n' "\$vol" "\$3" >"\$etat.tmp.\$\$"; mv "\$etat.tmp.\$\$" "\$etat"
+    echo "Volume: \$vol"
     ;;
   *) exit 1 ;;
 esac
@@ -372,6 +378,7 @@ coords() {
     console)
       R1=$1; R2=$2
       L="$l" H="$h" MODE=console R1="$R1" R2="$R2" \
+        NDIV="${NDIV:-1}" MAXJEUX="${MAXJEUX:-10}" LIENS="${LIENS:-0}" COL="${COL:-0}" \
         UNIT_LUA_PATH="$TMP/lua/?.lua" redbean -i "$TMP/coords.lua"
       ;;
     qualite)
@@ -418,6 +425,18 @@ noms = [j.get("name", "") for d in e.get("divisions", []) for j in d.get("stops"
 r1 = max([len(n) for n in noms] or [8]) * 0.5
 r2 = r1 * 0.75
 print(f"{r1:.3f} {r2:.3f}")
+PY
+}
+
+parametres_transposition() {
+  lire_api >"$TMP/api.json"
+  python3 - "$TMP/api.json" <<'PY'
+import json, sys
+e = json.load(open(sys.argv[1]))
+divs = e.get("divisions", [])
+maxjeux = max([len(d.get("stops", [])) for d in divs] or [10])
+liens = 1 if any(d.get("links") for d in divs) else 0
+print(len(divs), maxjeux, liens)
 PY
 }
 
@@ -487,7 +506,16 @@ if mode == "console" then
   local r1 = tonumber(os.getenv("R1") or "8")
   local r2 = tonumber(os.getenv("R2") or "6")
   local cible = math.min(d.POLICE_MAX, math.max(13, math.floor(l / 64)))
-  local p = d.disposer({divisions = {{jeux = {{}, {}, {}, {}, {}, {}, {}, {}, {}, {}}, liens = {}}}, netapes = 32}, l, h, r1, r2, cible)
+  local ndiv = tonumber(os.getenv("NDIV") or "1")
+  local maxjeux = tonumber(os.getenv("MAXJEUX") or "10")
+  local a_liens = os.getenv("LIENS") == "1"
+  local divisions = {}
+  for i = 1, ndiv do
+    local jeux = {}
+    for j = 1, maxjeux do jeux[j] = {} end
+    divisions[i] = {jeux = jeux, liens = (a_liens and i > 1) and {{}} or {}}
+  end
+  local p = d.disposer({divisions = divisions, netapes = 32}, l, h, r1, r2, cible)
   local y = ligne_y(0, p.entete)
   local x_audio = colonne(6, 4)
   local x_panique = colonne(6, 3)
@@ -495,6 +523,26 @@ if mode == "console" then
   print("audio_x=" .. arrondi(x_audio)); print("audio_y=" .. arrondi(y))
   print("panique_x=" .. arrondi(x_panique)); print("panique_y=" .. arrondi(y))
   print("midi_x=" .. arrondi(x_midi)); print("midi_y=" .. arrondi(y))
+  -- Transposition : une seule rangée (celle des accouplements) en bas de la
+  -- colonne COL. Rangée intérieure : bord (1) + marge de groupe (4) + une
+  -- rangée d'en-tête de 4 px avant le premier widget, puis nom, gain et
+  -- rangées de jeux (chacune augmentée de l'espacement 4).
+  local col = tonumber(os.getenv("COL") or "0")
+  local w = (l - 2 * MARGE - ESPACE * (ndiv - 1)) / ndiv
+  local gx = MARGE + col * (w + ESPACE)
+  local g = 16 + 2 * p.entete
+  local yr = g + 17 + 2 * p.entete + p.rangs * (p.jeu + ESPACE) + p.jeu / 2
+  local xc = gx + 5
+  local panel = (w - 10) - 4 * ESPACE
+  local total = 5.2
+  local function centre(i, avant, ratio)
+    local x = xc + (avant / total) * panel + i * ESPACE
+    return x + (ratio / total) * panel / 2
+  end
+  print("trans_moins_x=" .. arrondi(centre(1, 2, 1)))
+  print("trans_plus_x=" .. arrondi(centre(3, 4.2, 1)))
+  print("trans_valeur_x=" .. arrondi(centre(2, 3, 1.2)))
+  print("trans_y=" .. arrondi(yr))
 elseif mode == "qualite" then
   local rows = tonumber(os.getenv("ROWS")); local cols = tonumber(os.getenv("COLS"))
   local p = d.disposer_qualite(rows, l, h, cols)
@@ -666,6 +714,40 @@ if demarrer_xvfb && demarrer_organum oui && attendre_fenetre; then
   redimensionner 1920 1080
   read -r R1 R2 <<<"$(parametres_console)"
   eval "$(coords console 1920 1080 "$R1" "$R2")"
+
+  # Transposition : clic réel sur « + » dans la colonne du Manuel III, valeur
+  # relue par l'API, accent visible (captures), borne haute inactive.
+  read -r NDIV MAXJEUX LIENS <<<"$(parametres_transposition)"
+  eval "$(NDIV=$NDIV MAXJEUX=$MAXJEUX LIENS=$LIENS COL=0 coords console 1920 1080 "$R1" "$R2")"
+  ecrire_json_api '{"transposition":0}'
+  attendre_api '"transposition":0' 50
+  capturer "trans-avant"
+  H_TRANS_AVANT=$(md5sum "$CAPTURES/trans-avant.png" | cut -d' ' -f1)
+  clic_xy "$trans_plus_x" "$trans_y"
+  if attendre_api '"transposition":1' 50; then
+    ok "natif : transposition +1 par clic et relue dans /api/orgue"
+  else
+    echec "natif : le clic sur + n'a pas transposé de +1"
+  fi
+  capturer "trans-apres"
+  H_TRANS_APRES=$(md5sum "$CAPTURES/trans-apres.png" | cut -d' ' -f1)
+  if [ "$H_TRANS_AVANT" = "$H_TRANS_APRES" ]; then
+    echec "natif : la valeur non nulle ne change pas l'affichage (mise en évidence absente)"
+  else
+    ok "natif : valeur non nulle mise en évidence (capture changée)"
+  fi
+  ecrire_json_api '{"transposition":12}'
+  attendre_api '"transposition":12' 50
+  clic_xy "$trans_plus_x" "$trans_y"
+  sleep 0.4
+  if lire_api | grep -qF '"transposition":12'; then
+    ok "natif : + inactif à la borne +12"
+  else
+    echec "natif : + actif au-delà de la borne +12"
+  fi
+  ecrire_json_api '{"transposition":0}'
+  attendre_api '"transposition":0' 50
+
   clic_xy "$audio_x" "$audio_y"
   read -r QROWS QCOLS <<<"$(parametres_qualite)"
   eval "$(coords qualite 1920 1080 "$QROWS" "$QCOLS")"
@@ -784,12 +866,16 @@ PY
   redimensionner 1920 1080
   read -r R1 R2 <<<"$(parametres_console)"
   eval "$(coords console 1920 1080 "$R1" "$R2")"
+  read -r NDIV MAXJEUX LIENS <<<"$(parametres_transposition)"
+  eval "$(NDIV=$NDIV MAXJEUX=$MAXJEUX LIENS=$LIENS COL=0 coords console 1920 1080 "$R1" "$R2")"
   clic_xy "$audio_x" "$audio_y"
   read -r QROWS QCOLS <<<"$(parametres_qualite)"
   eval "$(coords qualite 1920 1080 "$QROWS" "$QCOLS")"
   if demarrer_chromium; then
     WID="$WID" DISPLAY="$DISPLAY" CAPTURES="$CAPTURES" \
     TEMP1_X="$temp_x" TEMP1_Y="$temp_y" TEMP3_X="$temp3_x" TEMP3_Y="$temp3_y" \
+    RETOUR_X="$retour_x" RETOUR_Y="$retour_y" \
+    TRANS_PLUS_X="$trans_plus_x" TRANS_PLUS_Y="$trans_y" \
     CDP_PORT="$CDP_PORT" BASE_URL="$URL" MODE=croise \
       node "$RACINE/scripts/e2e-web.mjs" >"$TMP/croise.log" 2>&1
     CODE_CROISE=$?

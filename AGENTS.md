@@ -107,6 +107,31 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   `aeolus_creer`, sans priorité sur notre valeur (le fichier de réglages
   utilisateur d'Aeolus, `~/.config/Aeolus.settings`, est écrasé par
   l'application explicite au démarrage).
+- Transposition globale : décalage de −12 à +12 demi-tons appliqué à toutes
+  les notes MIDI entrantes, jamais persisté (remis à 0 à chaque démarrage ;
+  absent d'`etat.json` et des combinaisons). Le filtre est
+  `cosmo/transposition.h` (règle pure, testée en C natif par
+  `cosmo/tests/transposition.c`) : table fixe `int8_t[16][128]` des notes
+  réellement envoyées, appui sur 0x9n vélocité > 0, relâchement sur 0x8n ou
+  0x9n vélocité 0 (renvoie la note retenue, même si le réglage a changé
+  entre-temps), pression polyphonique 0xAn décalée via la même table, notes
+  hors 0..127 ignorées à l'appui comme au relâchement, tous les autres
+  messages inchangés. Aucun verrou, allocation, appel système ni Lua dans le
+  fil audio ; la table n'est touchée que par ce fil et remise à zéro par
+  `panique()` et `recreer_moteur()`. Valeur effective dans `g_transposition`
+  (fil audio), commande `CMD_TRANSPOSITION` par le tube, publiée dans
+  `struct etat` (avance de `seq`). Lua : `organum.transposition(n)` borne
+  −12..12. `POST /api/orgue {"transposition": N}` (entier −12..12, sinon
+  400, validation dans `web/src/validation.moon`) et `GET /api/orgue`
+  publient `transposition`. Interface : bloc « Transposition » (−, valeur
+  signée, +) en bas de la colonne du Manuel III dans `web/src/page.moon` /
+  `client.moon` / `style.moon` et `web/src/fenetre.moon` (la colonne est
+  choisie par `modele.colonne_transposition` : Manuel III, sinon première
+  division sans accouplement) ; valeur non nulle accentuée, bornes inactives,
+  cibles web ≥ 44 px. Côté natif, le signe moins est l'hyphen ASCII (la
+  police latin embarquée n'a pas U+2212). Tests réels :
+  `web/scripts/test-transposition.sh`, e2e web et natif (dont croisé),
+  `scripts/tests-unitaires.sh` pour l'en-tête C.
 - Authentification facultative HTTP Digest SHA-256 (RFC 7616, `qop=auth`,
   royaume `organum`) : désactivée sans mot de passe ; ne sert qu'à vérifier
   les droits, sans chiffrement. Règles pures dans
