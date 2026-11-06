@@ -134,19 +134,57 @@ aide.verifie(c.autorise({reseau("10.35.0.0/16")}, 0x7f000001),
   "source locale : autorisée malgré la liste")
 aide.verifie(not c.autorise({reseau("10.35.0.0/16")}, nil), "source inconnue : refusée")
 
--- Fichier éditable : un sous-réseau par ligne, commentaires et lignes vides.
+-- Fichier éditable : un sous-réseau par ligne, commentaire facultatif en fin
+-- de ligne, lignes vides et lignes de commentaire admises.
 local fichier = c.analyser_fichier(
-  "# liste des réseaux autorisés\n\n10.35.0.0/16\n2001:470:ca35::/48\r\n")
+  "# liste des réseaux autorisés\n\n10.35.0.0/16 # chapelle\n2001:470:ca35::/48\r\n")
 aide.egal(fichier and #fichier, 2, "fichier réseaux : deux entrées")
-aide.egal(fichier and c.formater_liste(fichier), "10.35.0.0/16, 2001:470:ca35::/48",
-  "fichier réseaux : liste canonique")
-aide.egal(c.formater_fichier(fichier or {}), "10.35.0.0/16\n2001:470:ca35::/48\n",
-  "fichier réseaux : forme écrite")
+aide.egal(fichier and fichier[1] and fichier[1].reseau.texte, "10.35.0.0/16",
+  "fichier réseaux : sous-réseau 1")
+aide.egal(fichier and fichier[1] and fichier[1].commentaire, "chapelle",
+  "fichier réseaux : commentaire 1")
+aide.egal(fichier and fichier[2] and fichier[2].commentaire, "",
+  "fichier réseaux : commentaire vide")
+aide.egal(fichier and c.formater_liste(fichier),
+  "10.35.0.0/16 # chapelle, 2001:470:ca35::/48",
+  "fichier réseaux : liste canonique avec commentaires")
+aide.egal(c.formater_fichier(fichier or {}),
+  "10.35.0.0/16 # chapelle\n2001:470:ca35::/48\n",
+  "fichier réseaux : forme écrite, aller-retour")
+local relu = c.analyser_fichier(c.formater_fichier(fichier or {}))
+aide.egal(c.formater_fichier(relu or {}), c.formater_fichier(fichier or {}),
+  "fichier réseaux : analyse après réécriture idempotente")
+aide.egal(c.analyser_fichier("10.0.0.0/8#chapelle")[1].commentaire, "chapelle",
+  "fichier réseaux : # sans espace")
+aide.egal(c.analyser_fichier("10.0.0.0/8 #")[1].commentaire, "",
+  "fichier réseaux : commentaire vide")
 aide.egal(#(c.analyser_fichier("# commentaire\n\n") or {}), 0, "fichier réseaux : vide")
 aide.egal(c.formater_fichier({}), "", "fichier réseaux : écriture vide")
 aide.egal(c.analyser_fichier("10.0.0.0/8\npas-un-reseau\n"), nil,
   "fichier réseaux : une ligne invalide fait échouer")
-aide.egal(c.analyser_fichier("10.0.0.0/8 # fin de ligne"), nil,
-  "fichier réseaux : commentaire de fin de ligne non admis")
+aide.egal(c.analyser_fichier("pas-un-reseau # chapelle"), nil,
+  "fichier réseaux : adresse invalide avec commentaire refusée")
+aide.egal(c.analyser_fichier("10.0.0.0/8 # " .. string.rep("x", 201)), nil,
+  "fichier réseaux : commentaire de plus de 200 octets refusé")
+
+-- Nouvelle forme d'API : entrées {reseau, commentaire}.
+local entrees = c.normaliser_liste({
+  {reseau = "10.35.0.0/16", commentaire = "chapelle"},
+  {reseau = "2001:470:ca35::/48"},
+})
+aide.egal(entrees and #entrees, 2, "API réseaux : entrées objet")
+aide.egal(entrees and entrees[1].commentaire, "chapelle", "API réseaux : commentaire")
+aide.egal(entrees and c.formater_fichier(entrees),
+  "10.35.0.0/16 # chapelle\n2001:470:ca35::/48\n", "API réseaux : écriture")
+aide.egal(c.normaliser_liste({{reseau = "10.0.0.0/8", commentaire = "a\nb"}}), nil,
+  "API réseaux : saut de ligne dans le commentaire refusé")
+aide.egal(c.normaliser_liste({{reseau = "10.0.0.0/8", commentaire = string.rep("x", 201)}}), nil,
+  "API réseaux : commentaire de plus de 200 octets refusé")
+aide.egal(c.normaliser_liste({{commentaire = "sans réseau"}}), nil,
+  "API réseaux : réseau manquant refusé")
+aide.verifie(c.autorise(entrees or {}, 0x0a230102),
+  "API réseaux : commentaire ignoré par le contrôle d'accès")
+aide.verifie(not c.autorise(entrees or {}, 0x0a240102),
+  "API réseaux : hors réseau refusé malgré commentaire")
 
 aide.termine()

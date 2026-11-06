@@ -321,32 +321,33 @@ CODE=$(code_client GET /api/orgue --digest -u organiste:secret03)
 [ "$CODE" = 200 ] && ok "ORGANUM_DIGEST vide : chemin par défaut utilisé" \
   || echec "ORGANUM_DIGEST vide : code $CODE"
 
-# 11. Fichier invalide au démarrage : refus explicite de démarrer.
+# 11. Fichier invalide au démarrage : l'orgue démarre quand même, 503 pour
+# les sources non locales, et la source locale garde les pages et l'API pour
+# corriger ; un POST local valide rétablit le contrôle.
 arreter
 printf 'organiste:autre:%s\n' "$HA1_MANUELLE" >"$AUTH"
-ORGANUM_PERIPHERIQUE=null ORGANUM_QUALITE=3 \
-ORGANUM_ETAT="$ETAT" ORGANUM_CONFIG_MIDI="$CONFIG" ORGANUM_FENETRE=non \
-  "$BIN" -p "$PORT" >"$JOURNAL" 2>&1 &
-PID=$!
-i=0
-MORT=0
-while [ "$i" -lt 100 ]; do
-  if ! kill -0 "$PID" 2>/dev/null; then MORT=1; break; fi
-  sleep 0.1
-  i=$((i + 1))
-done
-if [ "$MORT" = 1 ]; then
-  wait "$PID" 2>/dev/null
-  CODE=$?
-  [ "$CODE" -ne 0 ] && ok "fichier Digest invalide au démarrage : arrêt (code $CODE)" \
-    || echec "fichier Digest invalide au démarrage : code 0"
-  grep -qF 'invalide' "$JOURNAL" && grep -qF "$AUTH" "$JOURNAL" \
-    && ok "fichier Digest invalide au démarrage : message explicite" \
-    || echec "fichier Digest invalide au démarrage : message absent"
-else
-  echec "fichier Digest invalide au démarrage : le serveur a démarré"
-fi
-PID=""
+demarrer_direct __ABSENT__ || { echec "fichier Digest invalide au démarrage : le serveur n'a pas démarré"; exit 1; }
+CODE=$(code_client GET /api/orgue)
+[ "$CODE" = 503 ] && ok "fichier Digest invalide au démarrage : non local 503" \
+  || echec "fichier Digest invalide au démarrage : non local code $CODE"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$URL_LOCAL/audio")
+[ "$CODE" = 200 ] && ok "fichier Digest invalide au démarrage : /audio local 200" \
+  || echec "fichier Digest invalide au démarrage : /audio local code $CODE"
+ETAT_AUTH=$(curl -s "$URL_LOCAL/api/authentification")
+[ -n "$(printf '%s' "$ETAT_AUTH" | champ erreur)" ] \
+  && ok "fichier Digest invalide au démarrage : erreur publiée" \
+  || echec "fichier Digest invalide au démarrage : aucune erreur publiée ($ETAT_AUTH)"
+REP=$(curl -s -X POST "$URL_LOCAL/api/authentification" \
+  -H 'Content-Type: application/json' -d '{"utilisateur":"organiste","mot_de_passe":"secret04"}')
+printf '%s' "$REP" | grep -qF '"active":true' \
+  && ok "fichier Digest invalide : POST local valide accepté" \
+  || echec "fichier Digest invalide : POST local refusé ($REP)"
+CODE=$(code_client GET /api/orgue)
+[ "$CODE" = 401 ] && ok "fichier Digest corrigé : contrôle rétabli (401 non local)" \
+  || echec "fichier Digest corrigé : non local code $CODE"
+CODE=$(code_client GET /api/orgue --digest -u organiste:secret04)
+[ "$CODE" = 200 ] && ok "fichier Digest corrigé : Digest accepté (200)" \
+  || echec "fichier Digest corrigé : code $CODE"
 
 arreter
 echo

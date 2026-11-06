@@ -715,6 +715,64 @@ async function testAudio() {
   verifie(!messageFinal.includes('Application'), 'web /audio : « Application… » a disparu après application');
 }
 
+async function testReseaux() {
+  await viewport(1100);
+  await navigate('/audio');
+  await attendre(() => evaluer('document.getElementById("reseaux-entrees") !== null'), 'page /audio : section Réseaux');
+
+  // Repart d'une liste vide, puis une rangée par sous-réseau avec commentaire.
+  await poster('/api/reseaux', { reseaux: [] });
+  await delay(300);
+  await clic('document.getElementById("reseaux-ajouter")');
+  await clic('document.getElementById("reseaux-ajouter")');
+  await evaluer(`(() => {
+    const lignes = document.querySelectorAll('#reseaux-entrees .reseau-entree');
+    lignes[0].querySelector('.reseau-sous-reseau').value = '127.0.0.1/32';
+    lignes[0].querySelector('.reseau-commentaire').value = '<script>window.__pwned = 1<\/script>';
+    lignes[1].querySelector('.reseau-sous-reseau').value = '10.35.0.0/16';
+    lignes[1].querySelector('.reseau-commentaire').value = 'chapelle';
+    return lignes.length;
+  })()`);
+  await clic('document.getElementById("reseaux-enregistrer")');
+  const enregistre = await attendre(async () => {
+    const r = await api('/api/reseaux');
+    const entrees = r.reseaux || [];
+    if (entrees.length !== 2) return null;
+    if (!entrees.some((e) => e.reseau === '10.35.0.0/16' && e.commentaire === 'chapelle')) return null;
+    return r;
+  }, 'web /audio : deux sous-réseaux avec commentaires enregistrés');
+  verifie(!!enregistre, 'web /audio : deux sous-réseaux avec commentaires enregistrés');
+
+  await navigate('/audio');
+  await attendre(async () => {
+    const lignes = await evaluer('document.querySelectorAll("#reseaux-entrees .reseau-entree").length');
+    return lignes === 2 ? lignes : null;
+  }, 'web /audio : une rangée par sous-réseau après rechargement');
+  const commentaireScript = await evaluer(
+    'document.querySelectorAll("#reseaux-entrees .reseau-commentaire")[0].value');
+  verifie(commentaireScript === '<script>window.__pwned = 1<\/script>',
+    'web /audio : commentaire <script> conservé comme valeur, pas exécuté');
+  const execute = await evaluer('typeof window.__pwned');
+  verifie(execute === 'undefined', 'web /audio : commentaire <script> non exécuté');
+  const scripts = await evaluer(
+    'Array.from(document.querySelectorAll("script")).filter((e) => (e.textContent || "").includes("__pwned")).length');
+  verifie(scripts === 0, 'web /audio : aucun <script> injecté dans le document');
+
+  // Retrait d'une rangée puis enregistrement : une seule entrée restante.
+  await clic('document.querySelector("#reseaux-entrees .reseau-retirer")');
+  const restantes = await evaluer('document.querySelectorAll("#reseaux-entrees .reseau-entree").length');
+  verifie(restantes === 1, 'web /audio : bouton Retirer enlève la rangée');
+  await clic('document.getElementById("reseaux-enregistrer")');
+  const apres = await attendre(async () => {
+    const r = await api('/api/reseaux');
+    return (r.reseaux || []).length === 1 ? r : null;
+  }, 'web /audio : retrait enregistré');
+  verifie(!!apres, 'web /audio : retrait enregistré');
+
+  // Remet la liste vide pour ne pas gêner la suite (source locale exemptée).
+  await poster('/api/reseaux', { reseaux: [] });
+}
+
 async function testResponsive() {
   for (const chemin of ['/', '/midi', '/audio']) {
     for (const largeur of [420, 1100]) {
@@ -725,7 +783,7 @@ async function testResponsive() {
         const debord = Math.max(d.scrollWidth, document.body.scrollWidth) - d.clientWidth;
         const petits = [];
         if (${JSON.stringify(chemin)} === '/audio') {
-          for (const e of document.querySelectorAll('.qualite-segment, .qualite-bascule')) {
+          for (const e of document.querySelectorAll('.qualite-segment, .qualite-bascule, .qualite input[type=\"text\"]')) {
             if (e.offsetParent === null) continue;
             const h = e.getBoundingClientRect().height;
             if (h < 44) petits.push((e.id || e.textContent.trim()) + '=' + h.toFixed(1));
@@ -919,6 +977,7 @@ async function principal() {
   await testAccueil();
   await testMidi();
   await testAudio();
+  await testReseaux();
   await testResponsive();
 
   verifie(cdp.erreurs.length === 0, `web : aucune erreur console (${cdp.erreurs.length})`);

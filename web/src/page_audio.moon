@@ -147,6 +147,31 @@ css = [[
     font: inherit;
     font-size: 0.9rem;
   }
+  /* Une rangée par sous-réseau : sous-réseau, commentaire facultatif,
+     bouton de retrait. Empilée sous 640 px, sans débordement à 420 px. */
+  .reseaux-entrees {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+  }
+  .reseau-entree {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    min-width: 0;
+  }
+  @media (min-width: 640px) {
+    .reseau-entree {
+      grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) auto;
+      align-items: center;
+    }
+  }
+  .reseau-retirer {
+    flex: 0 0 auto;
+    min-width: 44px;
+    text-align: center;
+  }
   /* Le curseur occupe toute sa zone tactile : 48 px de haut, ce qui contient
      le pouce de 48 px sans qu'il déborde sur le libellé au-dessus. */
   .qualite input[type="range"] {
@@ -1028,16 +1053,72 @@ script = [[
   chargerAuth();
 
   // --- Contrôle d'accès par sous-réseau source -------------------------
-  // Même contrat que l'authentification : l'état seul est relu, la liste
-  // est enregistrée telle que saisie, et le serveur refuse une liste qui
-  // exclurait l'adresse source courante (sauf source locale).
+  // Une rangée par sous-réseau : champ sous-réseau, commentaire facultatif,
+  // bouton de retrait. L'état relu est un tableau d'objets {reseau,
+  // commentaire} ; le commentaire n'entre jamais dans le contrôle d'accès.
   var sectionReseaux = document.getElementById('reseaux');
   var reseauxEtat = document.getElementById('reseaux-etat');
   var reseauxSource = document.getElementById('reseaux-source');
-  var reseauxListe = document.getElementById('reseaux-liste');
+  var reseauxEntrees = document.getElementById('reseaux-entrees');
+  var reseauxAjouter = document.getElementById('reseaux-ajouter');
   var reseauxEnregistrer = document.getElementById('reseaux-enregistrer');
   var reseauxNote = document.getElementById('reseaux-note');
   var reseauxEnCours = false;
+
+  function ligneReseau(entree) {
+    var ligne = document.createElement('div');
+    ligne.className = 'reseau-entree';
+    var sousReseau = document.createElement('input');
+    sousReseau.type = 'text';
+    sousReseau.className = 'reseau-sous-reseau';
+    sousReseau.maxLength = 64;
+    sousReseau.autocomplete = 'off';
+    sousReseau.placeholder = '10.35.0.0/16';
+    sousReseau.setAttribute('aria-label', 'Sous-réseau');
+    sousReseau.value = (entree && typeof entree.reseau === 'string') ? entree.reseau : '';
+    var commentaire = document.createElement('input');
+    commentaire.type = 'text';
+    commentaire.className = 'reseau-commentaire';
+    commentaire.maxLength = 200;
+    commentaire.autocomplete = 'off';
+    commentaire.placeholder = 'Commentaire (facultatif)';
+    commentaire.setAttribute('aria-label', 'Commentaire du sous-réseau');
+    commentaire.value = (entree && typeof entree.commentaire === 'string') ? entree.commentaire : '';
+    var retirer = document.createElement('button');
+    retirer.type = 'button';
+    retirer.className = 'qualite-bascule reseau-retirer';
+    retirer.textContent = 'Retirer';
+    retirer.setAttribute('aria-label', 'Retirer ce sous-réseau');
+    retirer.addEventListener('click', function () {
+      ligne.remove();
+    });
+    ligne.appendChild(sousReseau);
+    ligne.appendChild(commentaire);
+    ligne.appendChild(retirer);
+    return ligne;
+  }
+
+  function afficherEntrees(liste) {
+    if (!reseauxEntrees) { return; }
+    while (reseauxEntrees.firstChild) { reseauxEntrees.removeChild(reseauxEntrees.firstChild); }
+    var entrees = Array.isArray(liste) ? liste : [];
+    entrees.forEach(function (e) { reseauxEntrees.appendChild(ligneReseau(e)); });
+  }
+
+  function entreesSaisies() {
+    if (!reseauxEntrees) { return []; }
+    var entrees = [];
+    reseauxEntrees.querySelectorAll('.reseau-entree').forEach(function (ligne) {
+      var champ = ligne.querySelector('.reseau-sous-reseau');
+      var commentaire = ligne.querySelector('.reseau-commentaire');
+      var reseau = champ ? champ.value.trim() : '';
+      var texte = commentaire ? commentaire.value.trim() : '';
+      if (reseau !== '' || texte !== '') {
+        entrees.push({ reseau: reseau, commentaire: texte });
+      }
+    });
+    return entrees;
+  }
 
   function majReseaux(r) {
     if (!sectionReseaux || !r || typeof r !== 'object') { return; }
@@ -1047,12 +1128,10 @@ script = [[
     if (reseauxSource) {
       reseauxSource.textContent = 'Source : ' + (r.source || 'locale');
     }
-    if (reseauxListe && document.activeElement !== reseauxListe &&
-        typeof r.texte === 'string') {
-      reseauxListe.value = r.texte;
-    }
+    afficherEntrees(r.reseaux);
     var enCours = reseauxEnCours;
-    if (reseauxListe) { reseauxListe.disabled = enCours; }
+    if (reseauxEntrees) { reseauxEntrees.querySelectorAll('input, button').forEach(function (e) { e.disabled = enCours; }); }
+    if (reseauxAjouter) { reseauxAjouter.disabled = enCours; }
     if (reseauxEnregistrer) { reseauxEnregistrer.disabled = enCours; }
     if (reseauxNote) {
       if (r.erreur) {
@@ -1108,9 +1187,18 @@ script = [[
       });
   }
 
+  if (reseauxAjouter) {
+    reseauxAjouter.addEventListener('click', function () {
+      if (!reseauxEntrees) { return; }
+      var ligne = ligneReseau({reseau: '', commentaire: ''});
+      reseauxEntrees.appendChild(ligne);
+      var champ = ligne.querySelector('.reseau-sous-reseau');
+      if (champ) { champ.focus(); }
+    });
+  }
   if (reseauxEnregistrer) {
     reseauxEnregistrer.addEventListener('click', function () {
-      envoyerReseaux({ reseaux: reseauxListe ? reseauxListe.value : '' });
+      envoyerReseaux({ reseaux: entreesSaisies() });
     });
   }
   chargerReseaux();
@@ -1310,17 +1398,17 @@ script = [[
                 h.span class: "qualite-note", id: "reseaux-source", "Source : —"
               )
             )
+            h.div class: "reseaux-entrees", id: "reseaux-entrees"
             h.div(
-              class: "qualite-ligne"
-              h.span class: "qualite-libelle", "Sous-réseaux"
+              class: "qualite-ligne qualite-ligne-pleine"
               h.div(
                 class: "qualite-commandes"
-                h.input type: "text", id: "reseaux-liste", maxlength: "1024", autocomplete: "off", placeholder: "10.35.0.0/16, 2001:470:ca35::/48", ["aria-label"]: "Sous-réseaux autorisés"
+                h.button type: "button", class: "qualite-bascule", id: "reseaux-ajouter", "Ajouter un sous-réseau"
                 h.button type: "button", class: "qualite-bascule", id: "reseaux-enregistrer", "Enregistrer"
               )
             )
           )
-          h.p class: "note", "Un sous-réseau par ligne. Une liste vide ne filtre rien ; les adresses locales 127.0.0.1 et ::1 passent toujours. Enregistrer depuis cette page réécrit le fichier et perd ses commentaires."
+          h.p class: "note", "Un sous-réseau par ligne, avec un commentaire facultatif. Une liste vide ne filtre rien ; les adresses locales 127.0.0.1 et ::1 passent toujours. Enregistrer depuis cette page conserve les commentaires d’entrée mais perd les lignes qui ne sont qu’un commentaire."
           h.p class: "note qualite-message", id: "reseaux-note", role: "status", ["aria-live"]: "polite", hidden: true
         )
         h.script script

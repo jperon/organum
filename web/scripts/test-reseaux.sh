@@ -384,35 +384,54 @@ demarrer_direct "" || { echec "démarrage avec ORGANUM_RESEAUX_FICHIER vide"; ex
   && ok "ORGANUM_RESEAUX_FICHIER vide : chemin par défaut utilisé" \
   || echec "ORGANUM_RESEAUX_FICHIER vide : source listée code $(code_nl GET /api/orgue)"
 
-# Fichier invalide au démarrage : arrêt explicite.
+# API par entrées {reseau, commentaire} : commentaire conservé, refusé s'il
+# contient un saut de ligne ou dépasse 200 octets.
+REP=$(poster_reseaux_local "{\"reseaux\":[{\"reseau\":\"$RESEAU_NL\",\"commentaire\":\"chapelle\"}]}")
+printf '%s' "$REP" | grep -qF '"commentaire":"chapelle"' \
+  && ok "API réseaux : entrée avec commentaire acceptée" \
+  || echec "API réseaux : entrée avec commentaire refusée ($REP)"
+grep -qxF "$RESEAU_NL # chapelle" "$RESEAUX" \
+  && ok "API réseaux : commentaire écrit dans le fichier" \
+  || echec "API réseaux : commentaire absent du fichier ($(cat "$RESEAUX"))"
+CODE=$(code_local POST /api/reseaux -H 'Content-Type: application/json' \
+  -d "{\"reseaux\":[{\"reseau\":\"$RESEAU_NL\",\"commentaire\":\"a\\nb\"}]}")
+[ "$CODE" = 400 ] && ok "API réseaux : saut de ligne dans le commentaire refusé (400)" \
+  || echec "API réseaux : saut de ligne accepté (code $CODE)"
+LONG=$(python3 -c 'print("x"*201)')
+CODE=$(code_local POST /api/reseaux -H 'Content-Type: application/json' \
+  -d "{\"reseaux\":[{\"reseau\":\"$RESEAU_NL\",\"commentaire\":\"$LONG\"}]}")
+[ "$CODE" = 400 ] && ok "API réseaux : commentaire de plus de 200 octets refusé (400)" \
+  || echec "API réseaux : commentaire trop long accepté (code $CODE)"
+
+# Fichier invalide au démarrage : l'orgue démarre quand même, 503 pour les
+# sources non locales, et la source locale garde les pages et l'API pour
+# corriger ; un POST local valide rétablit le contrôle.
 arreter
 printf 'pas-un-reseau\n' >"$RESEAUX"
-ORGANUM_PERIPHERIQUE=null ORGANUM_QUALITE=3 \
-ORGANUM_ETAT="$ETAT" ORGANUM_CONFIG_MIDI="$CONFIG" ORGANUM_FENETRE=non \
-  "$BIN" -p "$PORT" >"$JOURNAL" 2>&1 &
-PID=$!
-i=0
-MORT=0
-while [ "$i" -lt 100 ]; do
-  if ! kill -0 "$PID" 2>/dev/null; then
-    MORT=1
-    break
-  fi
-  sleep 0.1
-  i=$((i + 1))
-done
-if [ "$MORT" = 1 ]; then
-  wait "$PID" 2>/dev/null
-  CODE=$?
-  [ "$CODE" -ne 0 ] && ok "fichier réseaux invalide au démarrage : arrêt (code $CODE)" \
-    || echec "fichier réseaux invalide au démarrage : code 0"
-  grep -qF "$RESEAUX" "$JOURNAL" && grep -qF 'invalide' "$JOURNAL" \
-    && ok "fichier réseaux invalide au démarrage : message explicite" \
-    || echec "fichier réseaux invalide au démarrage : message absent"
-else
-  echec "fichier réseaux invalide au démarrage : le serveur a démarré"
-fi
-PID=""
+demarrer_direct __ABSENT__ || { echec "fichier réseaux invalide au démarrage : le serveur n'a pas démarré"; exit 1; }
+[ "$(code_nl GET /api/orgue)" = 503 ] \
+  && ok "fichier réseaux invalide au démarrage : non local 503" \
+  || echec "fichier réseaux invalide au démarrage : non local code $(code_nl GET /api/orgue)"
+[ "$(code_local GET /audio)" = 200 ] \
+  && ok "fichier réseaux invalide au démarrage : /audio local 200" \
+  || echec "fichier réseaux invalide au démarrage : /audio local code $(code_local GET /audio)"
+ERREUR=$(client_local GET /api/reseaux | champ erreur)
+[ -n "$ERREUR" ] \
+  && ok "fichier réseaux invalide au démarrage : erreur publiée" \
+  || echec "fichier réseaux invalide au démarrage : aucune erreur publiée"
+REP=$(poster_reseaux_local "{\"reseaux\":[{\"reseau\":\"$RESEAU_NL\",\"commentaire\":\"corrigé\"}]}")
+printf '%s' "$REP" | grep -qF '"active":true' \
+  && ok "fichier réseaux invalide : POST local valide accepté" \
+  || echec "fichier réseaux invalide : POST local refusé ($REP)"
+[ "$(code_nl GET /api/orgue)" = 200 ] \
+  && ok "fichier réseaux corrigé : source listée acceptée (200)" \
+  || echec "fichier réseaux corrigé : source listée code $(code_nl GET /api/orgue)"
+[ "$(code_autre GET /api/orgue)" = 403 ] \
+  && ok "fichier réseaux corrigé : contrôle rétabli (403 hors liste)" \
+  || echec "fichier réseaux corrigé : hors liste code $(code_autre GET /api/orgue)"
+grep -qxF "$RESEAU_NL # corrigé" "$RESEAUX" \
+  && ok "fichier réseaux corrigé : commentaire conservé" \
+  || echec "fichier réseaux corrigé : commentaire absent"
 
 arreter
 echo

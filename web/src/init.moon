@@ -454,24 +454,10 @@ regler_authentification = (data) ->
   return nil, err unless ok
   auth_etat!
 
--- Refus explicite au démarrage : un fichier présent mais invalide ou
--- illisible exprime une intention de sécurité, qu'il ne faut pas remplacer
--- silencieusement par « aucun contrôle ».
-do
-  config = auth_config!
-  if config.erreur
-    Log kLogFatal, "organum : #{AUTH_FICHIER} invalide : #{config.erreur}"
-    unix.exit 1
-  contenu, erreur = lire_fichier_texte RESEAUX_FICHIER
-  if erreur
-    Log kLogFatal, "organum : #{RESEAUX_FICHIER} invalide : #{erreur}"
-    unix.exit 1
-  if contenu
-    liste, err = controle_acces.analyser_fichier contenu
-    unless liste
-      Log kLogFatal, "organum : #{RESEAUX_FICHIER} invalide : #{err}"
-      unix.exit 1
-
+-- Un fichier invalide n'empêche pas le démarrage : l'orgue joue, mais les
+-- sources non locales reçoivent 503 (voir reseaux_autoriser et
+-- auth_autoriser). Les adresses locales restent exemptées, afin de garder un
+-- moyen de corriger le fichier depuis l'interface web.
 
 -- Source HTTP réelle : GetClientAddr, et non GetRemoteAddr, pour qu'un
 -- en-tête X-Forwarded-For venu d'une adresse de confiance ne puisse ni
@@ -755,10 +741,11 @@ reseaux_config = ->
 -- quand elle est connue ; la fenêtre native n'a pas de source HTTP.
 reseaux_etat = (ip) ->
   config = reseaux_config!
+  entrees = [{reseau: e.reseau.texte, commentaire: e.commentaire} for e in *config.liste]
   {
     active: #config.liste > 0
     texte: controle_acces.formater_liste config.liste
-    reseaux: modele.liste_json [r.texte for r in *config.liste]
+    reseaux: modele.liste_json entrees
     source: if ip != nil then controle_acces.texte_source ip else nil
     erreur: config.erreur
   }

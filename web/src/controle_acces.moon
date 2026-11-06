@@ -186,57 +186,103 @@ M.analyser_reseau = (texte) ->
   reseau.texte = M.formater_reseau reseau
   reseau
 
--- Liste séparée par virgules ou espaces, ou tableau de chaînes. Les entrées
--- vides sont ignorées ; une entrée invalide fait échouer toute la liste.
+-- Commentaire de fin de ligne : facultatif, 200 octets au plus, jamais de
+-- saut de ligne (il ne doit pas casser le format un-sous-réseau-par-ligne).
+commentaire_valide = (commentaire) ->
+  return true if commentaire == nil or commentaire == ""
+  type(commentaire) == "string" and #commentaire <= 200 and not commentaire\find "[\r\n]"
+
+-- Découpe « 10.35.0.0/16 # chapelle » en sous-réseau et commentaire. Le
+-- commentaire commence au premier « # », avec ou sans espace avant.
+decouper_ligne = (texte) ->
+  avant, apres = texte\match "^([^#]*)#(.*)$"
+  unless avant
+    return texte, ""
+  avant\match("^%s*(.-)%s*$") or "", apres\match("^%s*(.-)%s*$") or ""
+
+-- Entrée {reseau, commentaire} à partir d'un sous-réseau et d'un commentaire.
+entree = (reseau, commentaire, numero) ->
+  commentaire = "" if commentaire == nil
+  unless commentaire_valide commentaire
+    return nil, "ligne #{numero or "?"} : commentaire invalide (200 octets au plus, sans saut de ligne)"
+  {reseau: reseau, commentaire: commentaire}
+
+-- Liste d'entrées {reseau, commentaire}. Accepte encore une chaîne ou un
+-- tableau de chaînes (ancienne forme, commentaire vide), et la nouvelle
+-- forme tableau d'objets {reseau, commentaire}. Les entrées vides sont
+-- ignorées ; une entrée invalide fait échouer toute la liste.
 M.normaliser_liste = (valeur) ->
-  textes = {}
+  entrees = {}
+  ajouter = (texte) ->
+    for morceau in texte\gmatch "[^,%s]+"
+      reseau, err = M.analyser_reseau morceau
+      return nil, "« #{morceau} » : #{err}" unless reseau
+      entrees[#entrees + 1] = {reseau: reseau, commentaire: ""}
+    true
   if valeur == nil
     return {}
   elseif type(valeur) == "string"
-    for morceau in valeur\gmatch "[^,%s]+"
-      textes[#textes + 1] = morceau
+    ok, err = ajouter valeur
+    return nil, err unless ok
   elseif type(valeur) == "table"
     for i, v in ipairs valeur
-      return nil, "entrée #{i} : chaîne attendue" unless type(v) == "string"
-      for morceau in v\gmatch "[^,%s]+"
-        textes[#textes + 1] = morceau
+      if type(v) == "string"
+        ok, err = ajouter v
+        return nil, err unless ok
+      elseif type(v) == "table"
+        return nil, "entrée #{i} : champ reseau attendu" unless type(v.reseau) == "string"
+        reseau, err = M.analyser_reseau v.reseau
+        return nil, "entrée #{i} : « #{v.reseau} » : #{err}" unless reseau
+        e, err = entree reseau, v.commentaire, nil
+        return nil, "entrée #{i} : #{err}" unless e
+        entrees[#entrees + 1] = e
+      else
+        return nil, "entrée #{i} : chaîne ou objet attendu"
   else
     return nil, "liste attendue"
-  reseaux = {}
-  for i, texte in ipairs textes
-    reseau, err = M.analyser_reseau texte
-    return nil, "« #{texte} » : #{err}" unless reseau
-    reseaux[#reseaux + 1] = reseau
-  reseaux
+  entrees
 
-M.formater_liste = (reseaux) ->
+M.formater_liste = (entrees) ->
   textes = {}
-  for reseau in *reseaux
-    textes[#textes + 1] = M.formater_reseau reseau
+  for e in *entrees
+    reseau = e.reseau or e
+    texte = M.formater_reseau reseau
+    texte = texte .. " # " .. e.commentaire if type(e.commentaire) == "string" and e.commentaire != ""
+    textes[#textes + 1] = texte
   table.concat textes, ", "
 
--- Analyse le fichier éditable à la main : un sous-réseau par ligne, lignes
--- vides et commentaires « # » admis. Une ligne invalide fait échouer tout le
--- fichier (une faute de saisie ne doit pas élargir silencieusement l'accès).
+-- Analyse le fichier éditable à la main : un sous-réseau par ligne, suivi
+-- d'un commentaire facultatif « # … ». Les lignes vides et les lignes qui ne
+-- sont qu'un commentaire sont admises. Une ligne invalide fait échouer tout
+-- le fichier (une faute de saisie ne doit pas élargir silencieusement
+-- l'accès). Les commentaires ne participent jamais au contrôle d'accès.
 M.analyser_fichier = (contenu) ->
   return nil, "contenu attendu" unless type(contenu) == "string"
-  reseaux = {}
+  entrees = {}
   numero = 0
   for ligne in contenu\gmatch "[^\n]*"
     numero += 1
     texte = ligne\match "^%s*(.-)%s*$"
     if texte != "" and texte\sub(1, 1) != "#"
-      reseau, err = M.analyser_reseau texte
-      return nil, "ligne #{numero} : « #{texte} » : #{err}" unless reseau
-      reseaux[#reseaux + 1] = reseau
-  reseaux, nil
+      sous_reseau, commentaire = decouper_ligne texte
+      reseau, err = M.analyser_reseau sous_reseau
+      return nil, "ligne #{numero} : « #{sous_reseau} » : #{err}" unless reseau
+      e, err = entree reseau, commentaire, numero
+      return nil, err unless e
+      entrees[#entrees + 1] = e
+  entrees, nil
 
--- Forme écrite sur disque : un sous-réseau canonique par ligne.
-M.formater_fichier = (reseaux) ->
-  textes = {}
-  for reseau in *reseaux
-    textes[#textes + 1] = M.formater_reseau reseau
-  table.concat(textes, "\n") .. (if #textes > 0 then "\n" else "")
+-- Forme écrite sur disque : un sous-réseau canonique par ligne, son
+-- commentaire d'entrée conservé. Les lignes qui n'étaient qu'un commentaire
+-- ne sont pas représentées (elles sont perdues à l'écriture web).
+M.formater_fichier = (entrees) ->
+  lignes = {}
+  for e in *entrees
+    reseau = e.reseau or e
+    texte = M.formater_reseau reseau
+    texte = texte .. " # " .. e.commentaire if type(e.commentaire) == "string" and e.commentaire != ""
+    lignes[#lignes + 1] = texte
+  table.concat(lignes, "\n") .. (if #lignes > 0 then "\n" else "")
 
 -- Adresse source brute de GetClientAddr en {famille, octets}. Une chaîne de
 -- 16 octets dont les dix premiers sont nuls et les deux suivants 0xffff est
@@ -299,12 +345,13 @@ M.appartient = (reseau, adresse) ->
 
 -- Vrai si la source est locale ou appartient à l'un des réseaux. Une liste
 -- vide est réputée sans filtre (l'appelant peut aussi le décider lui-même).
-M.autorise = (reseaux, valeur) ->
-  return true if #reseaux == 0
+M.autorise = (entrees, valeur) ->
+  return true if #entrees == 0
   adresse = M.depuis_client valeur
   return false unless adresse
   return true if locale adresse
-  for reseau in *reseaux
+  for e in *entrees
+    reseau = e.reseau or e
     return true if M.appartient reseau, adresse
   false
 
