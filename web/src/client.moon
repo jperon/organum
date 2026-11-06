@@ -19,7 +19,7 @@ JS = [[
   // d'état, sans requête supplémentaire. Le texte porte aussi le niveau.
   function majLienQualite(qualite) {
     if (!lienQualite) { return; }
-    if (qualite && qualite.application === true) { return; }
+    if (qualite && qualite.application_audio === true) { return; }
     var niveau = qualite && typeof qualite.charge_niveau === 'number'
       ? qualite.charge_niveau : 0;
     if (niveau < 0 || niveau > 3) { niveau = 0; }
