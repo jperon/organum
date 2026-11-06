@@ -279,12 +279,15 @@ script = [[
   var polyActif = false;
   var polyEnvoye = null;
   var echecEnvoi = '';
-  // Tempérament : la cible demandée est tenue localement tant que le fil
-  // audio n'a pas publié la valeur effective. `temperamentService` est la
-  // dernière valeur effective connue, qui reste marquée comme active.
-  var temperamentCible = null;
+  // Tempérament : la cible en cours est publiée par le serveur
+  // (qualite.temperament_cible), donc partagée par toutes les interfaces.
+  // Seul un retour immédiat au clic est gardé localement, le temps que
+  // l'état serveur arrive. `temperamentService` est la dernière valeur
+  // effective connue, qui reste marquée comme active.
+  var temperamentCibleLocale = null;
+  var temperamentEnvoiFini = false;
+  var temperamentCibleAffichee = null;
   var temperamentService = null;
-  var temperamentAcceptee = false;
   var temperamentEchec = '';
   var temperamentErreurServeur = '';
 
@@ -316,38 +319,43 @@ script = [[
   }
 
   // Applique l'état de la rangée Tempérament : la valeur effective reste
-  // marquée active (aria-pressed), la cible en cours porte aria-busy et un
-  // message de statut. `q` absent : on réutilise la dernière valeur connue
-  // (mise à jour optimiste au clic, sans attendre le serveur).
+  // marquée active (aria-pressed), la cible publiée par le serveur porte
+  // aria-busy et un message de statut. Le retour local du clic n'est utilisé
+  // que tant que l'état serveur ne l'a pas repris.
   function majTemperament(q) {
     if (q && typeof q === 'object') {
       if (typeof q.temperament === 'number') { temperamentService = q.temperament; }
       temperamentErreurServeur = typeof q.temperament_erreur === 'string' ? q.temperament_erreur : '';
-    }
-    if (temperamentCible !== null && q && typeof q === 'object') {
-      if (q.temperament === temperamentCible) {
-        // Le fil audio a publié la cible : la demande est aboutie.
-        temperamentCible = null;
-        temperamentAcceptee = false;
-        temperamentEchec = '';
-      } else if (temperamentAcceptee && q.application !== true &&
-                 temperamentErreurServeur !== '') {
-        // Le serveur a traité la demande et publié une erreur : la valeur
-        // effective est restée l'ancienne.
-        temperamentCible = null;
-        temperamentAcceptee = false;
+      if (temperamentCibleLocale !== null) {
+        var cibleServeur = (typeof q.temperament_cible === 'number' && q.temperament_cible >= 0)
+          ? q.temperament_cible : null;
+        if (cibleServeur === temperamentCibleLocale) {
+          // Le serveur porte maintenant la cible : le local devient inutile.
+          temperamentCibleLocale = null;
+          temperamentEnvoiFini = false;
+        } else if (temperamentEnvoiFini) {
+          // Envoi terminé sans que le serveur reprenne cette cible : soit le
+          // calcul est déjà fini, soit une demande plus récente l'emporte.
+          temperamentCibleLocale = null;
+          temperamentEnvoiFini = false;
+        }
       }
     }
+    var cible = temperamentCibleLocale;
+    if (cible === null && q && typeof q === 'object' &&
+        typeof q.temperament_cible === 'number' && q.temperament_cible >= 0) {
+      cible = q.temperament_cible;
+    }
+    temperamentCibleAffichee = cible;
     boutonsTemperament.forEach(function (b) {
       var n = nombre(b.getAttribute('data-valeur'));
       poser(b, temperamentService !== null && n === temperamentService);
-      b.setAttribute('aria-busy',
-        temperamentCible !== null && n === temperamentCible ? 'true' : 'false');
+      b.setAttribute('aria-busy', cible !== null && n === cible ? 'true' : 'false');
     });
     if (noteTemperament) {
       var texte = '';
-      if (temperamentCible !== null) {
-        texte = 'Application de ' + nomTemperament(temperamentCible) + '…';
+      if (cible !== null) {
+        texte = 'Application de ' + nomTemperament(cible) + '…';
       } else if (temperamentEchec) {
         texte = 'Tempérament : ' + temperamentEchec;
       } else if (temperamentErreurServeur) {
@@ -421,13 +429,13 @@ script = [[
     return parties.join(' · ');
   }
 
-  // Le message de la page : « Application… » tant qu'une reconfiguration est
-  // en cours côté fil audio (état explicite `application`), puis un éventuel
-  // échec d'envoi. Un échec audio s'affiche dans sa propre ligne.
+  // Le message de la page : « Application… » tant qu'une reconfiguration
+  // audio est en cours (application_audio, distinct du tempérament), puis un
+  // éventuel échec d'envoi. Un échec audio s'affiche dans sa propre ligne.
   function majMessage(q) {
     if (!message) { return; }
     var texte = '';
-    if (q && typeof q === 'object' && q.application === true) {
+    if (q && typeof q === 'object' && q.application_audio === true) {
       texte = 'Application…';
     } else if (echecEnvoi) {
       texte = echecEnvoi;
@@ -437,11 +445,11 @@ script = [[
   }
 
   // Puce d'adaptation : le niveau vient du C ; ce script ne fait que
-  // traduire la classe et le libellé. Pendant « Application… », on ne
-  // réévalue pas la puce.
+  // traduire la classe et le libellé. Pendant une reconfiguration audio, on
+  // ne réévalue pas la puce.
   function majPuce(q) {
     if (!puce) { return; }
-    if (q && typeof q === 'object' && q.application === true) { return; }
+    if (q && typeof q === 'object' && q.application_audio === true) { return; }
     var niveau = q && typeof q.charge_niveau === 'number' ? q.charge_niveau : 0;
     if (niveau < 0 || niveau > 3) { niveau = 0; }
     var classe = section.getAttribute('data-charge-classe-' + niveau) || 'charge-gris';
@@ -664,17 +672,17 @@ script = [[
       .then(function () {
         // La réponse de POST temperament est {ok:true} : la relire comme un
         // état complet effacerait la sélection. La boucle d'état publiera la
-        // valeur effective une fois le calcul terminé. À partir d'ici, une
-        // erreur publiée par le serveur concerne bien cette demande.
+        // cible partagée puis la valeur effective. À partir d'ici, l'état
+        // serveur fait foi pour cette demande.
         enAttente -= 1;
-        if (temperamentCible === n) { temperamentAcceptee = true; }
+        if (temperamentCibleLocale === n) { temperamentEnvoiFini = true; }
       })
       .catch(function (err) {
         enAttente -= 1;
-        if (temperamentCible !== n) { return; }
+        if (temperamentCibleLocale !== n) { return; }
         var detail = err && err.message ? err.message : 'erreur réseau';
-        temperamentCible = null;
-        temperamentAcceptee = false;
+        temperamentCibleLocale = null;
+        temperamentEnvoiFini = false;
         temperamentEchec = 'échec de l’enregistrement (' + detail + ')';
         majTemperament(null);
       });
@@ -685,11 +693,12 @@ script = [[
     if (n === null || n < 0) { return; }
     n = Math.round(n);
     // Dernière cible gagnante, mais sans renvoyer une demande identique :
-    // ni la cible déjà en cours, ni le tempérament déjà en service.
-    if (n === temperamentCible) { return; }
-    if (temperamentCible === null && n === temperamentService) { return; }
-    temperamentCible = n;
-    temperamentAcceptee = false;
+    // ni la cible déjà en cours (locale ou publiée par le serveur), ni le
+    // tempérament déjà en service.
+    if (n === temperamentCibleAffichee) { return; }
+    if (temperamentCibleAffichee === null && n === temperamentService) { return; }
+    temperamentCibleLocale = n;
+    temperamentEnvoiFini = false;
     temperamentEchec = '';
     temperamentErreurServeur = '';
     majTemperament(null);
@@ -1206,9 +1215,17 @@ script = [[
                   class: "qualite-segments", id: "qualite-taux", role: "group", ["aria-label"]: "Taux d'échantillonnage"
                   table.unpack [bouton_segment(v, v, v == "48000") for v in *taux_valides]
                 )
-                h.button type: "button", class: "qualite-bascule", id: "qualite-limiteur", ["aria-pressed"]: "true", "Limiteur"
                 h.span class: "qualite-note", id: "qualite-taux-note", hidden: true
+              )
+            )
+            h.div(
+              class: "qualite-ligne"
+              h.span class: "qualite-libelle", "Limiteur"
+              h.div(
+                class: "qualite-commandes"
+                h.button type: "button", class: "qualite-bascule", id: "qualite-limiteur", ["aria-pressed"]: "true", "Actif"
                 h.span class: "qualite-note", id: "qualite-limiteur-note", hidden: true
+                h.span class: "qualite-note", "évite la saturation sur les gros accords"
               )
             )
             h.div(
