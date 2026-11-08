@@ -175,6 +175,11 @@ if lancer degrade; then
   refuse "dégradé : pas de tentative audio dans le journal" 'sortie audio indisponible' "$journal"
   refuse "dégradé : pas de message ALSA" 'ALSA' "$journal"
   refuse "dégradé : pas de message SCHED_FIFO" 'SCHED_FIFO' "$journal"
+  # GET /api/midi/ports a déjà eu lieu : en mode dégradé, l'absence de
+  # séquenceur n'est pas un orgue non démarré et ne doit pas être annoncée
+  # comme telle.
+  refuse "dégradé : MIDI non ouvert, pas « organum non démarré »" \
+    'organum non démarré' "$journal"
   # ps -o %cpu donne une moyenne depuis le lancement, dominée par le
   # chargement du moteur. Mesurer la consommation réelle sur 2 s par les
   # compteurs de temps CPU de /proc : une boucle de réessai se verrait.

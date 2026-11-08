@@ -1867,7 +1867,11 @@ static int l_associations(lua_State *L) {
 // de la fenêtre native. La liste des adresses déconnectées, elle, est bien
 // en mémoire partagée entre ces processus.
 static int l_midi_ports(lua_State *L) {
-  if (!g_midi) return luaL_error(L, "organum non démarré (organum.demarrer dans .init.lua)");
+  if (!g_midi) {
+    // Mode dégradé : le séquenceur n'a jamais été ouvert, le moteur tourne.
+    if (g_sans_backend) return luaL_error(L, "séquenceur MIDI non ouvert (mode dégradé)");
+    return luaL_error(L, "organum non démarré (organum.demarrer dans .init.lua)");
+  }
   struct midi_port *ports = malloc(MIDI_MAX_PORTS * sizeof(*ports));
   if (!ports) return luaL_error(L, "mémoire insuffisante");
   int n = midi_ports(g_midi, ports, MIDI_MAX_PORTS);

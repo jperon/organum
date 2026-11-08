@@ -1336,7 +1336,12 @@ etat_midi_ports = ->
   adresse = e.midi if ok_etat and type(e) == "table"
   ok, ports = pcall organum.midi_ports
   unless ok
-    Log kLogWarn, "organum : ports MIDI indisponibles : #{ports}"
+    -- Mode dégradé : aucun séquenceur n'est censé être ouvert, ce n'est pas
+    -- une anomalie. Sinon, le moteur n'a réellement pas été démarré.
+    if SANS_BACKEND
+      Log kLogInfo, "organum : séquenceur MIDI non ouvert (mode dégradé sur #{modele.libelle_plateforme PLATEFORME})"
+    else
+      Log kLogWarn, "organum : ports MIDI indisponibles : #{ports}"
     return {adresse: adresse, disponible: not SANS_BACKEND,
       plateforme_libelle: modele.libelle_plateforme PLATEFORME,
       ports: modele.liste_json {}}
