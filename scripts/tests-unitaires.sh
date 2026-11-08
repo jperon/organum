@@ -198,6 +198,24 @@ else
   ignore "C : gcc absent, filtre de transposition non testé"
 fi
 
+# --- Codec du protocole MIDI macOS ------------------------------------------
+if command -v gcc >/dev/null 2>&1; then
+  if gcc -O2 -I "$RACINE/plateforme" "$RACINE/plateforme/tests/trames_midi.c" \
+       -o "$TMP/trames_midi" 2>"$TMP/gcc-trames.log"; then
+    if "$TMP/trames_midi" >"$TMP/trames.log" 2>&1; then
+      ok "C : codec MIDI macOS (poignée, trames, DEVICE_LIST, chemin)"
+    else
+      cat "$TMP/trames.log"
+      echec "C : codec MIDI macOS"
+    fi
+  else
+    cat "$TMP/gcc-trames.log" >&2
+    echec "C : compilation trames_midi"
+  fi
+else
+  ignore "C : gcc absent, codec MIDI macOS non testé"
+fi
+
 # --- Tables C++ des tempéraments --------------------------------------------
 # Compilation mise en cache : scale.cpp et le test ne changent pas entre deux
 # exécutions. La première compilation (quelques secondes) est hors du budget
