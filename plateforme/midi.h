@@ -58,6 +58,9 @@ int midi_deconnecter(midi_t *midi, int client, int port);
 
 void midi_fermer(midi_t *midi);
 
+/* Vrai si un backend MIDI est compilé pour la plate-forme courante. */
+int midi_supportee(void);
+
 #ifdef __cplusplus
 }
 #endif

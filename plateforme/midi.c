@@ -14,3 +14,4 @@ int midi_ports(midi_t *m, struct midi_port *ports, int max) { return AIGUILLER(m
 int midi_connecter(midi_t *m, int c, int p) { return AIGUILLER(midi_connecter, m, c, p); }
 int midi_deconnecter(midi_t *m, int c, int p) { return AIGUILLER(midi_deconnecter, m, c, p); }
 void midi_fermer(midi_t *m) { IsWindows() ? winmm_midi_fermer(m) : alsa_midi_fermer(m); }
+int midi_supportee(void) { return IsLinux() || IsWindows(); }

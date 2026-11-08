@@ -12,3 +12,4 @@ void audio_fermer(audio_t *a) { IsWindows() ? winmm_audio_fermer(a) : alsa_audio
 const char *audio_chemin(audio_t *a) { return AIGUILLER(audio_chemin, a); }
 const char *audio_format(audio_t *a) { return AIGUILLER(audio_format, a); }
 const char *audio_derniere_erreur(void) { return AIGUILLER(audio_derniere_erreur); }
+int audio_supportee(void) { return IsLinux() || IsWindows(); }

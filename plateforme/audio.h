@@ -15,6 +15,9 @@ const char *audio_chemin(audio_t *audio);
 const char *audio_format(audio_t *audio);
 /* Dernière erreur de chargement de libasound ou d'ouverture du PCM, ou NULL. */
 const char *audio_derniere_erreur(void);
+/* Vrai si un backend audio est compilé pour la plate-forme courante.
+   macOS (XNU) n'en a pas : organum démarre alors en mode dégradé. */
+int audio_supportee(void);
 
 #ifdef __cplusplus
 }

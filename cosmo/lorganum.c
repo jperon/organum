@@ -114,6 +114,8 @@ struct etat {
   int charge, charge_pointe, charge_evaluee, charge_niveau;
   int xruns_recents;  // xruns des 60 dernières secondes (hors changements)
   int temps_reel;  // le fil audio a obtenu SCHED_FIFO
+  int audio_disponible;  // backend audio présent sur cette plate-forme
+  int midi_disponible;   // backend MIDI présent sur cette plate-forme
   int etape, netapes;  // combinaison courante (séquenceur), à partir de 0
   int midi_client, midi_port;
   int taux;
@@ -179,6 +181,7 @@ static int g_xruns_base;  // xruns cumulés des descripteurs déjà fermés
 static struct demande_audio g_demande_pendante;
 static int g_demande_pendante_valide;
 static long g_dernier_essai_audio;
+static int g_sans_backend;  // plate-forme sans backend : démarrage dégradé
 static unsigned g_erreurs_ecriture;  // fil audio uniquement, publié par publier()
 static int g_maitre;  // processus qui fait tourner le moteur
 // Protège g_moteur entre le fil audio (recréation au changement de taux), le
@@ -845,6 +848,16 @@ static int ouvrir_audio_attente(const struct demande_audio *d, long limite_ms) {
 // reste en attente et sera réessayée par la boucle.
 static int appliquer_demande(struct demande_audio *dem, float **bg,
                              float **bd, float **be) {
+  if (g_sans_backend) {
+    // Aucun backend : retenir la demande pour que les valeurs publiées et
+    // enregistrées restent cohérentes, sans tenter d'ouvrir quoi que ce soit.
+    g_demande_pendante_valide = 0;
+    g_audio_erreur[0] = '\0';
+    if (dem->taux > 0) g_taux = dem->taux;
+    if (dem->periode > 0) g_periode = dem->periode;
+    strlcpy(g_peripherique, dem->peripherique, sizeof(g_peripherique));
+    return 1;
+  }
   // Rien à changer : la configuration demandée est déjà effective. On
   // efface seulement une erreur précédente (elle est résolue).
   if (g_audio && dem->taux == g_taux && dem->periode == g_periode &&
@@ -964,7 +977,7 @@ static void *boucle_audio(void *arg) {
   struct sched_param sp = {.sched_priority = 70};
   int err = pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp);
   g_etat->temps_reel = err == 0;
-  if (err != 0 && IsLinux())
+  if (err != 0 && IsLinux() && !g_sans_backend)
     // Une seule fois, au démarrage du fil : sans droit rtprio (limite PAM,
     // ulimit -r), on reste en temps partagé et le son peut hachurer. Ailleurs
     // (Windows, XNU), cosmocc renvoie ENOSYS et le message n'aurait pas de sens.
@@ -986,7 +999,7 @@ static void *boucle_audio(void *arg) {
 
   for (;;) {
     int n;
-    while ((n = midi_lire(g_midi, msgs, 64)) > 0)
+    while (g_midi && (n = midi_lire(g_midi, msgs, 64)) > 0)
       for (int i = 0; i < n; ++i) {
         unsigned char m[3] = {msgs[i].statut, msgs[i].d1, msgs[i].d2};
         // Message de canal : marque le canal actif 250 ms, avant les
@@ -1022,23 +1035,25 @@ static void *boucle_audio(void *arg) {
       }
 
     if (!g_audio) {
-      // Sortie fermée après un échec : réessai espacé, sans rendre ni
-      // quitter le processus, jusqu'à réussite ou nouvelle demande.
-      long t = maintenant_ms();
-      if (t - g_dernier_essai_audio >= 1000) {
-        g_dernier_essai_audio = t;
-        struct demande_audio dem;
-        if (g_demande_pendante_valide) {
-          dem = g_demande_pendante;
-        } else {
-          dem.taux = g_taux;
-          dem.periode = g_periode;
-          strlcpy(dem.peripherique, g_peripherique, sizeof(dem.peripherique));
+      if (!g_sans_backend) {
+        // Sortie fermée après un échec : réessai espacé, sans rendre ni
+        // quitter le processus, jusqu'à réussite ou nouvelle demande.
+        long t = maintenant_ms();
+        if (t - g_dernier_essai_audio >= 1000) {
+          g_dernier_essai_audio = t;
+          struct demande_audio dem;
+          if (g_demande_pendante_valide) {
+            dem = g_demande_pendante;
+          } else {
+            dem.taux = g_taux;
+            dem.periode = g_periode;
+            strlcpy(dem.peripherique, g_peripherique, sizeof(dem.peripherique));
+          }
+          appliquer_demande(&dem, &g, &d, &entrelace);
+          mesure_reinitialiser();
+          g_xruns_blocage =
+              g_echantillons + (unsigned long long)g_taux * XRUNS_BLOCAGE_SECONDES;
         }
-        appliquer_demande(&dem, &g, &d, &entrelace);
-        mesure_reinitialiser();
-        g_xruns_blocage =
-            g_echantillons + (unsigned long long)g_taux * XRUNS_BLOCAGE_SECONDES;
       }
       if (!g_audio) {
         struct timespec pause = {0, 20 * 1000 * 1000};
@@ -1234,13 +1249,14 @@ static int l_calibrer(lua_State *L) {
 }
 
 // organum.demarrer{taux=48000, periode=512, peripherique="default",
-//                  limiteur=true, jeux={{division, jeu}, …},
+//                  limiteur=true, sans_backend=false, jeux={{division, jeu}, …},
 //                  qualite={bruit_attaque=…, …}, tete_reverb=true}
 //                  → true | nil, erreur
 static int l_demarrer(lua_State *L) {
   if (g_etat) return luaL_error(L, "organum déjà démarré");
   g_maitre = getpid();
   int taux = 48000, nb_periodes = 3, limiteur = 1;
+  int sans_backend = 0;
   const char *peripherique = NULL;
   g_periode = 512;
   g_taux = 48000;
@@ -1253,8 +1269,13 @@ static int l_demarrer(lua_State *L) {
     if (lua_isstring(L, -1)) peripherique = lua_tostring(L, -1);
     lua_getfield(L, 1, "limiteur");
     if (!lua_isnil(L, -1)) limiteur = lua_toboolean(L, -1);
-    lua_pop(L, 4);
+    lua_getfield(L, 1, "sans_backend");
+    sans_backend = lua_toboolean(L, -1);
+    lua_pop(L, 5);
   }
+
+  // Une plate-forme sans backend est dégradée même si Lua ne l'a pas demandé.
+  g_sans_backend = sans_backend || !audio_supportee() || !midi_supportee();
 
   g_partage = mmap(NULL, sizeof(struct etat_partage), PROT_READ | PROT_WRITE,
                    MAP_SHARED | MAP_ANONYMOUS, -1, 0);
@@ -1357,24 +1378,32 @@ static int l_demarrer(lua_State *L) {
   // passer les appels dans libasound par un trampoline qui bloque tous les
   // signaux, y compris SIGALRM. Un serveur audio figé peut donc encore
   // bloquer cette ouverture ; le chemin hw:C,D, lui, ouvre en O_NONBLOCK.
-  if (!(g_audio = audio_ouvrir(peripherique, taux, 2, g_periode, nb_periodes))) {
-    const char *detail = audio_derniere_erreur();
-    char message[1200];
-    if (detail && detail[0])
-      snprintf(message, sizeof(message), "sortie audio indisponible : %s", detail);
-    else
-      snprintf(message, sizeof(message), "sortie audio indisponible");
-    liberer_demarrage();
-    lua_pushnil(L);
-    lua_pushstring(L, message);
-    return 2;
-  }
-  g_sortie_null = sortie_est_null(peripherique);
-  if (!(g_midi = midi_ouvrir("Organum", "entree"))) {
-    liberer_demarrage();
-    lua_pushnil(L);
-    lua_pushstring(L, "séquenceur MIDI indisponible");
-    return 2;
+  if (!g_sans_backend) {
+    if (!(g_audio = audio_ouvrir(peripherique, taux, 2, g_periode, nb_periodes))) {
+      const char *detail = audio_derniere_erreur();
+      char message[1200];
+      if (detail && detail[0])
+        snprintf(message, sizeof(message), "sortie audio indisponible : %s", detail);
+      else
+        snprintf(message, sizeof(message), "sortie audio indisponible");
+      liberer_demarrage();
+      lua_pushnil(L);
+      lua_pushstring(L, message);
+      return 2;
+    }
+    g_sortie_null = sortie_est_null(peripherique);
+
+    if (!(g_midi = midi_ouvrir("Organum", "entree"))) {
+      liberer_demarrage();
+      lua_pushnil(L);
+      lua_pushstring(L, "séquenceur MIDI indisponible");
+      return 2;
+    }
+  } else {
+    // Mode dégradé assumé : ni sortie audio, ni séquenceur, ni réessai.
+    g_audio = NULL;
+    g_midi = NULL;
+    g_sortie_null = 0;
   }
 
   int automatique = 1;
@@ -1383,7 +1412,7 @@ static int l_demarrer(lua_State *L) {
     if (!lua_isnil(L, -1)) automatique = lua_toboolean(L, -1);
     lua_pop(L, 1);
   }
-  if (automatique) midi_connecter_tout(g_midi);
+  if (automatique && g_midi) midi_connecter_tout(g_midi);
 
   // État sauvegardé (jeux, accouplements, combinaisons), avant le fil audio.
   if (lua_istable(L, 1)) {
@@ -1402,7 +1431,12 @@ static int l_demarrer(lua_State *L) {
   e->transposition = 0;
   strlcpy(e->peripherique, g_peripherique, sizeof(e->peripherique));
   e->netapes = aeolus_nb_etapes(g_moteur);
-  midi_adresse(g_midi, &e->midi_client, &e->midi_port);
+  e->audio_disponible = !g_sans_backend;
+  e->midi_disponible = !g_sans_backend;
+  if (g_midi)
+    midi_adresse(g_midi, &e->midi_client, &e->midi_port);
+  else
+    e->midi_client = e->midi_port = 0;
   e->ndivisions = aeolus_nb_divisions(g_moteur);
   if (e->ndivisions > MAX_DIVISIONS) e->ndivisions = MAX_DIVISIONS;
   for (int d = 0; d < e->ndivisions; ++d) {
@@ -1559,6 +1593,7 @@ static void envoyer(lua_State *L, struct commande c) {
 
 // organum.etat() → {seq, volume, reverb, xruns, taux, periode, nb_periodes,
 //                   erreurs_ecriture, temps_reel, midi="c:p",
+//                   audio_disponible, midi_disponible,
 //                   canaux_controle, canaux_expression, canaux_actifs,
 //                   qualite={bruit_attaque, instabilite, spatialisation,
 //                            polyphonie_max, tete_reverb (effectif),
@@ -1598,6 +1633,10 @@ static int l_etat(lua_State *L) {
   lua_pushnumber(L, copie.reverb), lua_setfield(L, -2, "reverb");
   lua_pushinteger(L, copie.xruns), lua_setfield(L, -2, "xruns");
   lua_pushboolean(L, copie.temps_reel), lua_setfield(L, -2, "temps_reel");
+  lua_pushboolean(L, copie.audio_disponible);
+  lua_setfield(L, -2, "audio_disponible");
+  lua_pushboolean(L, copie.midi_disponible);
+  lua_setfield(L, -2, "midi_disponible");
   lua_pushinteger(L, copie.periode), lua_setfield(L, -2, "periode");
   lua_pushinteger(L, copie.nb_periodes), lua_setfield(L, -2, "nb_periodes");
   lua_pushinteger(L, copie.erreurs_ecriture), lua_setfield(L, -2, "erreurs_ecriture");
@@ -1908,6 +1947,16 @@ static int l_charge_niveau_diag(lua_State *L) {
   return 1;
 }
 
+// organum.plateforme() → "linux", "windows", "macos" ou "autre".
+// Sert à init.moon pour choisir le mode dégradé (aucun backend audio/MIDI).
+static int l_plateforme(lua_State *L) {
+  lua_pushstring(L, IsLinux() ? "linux"
+                  : IsWindows() ? "windows"
+                  : IsXnu() ? "macos"
+                  : "autre");
+  return 1;
+}
+
 static const luaL_Reg kFonctions[] = {
     {"demarrer", l_demarrer}, {"etat", l_etat},     {"attendre", l_attendre},
     {"jeu", l_jeu},           {"gain", l_gain},     {"volume", l_volume},
@@ -1916,6 +1965,7 @@ static const luaL_Reg kFonctions[] = {
     {"charge_niveau", l_charge_niveau_diag},
     {"limiteur", l_limiteur}, {"tete_reverb", l_tete_reverb},
     {"transposition", l_transposition},
+    {"plateforme", l_plateforme},
     {"temperament", l_temperament},
     {"oublier_audio", l_oublier_audio},
     {"reconfigurer_audio", l_reconfigurer_audio},
