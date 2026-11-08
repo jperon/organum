@@ -31,11 +31,14 @@ exécutable [cosmopolitan](https://github.com/jart/cosmopolitan)/redbean.
   au démarrage.
 
 Plate-forme : **Linux x86-64**. Le code Windows (WinMM) est écrit mais non
-testé. macOS (XNU) fonctionne en **mode dégradé assumé** : l’interface web et
-le moteur démarrent, mais aucun backend audio ni MIDI n’est ouvert ; aucun son
-n’est produit et aucune boucle de réessai audio n’est lancée.
-`ORGANUM_SANS_BACKEND=1` permet de reproduire ce mode sous Linux pour les
-tests.
+testé. macOS (XNU) fonctionne en **mode dégradé assumé** pour l’audio :
+l’interface web et le moteur démarrent, mais aucun backend audio n’est ouvert,
+aucun son n’est produit et aucune boucle de réessai audio n’est lancée. Le
+MIDI reste disponible sur macOS par un assistant CoreMIDI externe, qui parle
+à organum par une socket Unix (voir `plateforme/macos/PROTOCOLE-MIDI.md`) ;
+sans cet assistant, le MIDI est simplement absent.
+`ORGANUM_SANS_BACKEND=1` permet de reproduire le mode sans audio sous Linux
+pour les tests ; l’axe MIDI reste pilotable séparément.
 
 ## Utilisation
 
@@ -299,6 +302,7 @@ livrer le son à temps. Ne pas la relever au-dessus de PipeWire.
 | `ORGANUM_REVERB_TETE` | oui | `non` (ou `0`) coupe la tête zéro latence de la réverbération, prioritaire sur `tete_reverb` |
 | `ORGANUM_CALIBRATION_FACTEUR` | `1` | Réservé aux tests : multiplie tous les coûts mesurés par la calibration (simule une machine plus lente) |
 | `ORGANUM_CALIBRATION_VOIX` | `250` | Réservé aux tests : nombre de voix de référence de la calibration |
+| `ORGANUM_MIDI_SOCKET` | auto | Chemin de la socket de l'assistant MIDI macOS ; non vide sous Linux, impose le backend socket (tests) |
 | `ORGANUM_DIGEST` | `etat.json.digest` | Fichier texte `utilisateur:organum:HA1` (absent ou vide : chemin par défaut) |
 | `ORGANUM_RESEAUX_FICHIER` | `etat.json.reseaux` | Fichier texte des sous-réseaux autorisés, un par ligne (absent ou vide : chemin par défaut) |
 
@@ -460,7 +464,7 @@ un lien) dans `externe/` avant de lancer le script.
 | Dossier | Contenu |
 |---|---|
 | `moteur/` | Moteur d'Aeolus (C++/JUCE), API C (`api/`), ressources embarquées |
-| `plateforme/` | Audio et MIDI : ALSA (Linux), WinMM (Windows) ; macOS démarre sans backend, en mode dégradé géré par `cosmo/lorganum.c` |
+| `plateforme/` | Audio et MIDI : ALSA (Linux), WinMM (Windows) ; macOS a un backend MIDI par socket vers un assistant CoreMIDI, sans audio, en mode dégradé audio géré par `cosmo/lorganum.c` |
 | `cosmo/` | Module Lua `organum`, intégration à redbean, correctif cosmopolitan |
 | `ui/` | Fenêtre sans bibliothèque (protocoles Wayland et X11), Nuklear |
 | `web/` | Interfaces web et native (MoonScript), assemblage de `organum.com` |

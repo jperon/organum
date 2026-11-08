@@ -46,22 +46,39 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   Sous cosmocc, `__linux__` n'est pas défini : tester avec `IsLinux()`.
   Les fichiers `cosmo/plateforme_*.c` incluent ces sources ; make ne suit pas
   ces inclusions (faire `touch` après modification).
-  `audio_supportee()` et `midi_supportee()` rendent
-  `IsLinux() || IsWindows()` ; `organum.plateforme()` rend `"linux"`,
-  `"windows"`, `"macos"` ou `"autre"`. Aucune troisième branche `xnu` n'est
-  ajoutée à l'aiguillage : macOS n'a pas de backend compilé.
+  `audio_supportee()` rend `IsLinux() || IsWindows()` ; `midi_supportee()`
+  rend `IsLinux() || IsWindows() || IsXnu()` (backend socket macOS) ;
+  `organum.plateforme()` rend `"linux"`, `"windows"`, `"macos"` ou
+  `"autre"`. L'aiguillage MIDI ajoute la branche socket sous `IsXnu()` ou
+  quand `ORGANUM_MIDI_SOCKET` (non vide) l'impose sous Linux pour les tests ;
+  l'audio macOS reste sans backend.
 - Mode dégradé (macOS, ou `ORGANUM_SANS_BACKEND=1` pour les tests) :
-  `organum.demarrer{sans_backend=true}` crée le moteur et l'état partagé,
-  mais n'ouvre ni ALSA/WinMM ni le séquenceur, et ne lance aucune boucle de
-  réessai audio ; le fil audio continue de lire les commandes et de publier
-  l'état (20 ms d'attente par tour, sans rendu). `struct etat` publie
-  `audio_disponible` et `midi_disponible` ; `appliquer_demande` retient les
-  réglages audio sans rien ouvrir. La décision se prend dans
-  `web/src/degradation.moon` (`degradation.detecter`) ; seule la valeur
-  exacte `1` d'`ORGANUM_SANS_BACKEND` force le mode, toute autre valeur
-  laisse Linux inchangé. L'échec audio reste fatal sur Linux quand un backend
-  existe ; le mode dégradé n'appelle jamais `unix.exit`. Tests :
-  `web/tests/degradation.lua` et `web/scripts/test-sans-backend.sh`.
+  l'axe **audio** et l'axe **MIDI** sont désormais séparés. `organum.demarrer
+  {sans_backend=true, midi=…}` coupe l'audio (`sans_backend`, plus l'absence
+  de backend audio) et le MIDI suit `g_sans_midi` : option `midi` explicite,
+  sinon comportement historique où `sans_backend` coupait aussi le MIDI.
+  Avec `midi=false`, le moteur et l'état partagé existent, ni ALSA/WinMM ni
+  le séquenceur ne sont ouverts, et aucune boucle de réessai audio n'est
+  lancée ; le fil audio continue de lire les commandes et de publier l'état
+  (20 ms d'attente par tour, sans rendu). Sur macOS, `sans_backend` peut être
+  vrai (pas d'audio) tandis que `midi=true` ouvre le backend socket : le
+  MIDI fonctionne sans audio, via l'assistant CoreMIDI externe (voir
+  `plateforme/macos/PROTOCOLE-MIDI.md`). `struct etat` publie
+  `audio_disponible` (axe audio) et `midi_disponible` (axe MIDI, désormais
+  `!g_sans_midi`) ; `appliquer_demande` retient les réglages audio sans rien
+  ouvrir. La décision audio se prend dans `web/src/degradation.moon`
+  (`degradation.detecter`) ; seule la valeur exacte `1`
+  d'`ORGANUM_SANS_BACKEND` force l'axe audio, toute autre valeur laisse Linux
+  inchangé. `web/src/midi_actif.moon` décide de l'axe MIDI : backend présent,
+  et `ORGANUM_SANS_BACKEND=1` le coupe sauf si `ORGANUM_MIDI_SOCKET` impose
+  le socket. `organum.midi_assistant()` rend 1 (assistant connecté), 0
+  (absent, avertissement unique au démarrage) ou -1 (sans objet : ALSA/WinMM
+  ou MIDI non ouvert) ; `organum.midi_chemin()` donne le chemin de la socket
+  sans recopier sa règle en MoonScript. L'échec audio reste fatal sur Linux
+  quand un backend existe ; le mode dégradé n'appelle jamais `unix.exit`.
+  Tests : `web/tests/degradation.lua`,
+  `web/tests/midi_actif.lua`, `web/scripts/test-sans-backend.sh` et
+  `web/scripts/test-midi-socket.sh` (dont MIDI socket + audio dégradé).
 - `web/src/init.moon` : démarrage, API HTTP (`/api/orgue`, `/api/midi`,
   `/api/volume`), persistance. `POST /api/orgue {"volume":0..1}` règle le
   volume du moteur (pédale), distinct de `/api/volume` (volume système), déjà
