@@ -43,6 +43,14 @@ aide.egal(l[0], false, "liste_json : marque même non vide")
 aide.egal(l.a, 1, "liste_json : contenu conservé")
 aide.egal(m.liste_json(nil)[0], false, "liste_json : nil -> table marquée")
 
+-- libelle_plateforme
+aide.egal(m.libelle_plateforme("linux"), "Linux", "libelle_plateforme : linux")
+aide.egal(m.libelle_plateforme("macos"), "macOS", "libelle_plateforme : macos")
+aide.egal(m.libelle_plateforme("inconnue"), "plate-forme inconnue",
+  "libelle_plateforme : inconnue")
+aide.egal(m.libelle_plateforme(nil), "plate-forme inconnue",
+  "libelle_plateforme : nil")
+
 -- ETATS
 aide.egal(m.ETATS.vert.classe, "etat-vert", "ETATS : classe vert")
 aide.egal(m.ETATS.orange.libelle, "Connecté, non synchronisé", "ETATS : libellé orange")

@@ -31,7 +31,11 @@ exécutable [cosmopolitan](https://github.com/jart/cosmopolitan)/redbean.
   au démarrage.
 
 Plate-forme : **Linux x86-64**. Le code Windows (WinMM) est écrit mais non
-testé ; macOS n'est pas pris en charge.
+testé. macOS (XNU) fonctionne en **mode dégradé assumé** : l’interface web et
+le moteur démarrent, mais aucun backend audio ni MIDI n’est ouvert ; aucun son
+n’est produit et aucune boucle de réessai audio n’est lancée.
+`ORGANUM_SANS_BACKEND=1` permet de reproduire ce mode sous Linux pour les
+tests.
 
 ## Utilisation
 
@@ -456,7 +460,7 @@ un lien) dans `externe/` avant de lancer le script.
 | Dossier | Contenu |
 |---|---|
 | `moteur/` | Moteur d'Aeolus (C++/JUCE), API C (`api/`), ressources embarquées |
-| `plateforme/` | Audio et MIDI : ALSA (Linux), WinMM (Windows) |
+| `plateforme/` | Audio et MIDI : ALSA (Linux), WinMM (Windows) ; macOS démarre sans backend, en mode dégradé géré par `cosmo/lorganum.c` |
 | `cosmo/` | Module Lua `organum`, intégration à redbean, correctif cosmopolitan |
 | `ui/` | Fenêtre sans bibliothèque (protocoles Wayland et X11), Nuklear |
 | `web/` | Interfaces web et native (MoonScript), assemblage de `organum.com` |
