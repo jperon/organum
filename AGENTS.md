@@ -79,6 +79,25 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   Tests : `web/tests/degradation.lua`,
   `web/tests/midi_actif.lua`, `web/scripts/test-sans-backend.sh` et
   `web/scripts/test-midi-socket.sh` (dont MIDI socket + audio dégradé).
+- Assistant CoreMIDI macOS (`plateforme/macos/`) : le codec
+  `trames_midi.h` est partagé par le backend `midi_socket.c` (client),
+  l'assistant natif `assistant_coremidi.c` (serveur) et le faux assistant de
+  test `plateforme/tests/faux_assistant.c` ; la spécification est
+  `PROTOCOLE-MIDI.md`. L'assistant est un binaire Mach-O **hors** de la
+  chaîne cosmocc : `sh plateforme/macos/construire_assistant.sh` produit
+  `plateforme/macos/build/organum-midi` (déjà ignoré par git), avec
+  `ARCHIVES=1` pour un binaire universel. Il possède la socket (sonde
+  `connect`, `unlink` de la socket périmée, code 3 si un autre assistant
+  vit), énumère les sources, connecte chacune à un port CoreMIDI et publie
+  une `DEVICE_LIST` à chaque changement ; les `SUBSCRIBE` d'organum activent
+  le filtrage, tenu par identifiant comme chez organum (aucune trame avant
+  abonnement, et un identifiant réutilisé retrouve le même état). Le rappel de
+  lecture CoreMIDI n'alloue ni ne bloque : trames encodées en pile, écriture
+  non bloquante sous mutex, `EAGAIN` jette et compte. `--liste` affiche les
+  sources (unique id + nom) et sert de diagnostic (pilote IAC ou clavier
+  USB) ; `--socket` et `--verbose` complètent. Mode d'emploi et LaunchAgent :
+  `plateforme/macos/LANCEMENT.md`. Compilation et test réels restent à faire
+  sur un Mac : aucun compilateur macOS en CI.
 - `web/src/init.moon` : démarrage, API HTTP (`/api/orgue`, `/api/midi`,
   `/api/volume`), persistance. `POST /api/orgue {"volume":0..1}` règle le
   volume du moteur (pédale), distinct de `/api/volume` (volume système), déjà

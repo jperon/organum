@@ -36,7 +36,10 @@ l’interface web et le moteur démarrent, mais aucun backend audio n’est ouve
 aucun son n’est produit et aucune boucle de réessai audio n’est lancée. Le
 MIDI reste disponible sur macOS par un assistant CoreMIDI externe, qui parle
 à organum par une socket Unix (voir `plateforme/macos/PROTOCOLE-MIDI.md`) ;
-sans cet assistant, le MIDI est simplement absent.
+sans cet assistant, le MIDI est simplement absent. L’assistant se compile sur
+un Mac avec `sh plateforme/macos/construire_assistant.sh` (résultat
+`plateforme/macos/build/organum-midi`, mode d’emploi dans
+`plateforme/macos/LANCEMENT.md`).
 `ORGANUM_SANS_BACKEND=1` permet de reproduire le mode sans audio sous Linux
 pour les tests ; l’axe MIDI reste pilotable séparément.
 
