@@ -200,6 +200,16 @@ libelle_port = (p) ->
   else
     "?"
 
+-- Libellé de la plate-forme d'exécution publiée par organum.plateforme().
+PLATEFORMES = {
+  linux: "Linux"
+  windows: "Windows"
+  macos: "macOS"
+  autre: "plate-forme inconnue"
+}
+
+libelle_plateforme = (p) -> PLATEFORMES[p] or PLATEFORMES.autre
+
 -- État synthétique d'un port : le nôtre d'abord, puis une source connectée,
 -- puis une destination possible, sinon un port disponible.
 etat_port = (p) ->
@@ -229,5 +239,7 @@ etat_port = (p) ->
   :libelle_association
   :libelle_port
   :etat_port
+  :PLATEFORMES
+  :libelle_plateforme
   :TEMPERAMENTS
 }

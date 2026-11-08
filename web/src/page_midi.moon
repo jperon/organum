@@ -231,7 +231,9 @@ script = [[
     if (!ports.length) {
       var vide = document.createElement('p');
       vide.className = 'note';
-      vide.textContent = 'Aucun port MIDI détecté.';
+      vide.textContent = etatPorts.disponible === false
+        ? 'MIDI indisponible sur ' + (etatPorts.plateforme_libelle || 'cette plate-forme') + '.'
+        : 'Aucun port MIDI détecté.';
       portsListe.appendChild(vide);
       return;
     }

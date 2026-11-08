@@ -7,6 +7,11 @@ validation = require "validation"
 calibration = require "calibration"
 authentification = require "authentification"
 controle_acces = require "controle_acces"
+degradation = require "degradation"
+
+-- Plate-forme et mode dégradé : décidés une fois au démarrage.
+PLATEFORME = if type(organum.plateforme) == "function" then organum.plateforme! else "autre"
+SANS_BACKEND, RAISON_SANS_BACKEND = degradation.detecter PLATEFORME, os.getenv "ORGANUM_SANS_BACKEND"
 
 -- Écoute : redbean, sans adresse explicite (-l), ne programme que 0.0.0.0
 -- (tool/net/redbean.c, Listen) ; on ajoute « :: » pour répondre aussi en
@@ -14,8 +19,9 @@ controle_acces = require "controle_acces"
 -- processus est lue dans /proc (absente sous Windows, on garde le défaut).
 -- redbean pose IPV6_V6ONLY, les deux écoutes coexistent sur le même port.
 a_un_l = ->
+  -- /proc n'existe ni sous Windows ni sous macOS : on garde le défaut.
   fd = unix.open "/proc/self/cmdline", unix.O_RDONLY
-  return false unless fd
+  return false unless type(fd) == "number" and fd >= 0
   contenu = unix.read fd, 65536
   unix.close fd
   return false unless type(contenu) == "string"
@@ -601,7 +607,7 @@ calibration_demarrage = nil
 -- ORGANUM_QUALITE=auto, ou état sauvegardé en mode auto). Elle se fait AVANT
 -- organum.demarrer : le micro-banc ne dépend pas du moteur. En cas d'échec
 -- ou de dépassement de 1,5 s, repli sur le niveau 3 sans jamais planter.
-if qualite_locale.auto
+if qualite_locale.auto and not SANS_BACKEND
   ok_cal, cal = pcall(organum.calibrer, {
     taux: taux_demarrage
     periode: periode_demarrage
@@ -650,6 +656,7 @@ if organum.demarrer
   demarrer = (taux, periode, peripherique, limiteur) ->
     organum.demarrer {
       :taux, :periode, :peripherique, :limiteur
+      sans_backend: SANS_BACKEND
       temperament: temperament_demarrage
       etat: etat_moteur
       qualite: qualite_demarrage
@@ -989,6 +996,11 @@ qualite_etat = ->
     xruns_recents: e.qualite.xruns_recents or 0
     niveau: q.niveau
     auto: q.auto
+    audio_disponible: e.audio_disponible == true
+    midi_disponible: e.midi_disponible == true
+    plateforme: PLATEFORME
+    plateforme_libelle: modele.libelle_plateforme PLATEFORME
+    mode_degrade: SANS_BACKEND
   }
   etat_qualite.calibration = calibration_demarrage if calibration_demarrage
   etat_qualite
@@ -1097,6 +1109,11 @@ etat_orgue = ->
     source: "aeolus", instance: INSTANCE, seq: e.seq, step: e.etape, steps: e.netapes
     volume: e.volume, reverb: e.reverb, xruns: e.xruns, midi: e.midi, temps_reel: e.temps_reel
     taux: e.taux, periode: e.periode, nb_periodes: e.nb_periodes, erreurs_ecriture: e.erreurs_ecriture
+    audio_disponible: e.audio_disponible == true
+    midi_disponible: e.midi_disponible == true
+    plateforme: PLATEFORME
+    plateforme_libelle: modele.libelle_plateforme PLATEFORME
+    mode_degrade: SANS_BACKEND
     temperament: e.temperament
     transposition: e.transposition or 0
     qualite: qualite_etat!
@@ -1320,12 +1337,16 @@ etat_midi_ports = ->
   ok, ports = pcall organum.midi_ports
   unless ok
     Log kLogWarn, "organum : ports MIDI indisponibles : #{ports}"
-    return {adresse: adresse, ports: modele.liste_json {}}
+    return {adresse: adresse, disponible: not SANS_BACKEND,
+      plateforme_libelle: modele.libelle_plateforme PLATEFORME,
+      ports: modele.liste_json {}}
   liste = for p in *ports
     p.libelle = modele.libelle_port p
     p.etat = modele.etat_port p
     p
-  {adresse: adresse, ports: modele.liste_json liste}
+  {adresse: adresse, disponible: not SANS_BACKEND,
+    plateforme_libelle: modele.libelle_plateforme PLATEFORME,
+    ports: modele.liste_json liste}
 
 handle_midi_ports = ->
   if GetMethod! == "GET"
@@ -1408,7 +1429,7 @@ page = require "page"
 
 divisions_page = ->
   e = etat_orgue!
-  e.divisions, e.steps, e.transposition or 0
+  e.divisions, e.steps, e.transposition or 0, {sans_backend: SANS_BACKEND, plateforme: PLATEFORME}
 
 -- Chaque fils de requête hérite des descripteurs PCM du processus principal.
 -- Les lâcher avant de servir : sinon le périphérique reste occupé après une
@@ -1470,6 +1491,7 @@ _G.OnHttpRequest = ->
   elseif path == "/"
     SetStatus 200
     SetHeader "Content-Type", "text/html; charset=utf-8"
-    Write page divisions_page!
+    divisions, steps, transposition, infos = divisions_page!
+    Write page divisions, steps, transposition, infos
   else
     Route!

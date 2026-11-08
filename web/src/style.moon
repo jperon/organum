@@ -517,6 +517,9 @@ CSS = [[
     color: var(--text-dim);
     margin: 0;
   }
+  .note.degrade {
+    color: #ffcf7a;
+  }
 
   @media (min-width: 640px) {
     body {

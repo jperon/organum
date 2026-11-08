@@ -298,6 +298,7 @@ script = [[
   var ligneCalibration = document.getElementById('qualite-calibration');
   var message = document.getElementById('qualite-message');
   var indisponible = document.getElementById('qualite-indisponible');
+  var lignePlateforme = document.getElementById('qualite-plateforme');
   var puce = document.getElementById('qualite-puce');
   var puceDetail = document.getElementById('qualite-puce-detail');
   var enAttente = 0;
@@ -502,7 +503,21 @@ script = [[
     });
   }
 
+  function majPlateforme(q) {
+    if (!lignePlateforme) { return; }
+    if (q && q.audio_disponible === false) {
+      var nom = q.plateforme_libelle || q.plateforme || 'cette plate-forme';
+      lignePlateforme.textContent =
+        'Audio et MIDI indisponibles sur ' + nom +
+        ' : aucun son ne sera produit, mais l’interface reste utilisable.';
+      lignePlateforme.hidden = false;
+    } else {
+      lignePlateforme.hidden = true;
+    }
+  }
+
   function maj(q, reverb) {
+    majPlateforme(q);
     if (enAttente > 0) { majMessage(q); majPuce(q); return; }
     // Réverbération : valeur publiée par le moteur (0..1), curseur 0..127.
     // Une association MIDI de cible « reverb » la modifie aussi : ne pas
@@ -1228,6 +1243,7 @@ script = [[
         h.section(
           class: "qualite", id: "qualite", ["aria-label"]: "Réglages audio", ["data-charge-classe-0"]: modele.CHARGE_NIVEAUX[1].classe, ["data-charge-classe-1"]: modele.CHARGE_NIVEAUX[2].classe, ["data-charge-classe-2"]: modele.CHARGE_NIVEAUX[3].classe, ["data-charge-classe-3"]: modele.CHARGE_NIVEAUX[4].classe, ["data-charge-libelle-0"]: modele.CHARGE_NIVEAUX[1].libelle, ["data-charge-libelle-1"]: modele.CHARGE_NIVEAUX[2].libelle, ["data-charge-libelle-2"]: modele.CHARGE_NIVEAUX[3].libelle, ["data-charge-libelle-3"]: modele.CHARGE_NIVEAUX[4].libelle
           h.p class: "note qualite-indisponible", id: "qualite-indisponible", hidden: true, "Réglages audio indisponibles sur ce serveur."
+          h.p class: "note qualite-indisponible", id: "qualite-plateforme", hidden: true
           h.div(
             class: "qualite-corps"
             h.div(

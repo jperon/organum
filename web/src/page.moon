@@ -76,8 +76,14 @@ division_html = (di, div, divisions, transposition = 0, colonne_transposition = 
     commande_transposition,
     h.button class: "btn small cancel-division", ["data-division"]: d, type: "button", "Tout annuler"
 
-(divisions, steps = 32, transposition = 0) ->
+(divisions, steps = 32, transposition = 0, infos = {}) ->
   colonne_transposition = modele.colonne_transposition divisions
+  bandeau_degrade = ""
+  if infos and infos.sans_backend
+    bandeau_degrade = h.p class: "note degrade", id: "mode-degrade",
+      "Mode dégradé : audio et MIDI indisponibles sur " ..
+      "#{modele.libelle_plateforme infos.plateforme}. " ..
+      "L’interface reste utilisable, mais aucun son ne sera produit."
   page = h.html lang: "fr",
     h.head {},
       h.meta charset: "utf-8",
@@ -109,6 +115,7 @@ division_html = (di, div, divisions, transposition = 0, colonne_transposition = 
             h.button type: "button", class: "btn panic", id: "panic", "Panique",
             h.a class: "btn small", href: "/midi", "MIDI",
             h.a class: "btn small lien-qualite charge-gris", href: "/audio", id: "lien-qualite", ["aria-label"]: "Audio — #{escape modele.CHARGE_NIVEAUX[1].libelle}", ["data-charge-classe-0"]: modele.CHARGE_NIVEAUX[1].classe, ["data-charge-classe-1"]: modele.CHARGE_NIVEAUX[2].classe, ["data-charge-classe-2"]: modele.CHARGE_NIVEAUX[3].classe, ["data-charge-classe-3"]: modele.CHARGE_NIVEAUX[4].classe, ["data-charge-libelle-0"]: escape(modele.CHARGE_NIVEAUX[1].libelle), ["data-charge-libelle-1"]: escape(modele.CHARGE_NIVEAUX[2].libelle), ["data-charge-libelle-2"]: escape(modele.CHARGE_NIVEAUX[3].libelle), ["data-charge-libelle-3"]: escape(modele.CHARGE_NIVEAUX[4].libelle), "Audio",
+          bandeau_degrade,
           h.p class: "note", "L'affichage reflète l'état mémorisé par le serveur ; il peut différer si les jeux sont tirés ailleurs.",
           h.div class: "divisions", table.unpack [division_html(di - 1, div, divisions, transposition, colonne_transposition) for di, div in ipairs divisions],
           h.p class: "note", h.a(href: "https://github.com/jperon/organum", "Code source (AGPL-3.0)"),

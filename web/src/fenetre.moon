@@ -313,6 +313,10 @@ MAX_ASSOCIATIONS = 16
       charge_pointe: base.charge_pointe or 0
       charge_evaluee: base.charge_evaluee == true
       charge_niveau: base.charge_niveau or 0
+      audio_disponible: true
+      midi_disponible: true
+      plateforme: ""
+      plateforme_libelle: ""
       xruns_recents: base.xruns_recents or 0
       xruns: e.xruns or 0
       reverb: e.reverb
@@ -895,6 +899,12 @@ MAX_ASSOCIATIONS = 16
         if calib
           ui\ligne ligne, 1
           ui\texte tronquer texte_calibration(calib), l - 2 * MARGE - ESPACE
+
+        if q.audio_disponible == false or q.midi_disponible == false
+          ui\ligne ligne, 1
+          texte_degrade = "Audio et MIDI indisponibles sur " ..
+            "#{q.plateforme_libelle or modele.libelle_plateforme q.plateforme}"
+          ui\texte tronquer(texte_degrade, l - 2 * MARGE - ESPACE)
 
         ui\ligne ligne, 1
         -- Puce d'adaptation : le niveau est calculé en C ; modele fournit le
