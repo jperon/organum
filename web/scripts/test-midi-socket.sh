@@ -355,11 +355,38 @@ if lancer_serveur degrade; then
   ports=$(curl -s --max-time 2 "$URL/api/midi/ports")
   verifie "h : ports MIDI disponibles" '"disponible":true' "$ports"
 
-  if lancer_assistant 'note:0:60:100,pause:2000' --attendre-client 5000; then
+  if lancer_assistant 'note:0:60:100,pause:300,note:0:60:0,pause:2000' \
+      --attendre-client 5000; then
     if corps=$(attendre_motif "$URL/api/midi" '"canaux_actifs":[1' 80); then
       ok "h : note reçue par le MIDI socket sans audio"
     else
       echec "h : note non reçue sans audio ; vu : $corps"
+    fi
+
+    # Régression observée sur macOS : sans rendu audio, g_echantillons ne
+    # bougeait pas et le canal restait actif à jamais. L'échéance vaut 250 ms ;
+    # on part de l'envoi effectif de la note OFF inscrit au journal.
+    i=0
+    while [ "$i" -lt 100 ]; do
+      grep -qF 'note canal=0 note=60 vitesse=0' "$JOURNAL_ASSISTANT" && break
+      sleep 0.02
+      i=$((i + 1))
+    done
+    if grep -qF 'note canal=0 note=60 vitesse=0' "$JOURNAL_ASSISTANT"; then
+      debut=$(date +%s%N)
+      if corps=$(attendre_motif "$URL/api/midi" '"canaux_actifs":[]' 40); then
+        fin=$(date +%s%N)
+        ms=$(( (fin - debut) / 1000000 ))
+        if [ "$ms" -le 1000 ]; then
+          ok "h : note OFF, canaux_actifs vidé en ${ms} ms (≤ 1 s)"
+        else
+          echec "h : canaux_actifs vidé trop tard (${ms} ms > 1 s) ; vu : $corps"
+        fi
+      else
+        echec "h : canaux_actifs jamais vidé après la note OFF ; vu : $corps"
+      fi
+    else
+      echec "h : note OFF non envoyée par l'assistant"
     fi
   fi
 fi

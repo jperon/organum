@@ -975,6 +975,44 @@ static void attendre_tampon_null(void) {
   }
 }
 
+// Bilan d'une seconde écoulée : moyenne de charge, anneau des xruns récents et
+// niveau publié. Appelé par le fil audio, qu'un tampon ait été rendu ou non.
+static void publier_seconde(void) {
+  g_mesure_prochaine_seconde = g_echantillons + (unsigned long long)g_taux;
+  g_xruns_anneau_pos = (g_xruns_anneau_pos + 1) % XRUNS_ANNEAU;
+  g_xruns_recents -= g_xruns_anneau[g_xruns_anneau_pos];
+  g_xruns_anneau[g_xruns_anneau_pos] = 0;
+  if (g_xruns_recents < 0) g_xruns_recents = 0;
+  // Seconde pleine écoulée : sa moyenne rejoint l'anneau, puis la pointe
+  // est le maximum des 60 dernières (arithmétique entière). Une seconde
+  // sans voix vaut 0 et fait redescendre l'anneau.
+  g_mesure_moyennes[g_mesure_moyennes_pos] =
+      g_mesure_tampons_jeu ? g_mesure_somme_jeu / g_mesure_tampons_jeu : 0;
+  g_mesure_moyennes_pos = (g_mesure_moyennes_pos + 1) % MESURE_MOYENNES;
+  g_mesure_pointe = 0;
+  for (int i = 0; i < MESURE_MOYENNES; ++i)
+    if (g_mesure_moyennes[i] > g_mesure_pointe)
+      g_mesure_pointe = g_mesure_moyennes[i];
+  g_mesure_somme_jeu = 0;
+  g_mesure_tampons_jeu = 0;
+  // Sans rendu, les deux compteurs de tampons valent zéro : la charge
+  // publiée est nulle, sans division par zéro.
+  g_etat->charge = g_mesure_tampons_seconde
+                       ? (int)(g_mesure_somme / g_mesure_tampons_seconde)
+                       : 0;
+  g_etat->charge_pointe = (int)g_mesure_pointe;
+  g_etat->charge_evaluee = g_mesure_evaluee;
+  g_etat->xruns_recents = g_xruns_recents;
+  int niveau = calculer_charge_niveau((int)g_mesure_pointe, g_xruns_recents,
+                                      g_mesure_evaluee);
+  if (niveau != g_etat->charge_niveau) {
+    g_etat->charge_niveau = niveau;
+    atomic_fetch_add_explicit(&g_etat->seq, 1, memory_order_release);
+  }
+  g_mesure_somme = 0;
+  g_mesure_tampons_seconde = 0;
+}
+
 static void *boucle_audio(void *arg) {
   // Sous la priorité du fil de PipeWire (88) : il doit pouvoir nous
   // interrompre pour livrer le son. Il faut un droit « rtprio » (groupe
@@ -998,6 +1036,11 @@ static void *boucle_audio(void *arg) {
   midi_msg_t msgs[64];
   struct commande cmds[32];
   int tours = 0;
+  // Horloge de substitution quand aucun tampon n'est rendu (mode dégradé, ou
+  // sortie fermée après un échec). L'échéance d'activité des canaux est
+  // exprimée en échantillons : sans avance, un canal resterait actif à jamais.
+  struct timespec horloge_avant;
+  int horloge_valide = 0;
   // Première moyenne à une seconde pleine : la seconde en cours au démarrage
   // est partielle et ne compte pas.
   g_mesure_prochaine_seconde = g_taux;
@@ -1063,6 +1106,25 @@ static void *boucle_audio(void *arg) {
       if (!g_audio) {
         struct timespec pause = {0, 20 * 1000 * 1000};
         nanosleep(&pause, NULL);
+        // Aucun tampon rendu : avancer l'horloge des canaux au temps réel
+        // écoulé, mesuré et non supposé (le nanosleep peut être interrompu ou
+        // dépasser 20 ms). La première mesure après une période de rendu sert
+        // seulement de point de départ.
+        struct timespec horloge;
+        clock_gettime(CLOCK_MONOTONIC, &horloge);
+        if (horloge_valide) {
+          long long ecoule_ns = (horloge.tv_sec - horloge_avant.tv_sec) *
+                                    1000000000LL +
+                                (horloge.tv_nsec - horloge_avant.tv_nsec);
+          if (ecoule_ns > 0)
+            g_echantillons += (unsigned long long)ecoule_ns *
+                              (unsigned long long)g_taux / 1000000000ULL;
+        }
+        horloge_avant = horloge;
+        horloge_valide = 1;
+        // La seconde écoulée est publiée même sans rendu : les moyennes y
+        // valent zéro et la charge reste nulle.
+        if (g_echantillons >= g_mesure_prochaine_seconde) publier_seconde();
         if (++tours % 4 == 0) publier();
         continue;
       }
@@ -1082,6 +1144,9 @@ static void *boucle_audio(void *arg) {
     if (audio_ecrire(g_audio, entrelace, g_periode) < 0) ++g_erreurs_ecriture;
     if (g_sortie_null) attendre_tampon_null();
     g_echantillons += g_periode;
+    // Le rendu reprend : la prochaine panne repartira d'une nouvelle mesure
+    // d'horloge, sans compter tout l'intervalle de rendu.
+    horloge_valide = 0;
 
     // Charge du tampon, en pourcentage entier de la durée de période.
     long long duree_ns = (t1.tv_sec - t0.tv_sec) * 1000000000LL +
@@ -1122,42 +1187,7 @@ static void *boucle_audio(void *arg) {
 
     // Une fois par seconde au plus : niveau (comparaison entière) et
     // publication des pourcentages sans toucher à seq.
-    if (g_echantillons >= g_mesure_prochaine_seconde) {
-      g_mesure_prochaine_seconde = g_echantillons + (unsigned long long)g_taux;
-      g_xruns_anneau_pos = (g_xruns_anneau_pos + 1) % XRUNS_ANNEAU;
-      g_xruns_recents -= g_xruns_anneau[g_xruns_anneau_pos];
-      g_xruns_anneau[g_xruns_anneau_pos] = 0;
-      if (g_xruns_recents < 0) g_xruns_recents = 0;
-      // Seconde pleine écoulée : sa moyenne rejoint l'anneau, puis la pointe
-      // est le maximum des 60 dernières (arithmétique entière). Une seconde
-      // sans voix vaut 0 et fait redescendre l'anneau.
-      g_mesure_moyennes[g_mesure_moyennes_pos] =
-          g_mesure_tampons_jeu
-              ? g_mesure_somme_jeu / g_mesure_tampons_jeu
-              : 0;
-      g_mesure_moyennes_pos =
-          (g_mesure_moyennes_pos + 1) % MESURE_MOYENNES;
-      g_mesure_pointe = 0;
-      for (int i = 0; i < MESURE_MOYENNES; ++i)
-        if (g_mesure_moyennes[i] > g_mesure_pointe)
-          g_mesure_pointe = g_mesure_moyennes[i];
-      g_mesure_somme_jeu = 0;
-      g_mesure_tampons_jeu = 0;
-      g_etat->charge = g_mesure_tampons_seconde
-                           ? (int)(g_mesure_somme / g_mesure_tampons_seconde)
-                           : 0;
-      g_etat->charge_pointe = (int)g_mesure_pointe;
-      g_etat->charge_evaluee = g_mesure_evaluee;
-      g_etat->xruns_recents = g_xruns_recents;
-      int niveau = calculer_charge_niveau((int)g_mesure_pointe,
-                                          g_xruns_recents, g_mesure_evaluee);
-      if (niveau != g_etat->charge_niveau) {
-        g_etat->charge_niveau = niveau;
-        atomic_fetch_add_explicit(&g_etat->seq, 1, memory_order_release);
-      }
-      g_mesure_somme = 0;
-      g_mesure_tampons_seconde = 0;
-    }
+    if (g_echantillons >= g_mesure_prochaine_seconde) publier_seconde();
 
     if (++tours % 4 == 0) publier();  // ~40 ms à 512 trames
   }
