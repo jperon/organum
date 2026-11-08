@@ -126,16 +126,28 @@ if ! cc -O2 -Wall -Wextra -std=c11 -o "$ASSISTANT" "$SOURCE_ASSISTANT" \
   exit 2
 fi
 
-# lancer_serveur : démarre organum avec le backend socket, attend l'API et
-# vérifie que le fil audio n'a pas obtenu le temps réel (ulimit -r 0).
+# lancer_serveur [degrade] : démarre organum avec le backend socket, attend
+# l'API et vérifie que le fil audio n'a pas obtenu le temps réel (ulimit -r 0).
+# « degrade » ajoute ORGANUM_SANS_BACKEND=1 : l'axe audio tombe, pas le MIDI.
 lancer_serveur() {
+  mode=${1:-}
   : >"$JOURNAL"
-  ORGANUM_MIDI_SOCKET="$SOCKET" \
-  ORGANUM_PERIPHERIQUE=null \
-  ORGANUM_ETAT="$ETAT" \
-  ORGANUM_CONFIG_MIDI="$CONFIG" \
-  ORGANUM_FENETRE=non \
-  "$BIN" -l 127.0.0.1 -p "$PORT" >"$JOURNAL" 2>&1 &
+  if [ "$mode" = degrade ]; then
+    ORGANUM_SANS_BACKEND=1 \
+    ORGANUM_MIDI_SOCKET="$SOCKET" \
+    ORGANUM_PERIPHERIQUE=null \
+    ORGANUM_ETAT="$ETAT" \
+    ORGANUM_CONFIG_MIDI="$CONFIG" \
+    ORGANUM_FENETRE=non \
+    "$BIN" -l 127.0.0.1 -p "$PORT" >"$JOURNAL" 2>&1 &
+  else
+    ORGANUM_MIDI_SOCKET="$SOCKET" \
+    ORGANUM_PERIPHERIQUE=null \
+    ORGANUM_ETAT="$ETAT" \
+    ORGANUM_CONFIG_MIDI="$CONFIG" \
+    ORGANUM_FENETRE=non \
+    "$BIN" -l 127.0.0.1 -p "$PORT" >"$JOURNAL" 2>&1 &
+  fi
   SERVEUR_PID=$!
   i=0
   while [ "$i" -lt 200 ]; do
@@ -325,6 +337,30 @@ if lancer_assistant '' --refuser-version --attendre-client 10000; then
       echec "g : le serveur s'est arrêté après le refus de version"
     fi
     refuse "g : aucun message fatal au journal" 'panique' "$(cat "$JOURNAL")"
+  fi
+fi
+
+# --- h. MIDI socket sans audio -------------------------------------------
+# ORGANUM_MIDI_SOCKET + ORGANUM_SANS_BACKEND=1 : l'axe audio est dégradé,
+# l'axe MIDI reste actif (cas d'un Mac sans backend audio).
+arreter_assistant
+arreter_serveur
+rm -f "$SOCKET"
+if lancer_serveur degrade; then
+  corps=$(curl -s --max-time 2 "$URL/api/orgue")
+  verifie "h : audio dégradé" '"audio_disponible":false' "$corps"
+  verifie "h : MIDI actif malgré l'audio dégradé" \
+    '"midi_disponible":true' "$corps"
+  verifie "h : mode_degrade reste vrai (axe audio)" '"mode_degrade":true' "$corps"
+  ports=$(curl -s --max-time 2 "$URL/api/midi/ports")
+  verifie "h : ports MIDI disponibles" '"disponible":true' "$ports"
+
+  if lancer_assistant 'note:0:60:100,pause:2000' --attendre-client 5000; then
+    if corps=$(attendre_motif "$URL/api/midi" '"canaux_actifs":[1' 80); then
+      ok "h : note reçue par le MIDI socket sans audio"
+    else
+      echec "h : note non reçue sans audio ; vu : $corps"
+    fi
   fi
 fi
 
