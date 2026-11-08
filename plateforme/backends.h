@@ -26,7 +26,21 @@
   int p##_midi_deconnecter(midi_t *, int, int);                               \
   void p##_midi_fermer(midi_t *);
 
+/* Backend MIDI seul (l'assistant macOS n'apporte pas d'audio). */
+#define DECLARER_BACKEND_MIDI(p)                                              \
+  midi_t *p##_midi_ouvrir(const char *, const char *);                        \
+  int p##_midi_fd(midi_t *);                                                  \
+  int p##_midi_lire(midi_t *, midi_msg_t *, int);                             \
+  int p##_midi_connecter_depuis(midi_t *, int, int);                          \
+  int p##_midi_adresse(midi_t *, int *, int *);                               \
+  int p##_midi_connecter_tout(midi_t *);                                      \
+  int p##_midi_ports(midi_t *, struct midi_port *, int);                      \
+  int p##_midi_connecter(midi_t *, int, int);                                 \
+  int p##_midi_deconnecter(midi_t *, int, int);                               \
+  void p##_midi_fermer(midi_t *);
+
 DECLARER_BACKEND(alsa)
 DECLARER_BACKEND(winmm)
+DECLARER_BACKEND_MIDI(midi_socket)
 
 #endif

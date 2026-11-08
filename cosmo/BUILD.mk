@@ -14,6 +14,7 @@ TOOL_ORGANUM_COMMUN =							\
 	o/$(MODE)/tool/organum/lorganum.o				\
 	o/$(MODE)/tool/organum/plateforme_audio.o			\
 	o/$(MODE)/tool/organum/plateforme_midi.o			\
+	o/$(MODE)/tool/organum/plateforme_midi_macos.o		\
 	o/$(MODE)/tool/organum/plateforme_audio_win.o		\
 	o/$(MODE)/tool/organum/plateforme_midi_win.o		\
 	o/$(MODE)/tool/organum/plateforme_aiguillage.o
@@ -74,6 +75,7 @@ o/$(MODE)/tool/organum/bip.dbg:						\
 		o/$(MODE)/tool/organum/plateforme_audio_win.o		\
 		o/$(MODE)/tool/organum/plateforme_aiguillage.o		\
 		o/$(MODE)/tool/organum/plateforme_midi.o		\
+		o/$(MODE)/tool/organum/plateforme_midi_macos.o		\
 		o/$(MODE)/tool/organum/plateforme_midi_win.o		\
 		o/$(MODE)/tool/organum/bip.o				\
 		$(CRT)							\
@@ -88,6 +90,7 @@ TOOL_ORGANUM_TEST_DEPS =						\
 		o/$(MODE)/tool/organum/plateforme_audio_win.o		\
 		o/$(MODE)/tool/organum/plateforme_aiguillage.o		\
 		o/$(MODE)/tool/organum/plateforme_midi.o		\
+		o/$(MODE)/tool/organum/plateforme_midi_macos.o		\
 		o/$(MODE)/tool/organum/plateforme_midi_win.o
 
 # Vérifie le message d'erreur quand libasound ne peut pas être chargée.
