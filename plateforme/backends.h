@@ -43,4 +43,9 @@ DECLARER_BACKEND(alsa)
 DECLARER_BACKEND(winmm)
 DECLARER_BACKEND_MIDI(midi_socket)
 
+/* Interrogation propre au backend socket ; midi.c ne l'appelle que sous XNU
+   ou quand ORGANUM_MIDI_SOCKET l'impose, jamais pour ALSA/WinMM. */
+int midi_socket_midi_connecte(midi_t *);
+int midi_socket_midi_chemin(midi_t *, char *, int);
+
 #endif

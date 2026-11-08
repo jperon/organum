@@ -61,6 +61,20 @@ void midi_fermer(midi_t *midi);
 /* Vrai si un backend MIDI est compilé pour la plate-forme courante. */
 int midi_supportee(void);
 
+/* Vrai si le backend socket est imposé par ORGANUM_MIDI_SOCKET (vide ou
+   absente : faux). Même règle que l'aiguillage de midi.c. */
+int midi_socket_imposee(void);
+
+/* État de l'assistant du backend socket : 1 connecté, 0 absent, -1 sans
+   objet (aucune instance, ou backend ALSA/WinMM). N'appelle jamais une
+   implémentation de backend qui n'est pas celui du système courant. */
+int midi_assistant_connecte(midi_t *midi);
+
+/* Chemin de la socket du backend socket, copié dans sortie (capacite octets,
+   NUL compris). Renvoie 0, ou -1 hors backend socket / si le chemin ne tient
+   pas. */
+int midi_chemin_assistant(midi_t *midi, char *sortie, int capacite);
+
 #ifdef __cplusplus
 }
 #endif

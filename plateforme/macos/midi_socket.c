@@ -432,6 +432,30 @@ midi_t *midi_socket_midi_ouvrir(const char *nom_client, const char *nom_port)
     return m;
 }
 
+int midi_socket_midi_connecte(midi_t *m)
+{
+    if (m == NULL)
+        return -1;
+    return m->etat == ETAT_CONNECTE ? 1 : 0;
+}
+
+int midi_socket_midi_chemin(midi_t *m, char *sortie, int capacite)
+{
+    if (m == NULL || sortie == NULL || capacite <= 0)
+        return argument_invalide();
+    if (!m->chemin_valide) {
+        errno = EINVAL;
+        return -1;
+    }
+    const size_t n = strlen(m->chemin);
+    if (n >= (size_t)capacite) {
+        errno = ENOSPC;
+        return -1;
+    }
+    memcpy(sortie, m->chemin, n + 1);
+    return 0;
+}
+
 int midi_socket_midi_fd(midi_t *m)
 {
     if (m == NULL)

@@ -114,8 +114,8 @@ struct etat {
   int charge, charge_pointe, charge_evaluee, charge_niveau;
   int xruns_recents;  // xruns des 60 dernières secondes (hors changements)
   int temps_reel;  // le fil audio a obtenu SCHED_FIFO
-  int audio_disponible;  // backend audio présent sur cette plate-forme
-  int midi_disponible;   // backend MIDI présent sur cette plate-forme
+  int audio_disponible;  // axe audio : backend ouvert, hors mode dégradé
+  int midi_disponible;   // axe MIDI : backend ouvert, indépendant de l'audio
   int etape, netapes;  // combinaison courante (séquenceur), à partir de 0
   int midi_client, midi_port;
   int taux;
@@ -181,7 +181,12 @@ static int g_xruns_base;  // xruns cumulés des descripteurs déjà fermés
 static struct demande_audio g_demande_pendante;
 static int g_demande_pendante_valide;
 static long g_dernier_essai_audio;
-static int g_sans_backend;  // plate-forme sans backend : démarrage dégradé
+// Axe audio : plate-forme sans backend audio, ou démarrage dégradé demandé.
+static int g_sans_backend;
+// Axe MIDI, séparé de l'audio : un Mac peut avoir le MIDI socket sans audio.
+// Par défaut (option Lua « midi » absente), sans_backend coupe encore le MIDI,
+// ce qui préserve le comportement historique.
+static int g_sans_midi;
 static unsigned g_erreurs_ecriture;  // fil audio uniquement, publié par publier()
 static int g_maitre;  // processus qui fait tourner le moteur
 // Protège g_moteur entre le fil audio (recréation au changement de taux), le
@@ -1249,14 +1254,20 @@ static int l_calibrer(lua_State *L) {
 }
 
 // organum.demarrer{taux=48000, periode=512, peripherique="default",
-//                  limiteur=true, sans_backend=false, jeux={{division, jeu}, …},
+//                  limiteur=true, sans_backend=false, midi=true,
+//                  jeux={{division, jeu}, …},
 //                  qualite={bruit_attaque=…, …}, tete_reverb=true}
 //                  → true | nil, erreur
+// sans_backend ne concerne que l'axe audio ; l'option midi (facultative) est
+// l'axe MIDI. Sans elle, le MIDI suit l'ancien comportement (coupé par
+// sans_backend).
 static int l_demarrer(lua_State *L) {
   if (g_etat) return luaL_error(L, "organum déjà démarré");
   g_maitre = getpid();
   int taux = 48000, nb_periodes = 3, limiteur = 1;
   int sans_backend = 0;
+  // -1 : option absente, comportement historique (le MIDI suit sans_backend).
+  int midi_demande = -1;
   const char *peripherique = NULL;
   g_periode = 512;
   g_taux = 48000;
@@ -1271,11 +1282,18 @@ static int l_demarrer(lua_State *L) {
     if (!lua_isnil(L, -1)) limiteur = lua_toboolean(L, -1);
     lua_getfield(L, 1, "sans_backend");
     sans_backend = lua_toboolean(L, -1);
-    lua_pop(L, 5);
+    lua_getfield(L, 1, "midi");
+    if (!lua_isnil(L, -1)) midi_demande = lua_toboolean(L, -1);
+    lua_pop(L, 6);
   }
 
-  // Une plate-forme sans backend est dégradée même si Lua ne l'a pas demandé.
-  g_sans_backend = sans_backend || !audio_supportee() || !midi_supportee();
+  // Deux axes distincts. sans_backend (option Lua) et l'absence de backend
+  // audio coupent l'audio ; le MIDI ne suit son propre axe que si Lua l'a
+  // demandé explicitement, sinon il conserve le comportement historique
+  // (sans_backend le coupait aussi).
+  g_sans_backend = sans_backend || !audio_supportee();
+  g_sans_midi = !midi_supportee() || midi_demande == 0 ||
+                (midi_demande < 0 && sans_backend);
 
   g_partage = mmap(NULL, sizeof(struct etat_partage), PROT_READ | PROT_WRITE,
                    MAP_SHARED | MAP_ANONYMOUS, -1, 0);
@@ -1392,7 +1410,13 @@ static int l_demarrer(lua_State *L) {
       return 2;
     }
     g_sortie_null = sortie_est_null(peripherique);
+  } else {
+    // Axe audio dégradé : pas de sortie, pas de boucle de réessai audio.
+    g_audio = NULL;
+    g_sortie_null = 0;
+  }
 
+  if (!g_sans_midi) {
     if (!(g_midi = midi_ouvrir("Organum", "entree"))) {
       liberer_demarrage();
       lua_pushnil(L);
@@ -1400,10 +1424,8 @@ static int l_demarrer(lua_State *L) {
       return 2;
     }
   } else {
-    // Mode dégradé assumé : ni sortie audio, ni séquenceur, ni réessai.
-    g_audio = NULL;
+    // Axe MIDI coupé : aucun séquenceur ouvert, même si l'audio tourne.
     g_midi = NULL;
-    g_sortie_null = 0;
   }
 
   int automatique = 1;
@@ -1432,7 +1454,7 @@ static int l_demarrer(lua_State *L) {
   strlcpy(e->peripherique, g_peripherique, sizeof(e->peripherique));
   e->netapes = aeolus_nb_etapes(g_moteur);
   e->audio_disponible = !g_sans_backend;
-  e->midi_disponible = !g_sans_backend;
+  e->midi_disponible = !g_sans_midi;
   if (g_midi)
     midi_adresse(g_midi, &e->midi_client, &e->midi_port);
   else
@@ -1593,7 +1615,8 @@ static void envoyer(lua_State *L, struct commande c) {
 
 // organum.etat() → {seq, volume, reverb, xruns, taux, periode, nb_periodes,
 //                   erreurs_ecriture, temps_reel, midi="c:p",
-//                   audio_disponible, midi_disponible,
+//                   audio_disponible (axe audio), midi_disponible (axe MIDI,
+//                   indépendant de l'audio),
 //                   canaux_controle, canaux_expression, canaux_actifs,
 //                   qualite={bruit_attaque, instabilite, spatialisation,
 //                            polyphonie_max, tete_reverb (effectif),
@@ -1868,8 +1891,9 @@ static int l_associations(lua_State *L) {
 // en mémoire partagée entre ces processus.
 static int l_midi_ports(lua_State *L) {
   if (!g_midi) {
-    // Mode dégradé : le séquenceur n'a jamais été ouvert, le moteur tourne.
-    if (g_sans_backend) return luaL_error(L, "séquenceur MIDI non ouvert (mode dégradé)");
+    // Axe MIDI coupé (mode dégradé ou option midi=false) : le moteur peut
+    // tourner sans séquenceur. Sinon, c'est vraiment un orgue non démarré.
+    if (g_sans_midi) return luaL_error(L, "séquenceur MIDI non ouvert (mode dégradé)");
     return luaL_error(L, "organum non démarré (organum.demarrer dans .init.lua)");
   }
   struct midi_port *ports = malloc(MIDI_MAX_PORTS * sizeof(*ports));
@@ -1951,6 +1975,41 @@ static int l_charge_niveau_diag(lua_State *L) {
   return 1;
 }
 
+// organum.midi_supportee() → vrai si un backend MIDI existe sur cette
+// plate-forme (ALSA, WinMM, ou socket macOS). Distinct de l'axe audio.
+static int l_midi_supportee(lua_State *L) {
+  lua_pushboolean(L, midi_supportee());
+  return 1;
+}
+
+// organum.midi_socket_imposee() → vrai si ORGANUM_MIDI_SOCKET (non vide)
+// impose le backend socket. Même règle que l'aiguillage C.
+static int l_midi_socket_imposee(lua_State *L) {
+  lua_pushboolean(L, midi_socket_imposee());
+  return 1;
+}
+
+// organum.midi_assistant() → 1 assistant connecté, 0 absent, -1 sans objet
+// (MIDI non ouvert, ou backend ALSA/WinMM).
+static int l_midi_assistant(lua_State *L) {
+  if (!g_midi) {
+    lua_pushinteger(L, -1);
+    return 1;
+  }
+  lua_pushinteger(L, midi_assistant_connecte(g_midi));
+  return 1;
+}
+
+// organum.midi_chemin() → chemin de la socket de l'assistant, ou nil hors
+// backend socket. Le trajet est résolu par le backend, jamais dupliqué ici.
+static int l_midi_chemin(lua_State *L) {
+  char chemin[256];
+  if (!g_midi || midi_chemin_assistant(g_midi, chemin, sizeof(chemin)) != 0)
+    return 0;
+  lua_pushstring(L, chemin);
+  return 1;
+}
+
 // organum.plateforme() → "linux", "windows", "macos" ou "autre".
 // Sert à init.moon pour choisir le mode dégradé (aucun backend audio/MIDI).
 static int l_plateforme(lua_State *L) {
@@ -1969,6 +2028,10 @@ static const luaL_Reg kFonctions[] = {
     {"charge_niveau", l_charge_niveau_diag},
     {"limiteur", l_limiteur}, {"tete_reverb", l_tete_reverb},
     {"transposition", l_transposition},
+    {"midi_supportee", l_midi_supportee},
+    {"midi_socket_imposee", l_midi_socket_imposee},
+    {"midi_assistant", l_midi_assistant},
+    {"midi_chemin", l_midi_chemin},
     {"plateforme", l_plateforme},
     {"temperament", l_temperament},
     {"oublier_audio", l_oublier_audio},

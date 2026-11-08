@@ -8,10 +8,18 @@ calibration = require "calibration"
 authentification = require "authentification"
 controle_acces = require "controle_acces"
 degradation = require "degradation"
+midi_actif = require "midi_actif"
 
 -- Plate-forme et mode dégradé : décidés une fois au démarrage.
 PLATEFORME = if type(organum.plateforme) == "function" then organum.plateforme! else "autre"
 SANS_BACKEND, RAISON_SANS_BACKEND = degradation.detecter PLATEFORME, os.getenv "ORGANUM_SANS_BACKEND"
+
+-- Axe MIDI, distinct de l'axe audio : le MIDI socket macOS existe même sans
+-- audio. ORGANUM_SANS_BACKEND=1 coupe le MIDI sauf si ORGANUM_MIDI_SOCKET
+-- impose explicitement le backend socket (simulation Linux, cas macOS).
+midi_supportee = type(organum.midi_supportee) == "function" and organum.midi_supportee!
+midi_socket = type(organum.midi_socket_imposee) == "function" and organum.midi_socket_imposee!
+MIDI_ACTIF = midi_actif.actif midi_supportee, os.getenv("ORGANUM_SANS_BACKEND"), midi_socket
 
 -- Écoute : redbean, sans adresse explicite (-l), ne programme que 0.0.0.0
 -- (tool/net/redbean.c, Listen) ; on ajoute « :: » pour répondre aussi en
@@ -657,6 +665,7 @@ if organum.demarrer
     organum.demarrer {
       :taux, :periode, :peripherique, :limiteur
       sans_backend: SANS_BACKEND
+      midi: MIDI_ACTIF
       temperament: temperament_demarrage
       etat: etat_moteur
       qualite: qualite_demarrage
@@ -688,6 +697,12 @@ if organum.demarrer
   -- Valeurs réellement retenues (l'ouverture audio peut borner) : le fil
   -- audio les publie dans l'état partagé, hérité par les fils de requête.
   etat_effectif = organum.etat!
+  -- Un seul avertissement au démarrage : le MIDI peut être actif même sans
+  -- audio (Mac), mais l'assistant CoreMIDI est alors indispensable. Le
+  -- chemin vient du backend, jamais d'une règle recopiée ici.
+  if MIDI_ACTIF and type(organum.midi_assistant) == "function" and organum.midi_assistant! == 0
+    chemin = if type(organum.midi_chemin) == "function" then organum.midi_chemin!
+    Log kLogWarn, "organum : assistant MIDI absent (socket #{chemin or "inconnue"}) ; lancez plateforme/macos/build/organum-midi"
   EFFECTIF.taux = etat_effectif.taux
   EFFECTIF.periode = etat_effectif.periode
   EFFECTIF.peripherique = periph_effectif
@@ -1330,26 +1345,34 @@ handle_orgue = ->
 -- champs bruts du moteur, plus « libelle » et « etat » calculés par
 -- modele.moon. Séquenceur indisponible : 200 avec ports = [] (les
 -- interfaces affichent simplement une liste vide) et un message journalisé.
+-- État de l'assistant socket : vrai seulement quand il est connecté.
+assistant_midi = ->
+  return false unless type(organum.midi_assistant) == "function"
+  ok, valeur = pcall organum.midi_assistant
+  ok and valeur == 1
+
 etat_midi_ports = ->
   adresse = ""
   ok_etat, e = pcall organum.etat
   adresse = e.midi if ok_etat and type(e) == "table"
   ok, ports = pcall organum.midi_ports
   unless ok
-    -- Mode dégradé : aucun séquenceur n'est censé être ouvert, ce n'est pas
-    -- une anomalie. Sinon, le moteur n'a réellement pas été démarré.
-    if SANS_BACKEND
+    -- Axe MIDI coupé : ce n'est pas une anomalie. Sinon, le moteur n'a
+    -- réellement pas démarré, ou les ports sont indisponibles.
+    unless MIDI_ACTIF
       Log kLogInfo, "organum : séquenceur MIDI non ouvert (mode dégradé sur #{modele.libelle_plateforme PLATEFORME})"
     else
       Log kLogWarn, "organum : ports MIDI indisponibles : #{ports}"
-    return {adresse: adresse, disponible: not SANS_BACKEND,
+    return {adresse: adresse, disponible: MIDI_ACTIF,
+      assistant: assistant_midi!,
       plateforme_libelle: modele.libelle_plateforme PLATEFORME,
       ports: modele.liste_json {}}
   liste = for p in *ports
     p.libelle = modele.libelle_port p
     p.etat = modele.etat_port p
     p
-  {adresse: adresse, disponible: not SANS_BACKEND,
+  {adresse: adresse, disponible: MIDI_ACTIF,
+    assistant: assistant_midi!,
     plateforme_libelle: modele.libelle_plateforme PLATEFORME,
     ports: modele.liste_json liste}
 

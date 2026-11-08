@@ -34,4 +34,30 @@ int midi_ports(midi_t *m, struct midi_port *ports, int max) { return AIGUILLER_M
 int midi_connecter(midi_t *m, int c, int p) { return AIGUILLER_MIDI(midi_connecter, m, c, p); }
 int midi_deconnecter(midi_t *m, int c, int p) { return AIGUILLER_MIDI(midi_deconnecter, m, c, p); }
 void midi_fermer(midi_t *m) { AIGUILLER_MIDI(midi_fermer, m); }
-int midi_supportee(void) { return IsLinux() || IsWindows(); }
+
+/* Le socket macOS est un backend MIDI à part entière : XNU l'a désormais,
+   même sans audio. Sous Linux, ORGANUM_MIDI_SOCKET reste un forçage de test. */
+int midi_supportee(void) { return IsLinux() || IsWindows() || IsXnu(); }
+
+int midi_socket_imposee(void) { return socket_imposee(); }
+
+/* Aiguillage des interrogations propres au backend socket. Sur Windows,
+   l'aiguillage principal choisit toujours WinMM, même si la variable est
+   posée : ne jamais appeler l'implémentation socket dans ce cas. */
+int midi_assistant_connecte(midi_t *m)
+{
+    if (m == NULL || IsWindows())
+        return -1;
+    if (IsXnu() || socket_imposee())
+        return midi_socket_midi_connecte(m);
+    return -1;
+}
+
+int midi_chemin_assistant(midi_t *m, char *sortie, int capacite)
+{
+    if (m == NULL || sortie == NULL || capacite <= 0 || IsWindows())
+        return -1;
+    if (IsXnu() || socket_imposee())
+        return midi_socket_midi_chemin(m, sortie, capacite);
+    return -1;
+}
