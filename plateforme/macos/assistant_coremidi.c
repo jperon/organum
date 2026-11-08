@@ -904,6 +904,13 @@ int main(int argc, char **argv)
     journal("sources CoreMIDI présentes");
 
   while (!g.arret) {
+    /* CoreMIDI ne livre ses notifications et n'actualise son cache de
+       sources que sur le run loop du fil qui a créé le client. Sans ce
+       pompage, une source branchée à chaud reste invisible malgré
+       l'énumération de secours, et le rappel de lecture n'est jamais
+       appelé. Le délai nul rend la main aussitôt : le fil continue de
+       servir la socket avec son poll(). */
+    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.0, true);
     if (g.client_ko && g.etat != ETAT_AUCUN)
       fermer_client();
 
