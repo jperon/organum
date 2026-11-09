@@ -393,9 +393,13 @@ par l'article 13 de l'AGPL.
   non-loopback (dont `0.0.0.0`). Sous XNU, `getnameinfo(..., NI_NAMEREQD)`
   échoue en ~17 s, deux fois (EC puis RSA) : le port écoute alors ~34 s sans
   que personne n'appelle `accept()`. `cosmo/organum.c` renomme donc le `main`
-  de redbean et insère `-X` (TLS désactivé) avant de l'appeler, sauf si
-  l'utilisateur fournit `-C`/`-K`. Ne pas réactiver TLS sans mesurer la
-  première réponse HTTP ; `web/scripts/test-demarrage.sh` la borne à 10 s.
+  de redbean et insère `-X` (TLS désactivé) avant de l'appeler, mais
+  **seulement sous XNU** (`IsXnu()`, macro d'exécution : ne pas la remplacer
+  par un `#if`, le binaire peut être universel) et sauf si l'utilisateur
+  fournit `-C`/`-K`. Linux et Windows conservent le comportement d'origine,
+  TLS auto-signé compris. Ne pas élargir la condition sans mesurer la
+  première réponse HTTP ; `web/scripts/test-demarrage.sh` la borne à 10 s et
+  vérifie le certificat (généré hors XNU, absent sous XNU).
 - Ne jamais arrêter PipeWire : l'audio passe par libasound `default`.
 - Sortie ALSA `null` : `audio_ecrire` rend aussitôt et la boucle audio
   tournerait à 100 % d'un cœur. `g_sortie_null`, recalculé à chaque ouverture

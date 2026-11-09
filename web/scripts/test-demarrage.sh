@@ -1,12 +1,14 @@
 #!/bin/sh
 # Test de non-régression du délai de première réponse HTTP.
 #
-# redbean générait un certificat TLS auto-signé entre Listen() et EventLoop(),
+# redbean génère un certificat TLS auto-signé entre Listen() et EventLoop(),
 # en reverse-résolvant chaque adresse non-loopback ; sous XNU, 0.0.0.0 coûtait
-# ~34 s, pendant lesquelles le port écoutait sans accept(). organum passe
-# maintenant -X. Le test lance le serveur réel, sonde /api/orgue toutes les
-# 50 ms et exige une première réponse en moins de 10 s (référence : ~1 s
-# sous Linux, ~4 s sous macOS avec -X, contre ~38 s avant le correctif).
+# ~34 s, pendant lesquelles le port écoutait sans accept(). organum passe donc
+# -X sous XNU seulement (sauf -C/-K) ; Linux et Windows gardent TLS. Le test
+# lance le serveur réel, sonde /api/orgue toutes les 50 ms et exige une
+# première réponse en moins de 10 s (référence : ~1 s sous Linux, ~4 s sous
+# macOS avec -X, contre ~38 s avant le correctif). Il vérifie aussi le
+# certificat : absent sous XNU (-X), généré ailleurs (TLS conservé).
 # Sortie : une ligne OK/ÉCHEC par contrôle ; code non nul si échec.
 set -u
 
@@ -73,8 +75,8 @@ for p in "$PORT" 8107 8117 8127 8137 8147; do
 done
 URL="http://127.0.0.1:$PORT"
 
-# -v -v : si TLS était encore actif, le journal montrerait la génération du
-# certificat auto-signé. ORGANUM_QUALITE=3 évite la calibration automatique.
+# -v -v : le journal montre la génération du certificat auto-signé quand TLS
+# est actif. ORGANUM_QUALITE=3 évite la calibration automatique.
 ORGANUM_PERIPHERIQUE=null \
 ORGANUM_ETAT="$ETAT" \
 ORGANUM_CONFIG_MIDI="$CONFIG" \
@@ -113,10 +115,22 @@ else
   exit 1
 fi
 
-if grep -q "generating self-signed ssl certificates" "$JOURNAL"; then
-  echec "génération d'un certificat TLS malgré -X"
+if [ "$(uname -s)" = Darwin ]; then
+  # XNU : -X doit avoir coupé TLS (c'est tout l'objet du contournement).
+  if grep -q "generating self-signed ssl certificates" "$JOURNAL"; then
+    echec "génération d'un certificat TLS malgré -X sous XNU"
+  else
+    ok "aucune génération de certificat TLS (XNU, -X)"
+  fi
 else
-  ok "aucune génération de certificat TLS"
+  # Linux/Windows : comportement d'origine, TLS doit rester actif.
+  if grep -q "generating self-signed ssl certificates" "$JOURNAL"; then
+    ok "certificat TLS auto-signé généré (TLS conservé hors XNU)"
+  else
+    echec "aucune génération de certificat TLS hors XNU (TLS perdu)"
+    sed 's/^/        /' "$JOURNAL" >&2
+    exit 1
+  fi
 fi
 
 for chemin in / /midi /audio; do

@@ -23,7 +23,7 @@ static void OrganumOpenLibs(lua_State *L) {
 
 #define luaL_openlibs OrganumOpenLibs
 // Le main de redbean est renommé pour qu'organum puisse insérer « -X »
-// avant de le lui passer (voir OrganumMain plus bas).
+// avant de le lui passer sous XNU (voir main plus bas).
 #define main redbean_main
 #include "tool/net/redbean.c"
 #undef main
@@ -59,11 +59,15 @@ static bool OrganumCertificatDemande(int argc, char *argv[]) {
 // et ConfigureCertificate reverse-résout chaque adresse non-loopback. Sous
 // XNU, getnameinfo(..., NI_NAMEREQD) sur 0.0.0.0 échoue en ~17 s, deux fois
 // (EC puis RSA) : le port écoute alors ~34 s sans que personne n'appelle
-// accept(). organum ne sert qu'en HTTP et ne configure jamais TLS ; on passe
-// donc « -X » (unsecure), sauf si l'utilisateur fournit -C/-K.
+// accept(). Ce défaut est propre à XNU ; ailleurs la reverse-résolution
+// échoue instantanément. On ne passe donc « -X » (unsecure, TLS désactivé)
+// que sous XNU, et sauf si l'utilisateur demande explicitement un certificat
+// (-C/-K). Linux et Windows gardent le comportement d'origine, TLS compris.
+// IsXnu() est une macro d'exécution (__hostos) : pas de #if, qui figerait le
+// choix à la compilation du binaire universel.
 int main(int argc, char *argv[]) {
-  if (OrganumCertificatDemande(argc, argv))
-    return redbean_main(argc, argv);
+  if (!IsXnu() || OrganumCertificatDemande(argc, argv))
+    return redbean_main(argc, argv);  // argv d'origine, sans allocation
   char **argv2 = malloc((argc + 2) * sizeof(*argv2));
   if (!argv2)
     return redbean_main(argc, argv);
