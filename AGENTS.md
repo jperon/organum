@@ -103,6 +103,27 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   USB) ; `--socket` et `--verbose` complètent. Mode d'emploi et LaunchAgent :
   `plateforme/macos/LANCEMENT.md`. Compilation et test réels restent à faire
   sur un Mac : aucun compilateur macOS en CI.
+- Horloge sous XNU (piège `CLOCK_MONOTONIC`) : sous XNU x86-64, cosmocc
+  reconstitue `CLOCK_MONOTONIC` depuis le TSC avec un diviseur supposant
+  3 GHz (`libc/intrin/clock_gettime-mono.c:80`) ; sur une VM à 0,88 GHz, il
+  avance à ~0,29 × le temps réel (un recul d'une seconde durait 3,4 s).
+  Règle : toute **durée humaine** (fenêtre d'activité, réessais audio, recul
+  de reconnexion MIDI) se mesure avec `horloge_mur()` — `CLOCK_REALTIME` sous
+  XNU, `CLOCK_MONOTONIC` ailleurs — définie dans `cosmo/lorganum.c` et
+  reprise localement dans `plateforme/macos/midi_socket.c`. `CLOCK_REALTIME`
+  peut sauter vers l'arrière : un reste négatif vaut échéance atteinte, et un
+  reste supérieur au plus long recul normal (`MIDI_SOCKET_DELAI_VERSION` +
+  marge) aussi, sinon un saut NTP repousserait la reconnexion. En revanche,
+  deux lectures rapprochées pour un pourcentage (mesure de charge du fil
+  audio) gardent `CLOCK_MONOTONIC` : un diviseur TSC faux n'affecte pas le
+  rapport, et l'absence de saut NTP le protège. `attendre_tampon_null()` le
+  garde aussi car il doit être le même que `clock_nanosleep` ; la sortie
+  « null » ne concerne pas macOS. Le faux assistant `faux_assistant.c` est
+  compilé par le cc de l'hôte, pas par cosmocc : son `CLOCK_MONOTONIC` est
+  celui de la libc native et n'a pas ce défaut. Tests :
+  `plateforme/tests/horloge_midi_socket.c` (horloge simulée, recul mural et
+  saut arrière) et le contrôle `j` de `web/scripts/test-midi-socket.sh`
+  (reconnexion réelle ≤ 2 s).
 - `web/src/init.moon` : démarrage, API HTTP (`/api/orgue`, `/api/midi`,
   `/api/volume`), persistance. `POST /api/orgue {"volume":0..1}` règle le
   volume du moteur (pédale), distinct de `/api/volume` (volume système), déjà

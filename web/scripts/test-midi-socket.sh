@@ -15,7 +15,10 @@
 #   d. deux ports, client « CoreMIDI », connectés ;
 #   e. sans assistant, le serveur démarre, l'API répond et ports = [] ;
 #   f. après mort et relance de l'assistant, une note est reçue en ≤ 2 s ;
-#   g. version refusée : pas de boucle, pas de plantage, ports = [].
+#   g. version refusée : pas de boucle, pas de plantage, ports = [] ;
+#   h. MIDI socket sans audio (mode dégradé) ;
+#   i. lectures concurrentes : aucune note volée, un PONG par PING ;
+#   j. recul de reconnexion mesuré en temps mural (≤ 2 s après relance).
 #
 # Sortie : une ligne OK/ÉCHEC par contrôle ; code non nul au premier échec.
 set -u
@@ -320,6 +323,41 @@ if lancer_assistant 'note:1:64:100,pause:700,pc:15:3' --attendre-client 5000; th
     ok "c : Program Change visible (étape 3 du séquenceur)"
   else
     echec "c : étape du séquenceur non changée ; vu : $corps"
+  fi
+fi
+arreter_assistant
+
+# --- j. Recul de reconnexion en temps mural -------------------------------
+# Le recul qui suit la perte de l'assistant vaut une seconde. Il doit se
+# mesurer en temps mural : sous XNU, l'ancien CLOCK_MONOTONIC de cosmocc
+# l'étirait à ~3,4 s. On attend que l'assistant soit vu absent (la connexion
+# est alors fermée et le recul armé), puis on le relance et on borne le retour
+# de « assistant » à 2 s, marge comprise. Le défaut propre à XNU est reproduit
+# par plateforme/tests/horloge_midi_socket.c ; ce contrôle-ci garde le chemin
+# réel, y compris sur une machine Apple.
+if lancer_assistant 'pause:8000' --attendre-client 5000; then
+  if attendre_motif "$URL/api/midi/ports" '"assistant":true' 80 >/dev/null; then
+    arreter_assistant
+    if attendre_motif "$URL/api/midi/ports" '"assistant":false' 80 >/dev/null; then
+      debut=$(date +%s%N)
+      if lancer_assistant 'pause:8000' --attendre-client 5000; then
+        if attendre_motif "$URL/api/midi/ports" '"assistant":true' 80 >/dev/null; then
+          fin=$(date +%s%N)
+          ms=$(( (fin - debut) / 1000000 ))
+          if [ "$ms" -le 2000 ]; then
+            ok "j : reconnexion après relance en ${ms} ms (≤ 2 s, temps mural)"
+          else
+            echec "j : reconnexion après relance en ${ms} ms (> 2 s)"
+          fi
+        else
+          echec "j : assistant jamais revu après la relance"
+        fi
+      fi
+    else
+      echec "j : assistant jamais vu absent après l'arrêt"
+    fi
+  else
+    echec "j : assistant jamais vu connecté avant l'arrêt"
   fi
 fi
 arreter_assistant

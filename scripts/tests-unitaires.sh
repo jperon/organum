@@ -218,12 +218,12 @@ fi
 
 # --- Un seul lecteur de la socket MIDI --------------------------------------
 # Un fils de requête redbean hérite de la socket ; s'il lisait, il volerait
-# des trames au fil audio. Le test inclut midi_socket.c avec un cosmo.h vide
-# (le backend n'utilise IsXnu que par l'aiguillage) et vérifie qu'un fils ne
-# consomme rien alors que le père lit la note.
+# des trames au fil audio. Le test inclut midi_socket.c avec un cosmo.h
+# minimal (IsXnu() à 0, comme sous Linux) et vérifie qu'un fils ne consomme
+# rien alors que le père lit la note.
 if command -v gcc >/dev/null 2>&1; then
   mkdir -p "$TMP/cosmo-vide"
-  : >"$TMP/cosmo-vide/cosmo.h"
+  printf '#define IsXnu() 0\n' >"$TMP/cosmo-vide/cosmo.h"
   if gcc -O2 -I "$TMP/cosmo-vide" -I "$RACINE/plateforme" \
        "$RACINE/plateforme/tests/midi_socket_lecteur.c" \
        -o "$TMP/midi_socket_lecteur" 2>"$TMP/gcc-lecteur.log"; then
@@ -239,6 +239,31 @@ if command -v gcc >/dev/null 2>&1; then
   fi
 else
   ignore "C : gcc absent, lecteur unique MIDI non testé"
+fi
+
+# --- Horloge des reculs MIDI sous XNU ---------------------------------------
+# Sous XNU, CLOCK_MONOTONIC de cosmocc avance à ~0,29 × le temps réel. Le
+# backend socket doit donc armer ses reculs de reconnexion sur
+# CLOCK_REALTIME. Le test inclut midi_socket.c avec une horloge simulée :
+# CLOCK_MONOTONIC y est trois fois trop lent, comme sur une VM à 0,88 GHz.
+if command -v gcc >/dev/null 2>&1; then
+  mkdir -p "$TMP/cosmo-xnu"
+  : >"$TMP/cosmo-xnu/cosmo.h"
+  if gcc -O2 -I "$TMP/cosmo-xnu" -I "$RACINE/plateforme" \
+       "$RACINE/plateforme/tests/horloge_midi_socket.c" \
+       -o "$TMP/horloge_midi_socket" 2>"$TMP/gcc-horloge.log"; then
+    if "$TMP/horloge_midi_socket" >"$TMP/horloge.log" 2>&1; then
+      ok "C : reculs MIDI mesurés en temps mural sous XNU"
+    else
+      cat "$TMP/horloge.log"
+      echec "C : reculs MIDI sous XNU"
+    fi
+  else
+    cat "$TMP/gcc-horloge.log" >&2
+    echec "C : compilation horloge_midi_socket"
+  fi
+else
+  ignore "C : gcc absent, horloge des reculs MIDI non testée"
 fi
 
 # --- Tables C++ des tempéraments --------------------------------------------

@@ -88,19 +88,40 @@ static int argument_invalide(void)
     return -1;
 }
 
+/* Horloge murale pour les durées « humaines » (reculs de reconnexion). Sous
+ * XNU x86-64, CLOCK_MONOTONIC de cosmocc est reconstitué depuis le TSC avec
+ * un diviseur supposant 3 GHz (libc/intrin/clock_gettime-mono.c:80) : sur une
+ * VM dont le TSC tourne à 0,88 GHz, il avance à 0,29 × le temps réel. Un
+ * recul d'une seconde durait alors 3,4 s. CLOCK_REALTIME est correct sur les
+ * deux plates-formes ; sous Linux, CLOCK_MONOTONIC reste préféré car il
+ * ignore les sauts NTP. */
+static void horloge_mur(struct timespec *t)
+{
+    clock_gettime(IsXnu() ? CLOCK_REALTIME : CLOCK_MONOTONIC, t);
+}
+
 static void armer_recul(midi_t *m, int secondes)
 {
-    clock_gettime(CLOCK_MONOTONIC, &m->prochain_essai);
+    horloge_mur(&m->prochain_essai);
     m->prochain_essai.tv_sec += secondes;
 }
 
 static int echeance_atteinte(const midi_t *m)
 {
     struct timespec maintenant;
-    clock_gettime(CLOCK_MONOTONIC, &maintenant);
-    if (maintenant.tv_sec != m->prochain_essai.tv_sec)
-        return maintenant.tv_sec > m->prochain_essai.tv_sec;
-    return maintenant.tv_nsec >= m->prochain_essai.tv_nsec;
+    horloge_mur(&maintenant);
+    const long long reste_ns =
+        (long long)(m->prochain_essai.tv_sec - maintenant.tv_sec) *
+            1000000000LL +
+        (m->prochain_essai.tv_nsec - maintenant.tv_nsec);
+    if (reste_ns <= 0)
+        return 1;
+    /* Un saut d'horloge vers l'arrière ne doit ni repousser la reconnexion
+       au-delà du plus long recul normal (MIDI_SOCKET_DELAI_VERSION), ni
+       provoquer une rafale : la tentative immédiate réarme ensuite sur la
+       nouvelle horloge. */
+    return reste_ns > (long long)(MIDI_SOCKET_DELAI_VERSION + 1) *
+                          1000000000LL;
 }
 
 /* Une écriture bornée : jamais d'attente, et EAGAIN devient ENOSPC pour
