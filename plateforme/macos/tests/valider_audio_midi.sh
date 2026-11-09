@@ -211,6 +211,10 @@ while [ "$i" -lt 80 ]; do
   i=$((i + 1))
   sleep 0.1
 done
+# Instantané frais juste avant la mesure : sans cela, la valeur « avant »
+# vient de la dernière requête d'attente et peut avoir jusqu'à 100 ms de
+# retard, ce qui fausse la cadence vers le haut (mesuré : 2,48 %).
+curl -fsS --max-time 2 "$URL/api/orgue" > "$ORQUE" 2>/dev/null || true
 debut=$(maintenant_ns)
 avant=$(champ "$ORQUE" trames_jouees)
 [ -n "$avant" ] || avant=0
@@ -255,6 +259,12 @@ if [ "$actif" = 1 ]; then
   ok "c : note CoreMIDI reçue, canaux_actifs non vide ($(champ "$MIDIJSON" canaux_actifs))"
 else
   echec "c : aucune activité MIDI vue dans /api/midi"
+  echo "        /api/midi : $(cat "$MIDIJSON" 2>/dev/null)" >&2
+  echo "        --- journal de l'assistant ---" >&2
+  JOURNAL_AIDE=$(champ "$ORQUE" assistant_log)
+  if [ -n "$JOURNAL_AIDE" ] && [ -f "$JOURNAL_AIDE" ]; then
+    sed 's/^/        /' "$JOURNAL_AIDE" | tail -n 30 >&2
+  fi
   sed 's/^/        /' "$EMETTEUR_LOG" >&2
 fi
 

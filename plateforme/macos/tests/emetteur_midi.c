@@ -29,14 +29,13 @@ static void sur_signal(int sig)
   atomic_store(&g_arreter, 1);
 }
 
+/* Horodatage 0 : « jouer maintenant ». Ne PAS utiliser CLOCK_MONOTONIC : un
+   MIDITimeStamp CoreMIDI est en ticks Mach, et un horodatage en nanosecondes
+   place l'événement très loin dans le futur, où il n'arrive jamais. */
 static MIDIPacket *paquet_note(MIDIPacketList *liste, MIDIPacket *p,
                                const unsigned char *octets, size_t n)
 {
-  struct timespec t;
-  clock_gettime(CLOCK_MONOTONIC, &t);
-  const MIDITimeStamp horodatage =
-      (MIDITimeStamp)t.tv_sec * 1000000000ULL + (MIDITimeStamp)t.tv_nsec;
-  return MIDIPacketListAdd(liste, 256, p, horodatage, n, octets);
+  return MIDIPacketListAdd(liste, 256, p, 0, n, octets);
 }
 
 int main(int argc, char **argv)
