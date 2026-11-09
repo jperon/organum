@@ -122,7 +122,48 @@ jobs:
       - name: Construction
         run: scripts/construire.sh
 
-      - name: Tests
+      # Les tests unitaires ont besoin de redbean comme interpréteur Lua 5.4 ;
+      # l'arbre cosmopolitan est déjà construit à cette étape, on y prend le
+      # binaire plutôt que d'installer un paquet supplémentaire.
+      - name: Préparer redbean pour les tests unitaires
+        run: |
+          make -C externe/cosmopolitan -j"$(nproc)" o//tool/net/redbean
+          test -x externe/cosmopolitan/o//tool/net/redbean
+          echo "$GITHUB_WORKSPACE/externe/cosmopolitan/o//tool/net" >> "$GITHUB_PATH"
+          externe/cosmopolitan/o//tool/net/redbean -h > /dev/null
+
+      # Suites réelles, sans navigateur ni Xvfb : elles lancent organum.com
+      # sur une sortie muette (ORGANUM_PERIPHERIQUE=null), avec des ports et
+      # des états temporaires, et n'ouvrent jamais /dev/snd. Chaque étape doit
+      # faire échouer le job (pas de continue-on-error).
+      - name: Tests unitaires (MoonScript, Lua, C/C++ purs)
+        run: sh scripts/tests-unitaires.sh
+
+      - name: Mode dégradé sans backend audio ni MIDI
+        run: sh web/scripts/test-sans-backend.sh
+
+      - name: Délai de première réponse HTTP
+        run: sh web/scripts/test-demarrage.sh
+
+      - name: Clavier jouable par l'API
+        run: sh web/scripts/test-clavier.sh
+
+      - name: Backend MIDI par socket
+        run: sh web/scripts/test-midi-socket.sh
+
+      - name: Backend audio par socket
+        run: sh web/scripts/test-audio-socket.sh
+
+      - name: Authentification HTTP Digest
+        run: sh web/scripts/test-authentification.sh
+
+      - name: Contrôle d'accès par sous-réseau
+        run: sh web/scripts/test-reseaux.sh
+
+      - name: Transposition globale
+        run: sh web/scripts/test-transposition.sh
+
+      - name: Tests de la couche plate-forme (ALSA/MIDI)
         run: scripts/tester.sh
 
       - name: Vérification
