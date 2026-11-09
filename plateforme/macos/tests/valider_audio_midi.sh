@@ -14,9 +14,9 @@
 #   a. l'assistant embarqué démarre, CoreAudio s'ouvre :
 #      audio_disponible, audio_assistant = 1, latence_ms > 0, audio_demarre ;
 #   b. cadence : trois fenêtres de 5 s après 1 s de stabilisation, médiane
-#      ≤ 2 % de taux, xruns = 0 (preuve que le rappel CoreAudio consomme
-#      l'anneau au bon rythme, sans confondre un pic de charge isolé avec un
-#      défaut structurel) ;
+#      ≤ 2 % de taux, et aucun NOUVEL xrun pendant ces fenêtres (preuve que
+#      le rappel CoreAudio consomme l'anneau au bon rythme, sans confondre
+#      un pic de charge isolé avec un défaut structurel) ;
 #   c. MIDI de bout en bout : une source virtuelle CoreMIDI joue une note,
 #      /api/midi publie canaux_actifs non vide, puis revient à vide quand
 #      l'émetteur relâche la note ;
@@ -227,6 +227,18 @@ while [ "$i" -lt 80 ]; do
   sleep 0.1
 done
 sleep 1
+# Référence des xruns après stabilisation : un underrun au tout premier
+# rappel (l'anneau se remplit) est un transitoire de démarrage, pas un défaut
+# de la lecture mesurée. On exige donc qu'aucun NOUVEL xrun n'apparaisse
+# pendant les trois fenêtres, et on publie les deux valeurs pour la trace.
+curl -fsS --max-time 2 "$URL/api/orgue" > "$ORQUE" 2>/dev/null || true
+xruns_avant=$(champ "$ORQUE" xruns)
+xruns_recents_avant=$(champ "$ORQUE" xruns_recents)
+if [ -z "$xruns_avant" ] || [ -z "$xruns_recents_avant" ]; then
+  echec "b : compteurs xruns non publiés dans /api/orgue"
+fi
+[ -n "$xruns_avant" ] || xruns_avant=0
+[ -n "$xruns_recents_avant" ] || xruns_recents_avant=0
 
 # Trois fenêtres de 5 s, médiane : une préemption isolée peut fausser une
 # fenêtre, pas les trois. Un défaut structurel (facteur 1,5, horloge fausse)
@@ -269,8 +281,23 @@ if [ "$m" -eq 3 ]; then
     echec "b : cadence hors tolérance : médiane ${mediane}‱ > 2 % sur 3 fenêtres de 5 s"
   fi
 fi
-verifie '"xruns":0' "$ORQUE" "b : aucun xrun (underrun/overrun) pendant la lecture"
-verifie '"xruns_recents":0' "$ORQUE" "b : aucun xrun récent"
+xruns_apres=$(champ "$ORQUE" xruns)
+xruns_recents_apres=$(champ "$ORQUE" xruns_recents)
+if [ -z "$xruns_apres" ] || [ -z "$xruns_recents_apres" ]; then
+  echec "b : compteurs xruns non publiés à la fin de la mesure"
+fi
+[ -n "$xruns_apres" ] || xruns_apres=0
+[ -n "$xruns_recents_apres" ] || xruns_recents_apres=0
+if [ "$xruns_apres" -eq "$xruns_avant" ] 2>/dev/null; then
+  ok "b : aucun nouvel xrun (underrun/overrun) pendant la mesure ($xruns_apres, référence $xruns_avant)"
+else
+  echec "b : $((xruns_apres - xruns_avant)) nouvel(x) xrun(s) pendant la mesure ($xruns_avant → $xruns_apres)"
+fi
+if [ "$xruns_recents_apres" -le "$xruns_recents_avant" ] 2>/dev/null; then
+  ok "b : aucun xrun récent nouveau ($xruns_recents_apres, référence $xruns_recents_avant)"
+else
+  echec "b : xruns récents en hausse ($xruns_recents_avant → $xruns_recents_apres)"
+fi
 
 ASSISTANT_PID=$(champ "$ORQUE" assistant_pid)
 [ -n "$ASSISTANT_PID" ] || ASSISTANT_PID=0

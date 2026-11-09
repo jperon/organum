@@ -232,8 +232,10 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   exerçables en CI.
   Contrôles du script : `audio_disponible`, `audio_assistant = 1`,
   `latence_ms > 0`, `audio_demarre`, cadence (trois fenêtres de 5 s après
-  1 s de stabilisation, médiane ≤ 2 % de `taux`), `xruns`/`xruns_recents`
-  à 0, puis MIDI de bout en bout (source virtuelle CoreMIDI
+  1 s de stabilisation, médiane ≤ 2 % de `taux`), absence de NOUVEL xrun
+  pendant ces fenêtres (référence prise après stabilisation : un underrun
+  au tout premier rappel n'est pas un défaut de la lecture mesurée), puis
+  MIDI de bout en bout (source virtuelle CoreMIDI
   `emetteur_midi.c` → assistant → socket → orgue : `canaux_actifs` non
   vide, puis revenu à vide au relâchement). Mesure réelle du 2026-11-09
   (run `42653100117`, 10 s pour le script) : « latence audio publiée
