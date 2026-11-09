@@ -21,7 +21,12 @@
 
 // Magic ASCII « OAUD » lu en petit-boutiste.
 #define ANNEAU_AUDIO_MAGIE 0x4455414Fu
-#define ANNEAU_AUDIO_VERSION 1
+/* Version de la disposition et de la sémantique de l'en-tête. Toute
+   modification des champs, de leur ordre ou de leur sens (par exemple le
+   drapeau demarre ajouté en v2) impose de l'incrémenter : un organum et un
+   assistant de versions différentes doivent se REFUSER explicitement, jamais
+   partager un anneau dont l'un ignore un champ. Voir PROTOCOLE-AUDIO.md. */
+#define ANNEAU_AUDIO_VERSION 2
 
 // 16384 trames = 128 Kio en float32 stéréo.
 #define ANNEAU_AUDIO_CAPACITE_MAX 16384u

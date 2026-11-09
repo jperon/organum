@@ -89,16 +89,20 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   `web/scripts/test-midi-socket.sh` (dont MIDI socket + audio dégradé).
 - États audio affichés (étape 7 du chantier audio) : la règle pure
   `degradation.etat_audio {supportee, sans_backend, socket, assistant,
-  disponible, erreur}` (dans `web/src/degradation.moon`) distingue quatre
+  disponible, erreur}` (dans `web/src/degradation.moon`) distingue cinq
   situations, dans cet ordre : `sans_backend` (aucun backend sur la
   plate-forme → « Audio non pris en charge sur cette plate-forme. »),
   `desactive` (forçage `ORGANUM_SANS_BACKEND` ou axe coupé), `sans_sortie`
   (`audio_erreur` contient « aucune sortie audio », ACK statut 2 de
   l'assistant → « Aucune sortie audio : vérifiez Réglages Système → Son →
-  Sortie. »), puis `assistant_absent` (`audio_assistant == 0` → « Assistant
-  audio absent : lancez `organum-audio`… », non alarmant). Audio
-  opérationnel : `nil, nil`, aucun message. L'erreur est examinée **avant**
-  l'assistant, car un ACK statut 2 laisse aussi `audio_assistant` à 0.
+  Sortie. »), `incompatible` (`audio_erreur` contient « version du protocole
+  audio incompatible » ou « version de l'anneau audio incompatible » : le
+  message brut, qui nomme les deux versions et demande de recompiler les deux
+  binaires, reste affiché), puis `assistant_absent` (`audio_assistant == 0`
+  → « Assistant audio absent : lancez `organum-audio`… », non alarmant).
+  Audio opérationnel : `nil, nil`, aucun message. L'erreur est examinée
+  **avant** l'assistant, car un ACK statut 2 ou un refus de version laisse
+  aussi `audio_assistant` à 0.
   `web/src/midi_actif.moon` expose de même `midi_actif.message(disponible,
   assistant, socket)` (« MIDI désactivé… » ou « Assistant MIDI absent… »),
   nil quand le MIDI fonctionne. `qualite_etat` publie `audio_etat`,

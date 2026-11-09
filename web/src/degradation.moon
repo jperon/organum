@@ -27,10 +27,13 @@ detecter = (plateforme, force, supportee) ->
 --   * axe audio désactivé (ORGANUM_SANS_BACKEND, ou backend absent alors que
 --     la plate-forme en a normalement un) ;
 --   * assistant socket absent, ou pas encore connecté (non alarmant) ;
---   * assistant présent mais sans périphérique de sortie (ACK statut 2).
+--   * assistant présent mais sans périphérique de sortie (ACK statut 2) ;
+--   * organum et assistant de versions de protocole/anneau incompatibles :
+--     refus explicite, jamais un silence présenté comme normal.
 -- `audio_erreur` est examinée avant `audio_assistant` : un assistant qui
--- répond « aucune sortie audio » n'est pas un assistant absent. Renvoie
--- nil, nil quand l'audio fonctionne : aucun message ne doit s'afficher.
+-- répond « aucune sortie audio » ou une version incompatible n'est pas un
+-- assistant absent. Renvoie nil, nil quand l'audio fonctionne : aucun
+-- message ne doit s'afficher.
 etat_audio = (info) ->
   info = info or {}
   supportee = info.supportee
@@ -44,6 +47,10 @@ etat_audio = (info) ->
     "desactive", "Audio désactivé sur cette plate-forme."
   elseif erreur\find "aucune sortie audio", 1, true
     "sans_sortie", "Aucune sortie audio : vérifiez Réglages Système → Son → Sortie."
+  elseif (erreur\find "version du protocole audio incompatible", 1, true) or
+         (erreur\find "version de l'anneau audio incompatible", 1, true)
+    -- Le message brut nomme déjà les deux versions et demande de recompiler.
+    "incompatible", erreur
   elseif disponible and info.demarre == false
     -- Production pas encore commencée (ouverture, ou recréation du moteur
     -- pendant un changement de taux) : le silence est explicite, jamais une

@@ -83,7 +83,7 @@ Les deux côtés échangent exactement **8 octets** :
 | Octet | Contenu |
 |---|---|
 | 0..3 | magic ASCII `OAUD` (`4F 41 55 44`) |
-| 4 | version du protocole : `1` |
+| 4 | version du protocole : `2` |
 | 5 | côté client : `0` ; côté serveur : statut |
 | 6..7 | `max_frame` en petit-boutiste (LE16) |
 
@@ -92,18 +92,48 @@ Statuts de la poignée côté serveur :
 | Valeur | Sens |
 |---|---|
 | `0` | accepté |
-| `1` | version incompatible |
+| `3` | version de protocole ou d'en-tête d'anneau incompatible |
 | `4` | refus interne (dont « déjà un client ») |
 
 Le client envoie sa poignée (statut `0`), le serveur répond avec la sienne.
 La valeur retenue pour la connexion est `min(max_frame client, max_frame
 serveur)`, **bornée à 64..8192**. Un `max_frame` hors de ces bornes est
-refusé (code de décodage `-3`). Une version différente de `1` reçoit le
-statut `1`, puis la connexion est fermée.
+refusé (code de décodage `-3`). Une version différente de `2` reçoit le
+statut `3`, puis la connexion est fermée.
 
 Le délai de la poignée est court : organum n'accorde que **200 ms** à
 l'ensemble connexion + poignée. L'assistant doit donc répondre aussitôt
 après `accept()` (il lit les 8 octets avec une borne de 150 ms).
+
+### Versions et compatibilité
+
+La version de la poignée (`TRAMES_AUDIO_VERSION`, dans `trames_audio.h`) et
+la version de l'en-tête de l'anneau (`ANNEAU_AUDIO_VERSION`, dans
+`anneau_audio.h`) valent **2**. La première couvre le protocole de contrôle
+et la seconde la disposition de la mémoire partagée ; **toute modification
+de l'un ou de l'autre impose d'incrémenter les deux**, et de recompiler
+organum et l'assistant ensemble. La version 2 correspond à l'ajout du
+drapeau `demarre` à l'offset 108.
+
+Règle absolue : **un couple hétérogène est REFUSÉ, jamais toléré en
+silence**. Un organum d'une autre version ne doit jamais ouvrir l'anneau d'un
+assistant qui en attend une autre : l'absence de son ne doit pas être
+présentée comme un fonctionnement normal. Concrètement :
+
+- la poignée porte la version du serveur ; si elle diffère, le client refuse
+  l'ouverture avec un message français nommant les deux versions et
+  demandant de recompiler les deux binaires ;
+- l'assistant répond le statut `3` à une poignée de version inconnue, reste à
+  l'écoute et ne crée aucune session ;
+- après l'ACK, organum vérifie `magie` et `version` de l'en-tête mappé ; un
+  désaccord est refusé avec un message explicite ;
+- l'assistant vérifie aussi cet en-tête avant d'appliquer une
+  `AUDIO_CONFIG` et répond alors le statut `3` (configuration invalide), au
+  lieu de jouer du silence.
+
+Cette règle a été ajoutée après un défaut réel : un organum antérieur au
+drapeau `demarre` écrivait dans un anneau que le nouvel assistant refusait de
+lire (`demarre = 0`), et l'utilisateur n'entendait rien sans aucun message.
 
 ## 3. Trame
 
@@ -246,7 +276,7 @@ petit-boutiste natif (aucune sérialisation : la mémoire est partagée).
 | Décalage | Champ | Type |
 |---|---|---|
 | 0 | `magie` (`0x4455414F`, « OAUD ») | u32 |
-| 4 | `version` (`1`) | u32 |
+| 4 | `version` (`2`) | u32 |
 | 8 | `canaux` | u32 |
 | 12 | `octets_trame` | u32 |
 | 16 | `taux` | u32 |

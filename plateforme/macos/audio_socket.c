@@ -252,7 +252,12 @@ static int valider_anneau(struct audio *a, const struct stat *st)
         return -1;
     }
     if (e->version != ANNEAU_AUDIO_VERSION) {
-        definir_erreur("anneau audio : version incompatible");
+        char message[224];
+        snprintf(message, sizeof message,
+                 "version de l'anneau audio incompatible entre organum (%u) "
+                 "et l'assistant (%u) : recompilez les deux",
+                 (unsigned)ANNEAU_AUDIO_VERSION, (unsigned)e->version);
+        definir_erreur(message);
         errno = EPROTO;
         return -1;
     }
@@ -535,9 +540,15 @@ audio_t *audio_socket_audio_ouvrir(const char *peripherique, int taux,
     if (code != 1) {
         if (code == 0)
             definir_erreur(message_statut(vue.statut));
-        else if (code == -2)
-            definir_erreur("version du protocole audio incompatible");
-        else if (code == -3)
+        else if (code == -2) {
+            char message[224];
+            snprintf(message, sizeof message,
+                     "version du protocole audio incompatible entre organum "
+                     "(%u) et l'assistant (%u) : recompilez les deux",
+                     (unsigned)TRAMES_AUDIO_VERSION,
+                     (unsigned)vue.version);
+            definir_erreur(message);
+        } else if (code == -3)
             definir_erreur("taille de trame audio incompatible");
         else
             definir_erreur("poignée de main audio invalide");

@@ -35,6 +35,13 @@ ARCHIVES=1 sh plateforme/macos/construire_assistant.sh
 La compilation ne fait pas partie de `scripts/construire.sh` : elle demande
 les frameworks Apple, absents de la chaîne cosmocc.
 
+**Recompiler les deux assistants en même temps qu'organum** à chaque mise à
+jour : la version du protocole audio et celle de l'anneau partagé changent
+ensemble (version 2 depuis le drapeau `demarre`). Un couple hétérogène est
+refusé explicitement, avec un message français nommant les deux versions ;
+organum ne produit alors aucun son, mais l'erreur est visible dans
+`/api/orgue` et le panneau Audio.
+
 ## Vérifier le MIDI
 
 ```bash

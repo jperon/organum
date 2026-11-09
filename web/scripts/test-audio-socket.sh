@@ -30,6 +30,11 @@
 #   i. fichier `.pcm` périmé (assistant tué par SIGKILL) : reprise propre ;
 #   j. AUDIO_DEVICE dont le nom contient « ~ » (0x7E, type BYE) pendant une
 #      attente d'écriture : aucune fausse déconnexion, le son continue.
+#   k. assistant annonçant une version de protocole incompatible : refus
+#      explicite avec les deux versions, audio_erreur renseignée, aucun son
+#      silencieux (le couple hétérogène n'est jamais toléré).
+#   l. en-tête d'anneau de version incompatible : refus explicite côté
+#      organum, pas de session silencieuse.
 #
 # Sortie : une ligne OK/ÉCHEC par contrôle ; code non nul au premier échec.
 set -u
@@ -314,6 +319,77 @@ if lancer_serveur; then
   fi
   refuse "b : aucune panique au journal" 'panique' "$(cat "$JOURNAL")"
 fi
+arreter_serveur
+rm -f "$SOCKET" "$SOCKET.pcm"
+
+# --- k/l. Couple hétérogène : refus explicite, jamais du silence ----------
+# Le faux assistant reste au protocole courant pour décoder notre poignée,
+# mais annonce une version antérieure (k) ou écrit une version antérieure
+# dans l'en-tête de l'anneau (l). Dans les deux cas, organum doit refuser
+# d'ouvrir et publier un message français contenant les deux versions.
+if lancer_assistant --version 1 --attendre-client 15000; then
+  if lancer_serveur; then
+    if corps=$(attendre_motif "$URL/api/orgue" \
+        'version du protocole audio incompatible' 100); then
+      ok "k : version de protocole incompatible détectée"
+    else
+      echec "k : aucune erreur de version publiée ; vu : $corps"
+    fi
+    verifie "k : message explicite avec les deux versions" \
+      'entre organum (2) et l' "$corps"
+    verifie "k : axe audio indisponible" '"audio_disponible":false' "$corps"
+    verifie "k : assistant non connecté" '"audio_assistant":0' "$corps"
+    verifie "k : état incompatible publié pour l'interface" \
+      '"audio_etat":"incompatible"' "$corps"
+    avant=$(extrait trames_jouees)
+    sleep 1.5
+    apres=$(extrait trames_jouees)
+    corps=$(curl -s --max-time 2 "$URL/api/orgue")
+    verifie "k : aucune session silencieuse (audio toujours indisponible)" \
+      '"audio_disponible":false' "$corps"
+    if [ "${avant:-0}" -eq 0 ] && [ "${apres:-0}" -eq 0 ]; then
+      ok "k : aucune trame jouée par un couple incompatible"
+    else
+      echec "k : trames jouées malgré l'incompatibilité ($avant → $apres)"
+    fi
+    verifie "k : le message d'erreur reste explicite" \
+      'version du protocole audio incompatible' "$corps"
+    refuse "k : aucune panique au journal" 'panique' "$(cat "$JOURNAL")"
+    if kill -0 "$SERVEUR_PID" 2>/dev/null; then
+      ok "k : le serveur vit toujours après le refus"
+    else
+      echec "k : le serveur s'est arrêté après le refus"
+    fi
+  fi
+fi
+arreter_assistant
+arreter_serveur
+rm -f "$SOCKET" "$SOCKET.pcm"
+
+if lancer_assistant --version-anneau 1 --attendre-client 15000; then
+  if lancer_serveur; then
+    if corps=$(attendre_motif "$URL/api/orgue" \
+        'anneau audio incompatible' 100); then
+      ok "l : version d'en-tête d'anneau incompatible détectée"
+    else
+      echec "l : aucune erreur d'en-tête publiée ; vu : $corps"
+    fi
+    verifie "l : message explicite avec les deux versions" \
+      'entre organum (2) et l' "$corps"
+    verifie "l : axe audio indisponible" '"audio_disponible":false' "$corps"
+    verifie "l : assistant non connecté" '"audio_assistant":0' "$corps"
+    verifie "l : état incompatible publié pour l'interface" \
+      '"audio_etat":"incompatible"' "$corps"
+    sleep 1.2
+    corps=$(curl -s --max-time 2 "$URL/api/orgue")
+    verifie "l : aucune session silencieuse" \
+      '"audio_disponible":false' "$corps"
+    verifie "l : le message d'erreur reste explicite" \
+      'anneau audio incompatible' "$corps"
+    refuse "l : aucune panique au journal" 'panique' "$(cat "$JOURNAL")"
+  fi
+fi
+arreter_assistant
 arreter_serveur
 rm -f "$SOCKET" "$SOCKET.pcm"
 

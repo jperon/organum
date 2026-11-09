@@ -625,6 +625,19 @@ static void fermer_client(int adieu)
 
 static uint8_t appliquer_config(const struct audio_config_vue *cfg)
 {
+  if (g.anneau == NULL)
+    return TRAMES_AUDIO_STATUT_INTERNE;
+  /* L'assistant possède l'en-tête, mais un fichier ou un mappage incohérent
+     ne doit jamais être utilisé en silence : un désaccord de version est un
+     refus explicite (statut 3), pas une session qui ne produit rien. */
+  if (g.anneau->magie != ANNEAU_AUDIO_MAGIE ||
+      g.anneau->version != ANNEAU_AUDIO_VERSION) {
+    erreur("en-tête d'anneau incompatible (magie 0x%08x, version %u, "
+           "attendue %u)",
+           (unsigned)g.anneau->magie, (unsigned)g.anneau->version,
+           (unsigned)ANNEAU_AUDIO_VERSION);
+    return TRAMES_AUDIO_STATUT_CONFIG;
+  }
   if (cfg->format != TRAMES_AUDIO_FORMAT_FLOAT32_ENTRELACE ||
       cfg->canaux != CANAUX ||
       cfg->octets != cfg->capacite * (uint32_t)OCTETS_TRAME)
@@ -848,7 +861,9 @@ static void accepter_client(void)
   if (code == 1)
     statut = TRAMES_AUDIO_STATUT_OK;
   else if (code == -2)
-    statut = TRAMES_AUDIO_STATUT_FORMAT;
+    /* Version de protocole (donc de disposition de l'anneau) incompatible :
+       refus explicite, jamais une session silencieuse. */
+    statut = TRAMES_AUDIO_STATUT_CONFIG;
 
   uint8_t reponse[TRAMES_AUDIO_POIGNEE_TAILLE];
   poignee_audio_encoder(reponse, statut, MAX_FRAME);
@@ -858,7 +873,10 @@ static void accepter_client(void)
     return;
   }
   if (statut != TRAMES_AUDIO_STATUT_OK) {
-    journal("poignée refusée (code %d, statut %u)", code, statut);
+    journal("poignée refusée (code %d, statut %u, client version %u, "
+            "attendue %u)",
+            code, (unsigned)statut, (unsigned)vue.version,
+            (unsigned)TRAMES_AUDIO_VERSION);
     close(fd);
     return;
   }

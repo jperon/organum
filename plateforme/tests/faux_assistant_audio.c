@@ -18,12 +18,15 @@
  * Usage :
  *   faux_assistant_audio [--socket CHEMIN] [--attendre-client MS]
  *                        [--tomber-apres MS] [--duree MS]
- *                        [--refuser-version] [--sans-peripherique]
+ *                        [--refuser-version] [--version N]
+ *                        [--version-anneau N] [--sans-peripherique]
  *                        [--taux-blocage POURCENT] [--ne-pas-drainer]
  *                        [--rampe] [--device-tilde-apres MS] [--aide]
  *
  * --tomber-apres ferme la connexion puis sort après MS (panne simulée).
  * --duree borne la vie du programme. --refuser-version répond le statut 1.
+ * --version N annonce N dans la poignée (simule un assistant ancien) ;
+ * --version-anneau N écrit N dans l'en-tête de l'anneau.
  * --sans-peripherique répond ACK statut 2 (aucune sortie). --taux-blocage
  * draine à POURCENT du taux (provoque des overruns chez le producteur) ;
  * --ne-pas-drainer ne consomme rien. --rampe vérifie que les échantillons
@@ -302,6 +305,12 @@ struct session {
 
 struct options {
     int refuser_version;
+    /* Version annoncée dans la poignée (0 = version du codec). Un test peut
+       ainsi simuler un assistant resté à une version antérieure. */
+    int version_annoncee;
+    /* Version écrite dans l'en-tête de l'anneau (0 = version du codec) :
+       éprouve le refus d'un anneau hétérogène côté organum. */
+    int version_anneau;
     int sans_peripherique;
     int ne_pas_drainer;
     int rampe;
@@ -496,6 +505,8 @@ static int repondre_config(struct session *s, const struct options *o,
             journal("erreur : anneau non initialisable");
             return -1;
         }
+        if (o->version_anneau != 0)
+            g_anneau->version = (uint32_t)o->version_anneau;
         s->configure = 1;
         s->taux = cfg.taux;
         s->periode = cfg.periode;
@@ -644,6 +655,8 @@ static int servir_client(int fd, const struct options *o, long tomber_apres,
     journal("poignée acceptée (client version %u, max_frame %u)", vue.version,
             vue.max_frame);
     poignee_audio_encoder(reponse, TRAMES_AUDIO_STATUT_OK, MAX_FRAME);
+    if (o->version_annoncee != 0)
+        reponse[4] = (uint8_t)o->version_annoncee;
     if (ecrire_tout(fd, reponse, sizeof reponse) < 0)
         return 0;
 
@@ -750,6 +763,7 @@ static void aide(const char *programme)
 {
     printf("Usage : %s [--socket CHEMIN] [--attendre-client MS]\n"
            "       [--tomber-apres MS] [--duree MS] [--refuser-version]\n"
+           "       [--version N] [--version-anneau N]\n"
            "       [--sans-peripherique] [--taux-blocage POURCENT]\n"
            "       [--ne-pas-drainer] [--rampe]\n"
            "       [--device-tilde-apres MS]\n"
@@ -790,6 +804,15 @@ int main(int argc, char **argv)
                 goto invalide;
         } else if (strcmp(argv[i], "--refuser-version") == 0) {
             o.refuser_version = 1;
+        } else if (strcmp(argv[i], "--version") == 0 && i + 1 < argc) {
+            o.version_annoncee = (int)strtol(argv[++i], NULL, 10);
+            if (o.version_annoncee <= 0 || o.version_annoncee > 255)
+                goto invalide;
+        } else if (strcmp(argv[i], "--version-anneau") == 0 &&
+                   i + 1 < argc) {
+            o.version_anneau = (int)strtol(argv[++i], NULL, 10);
+            if (o.version_anneau <= 0 || o.version_anneau > 255)
+                goto invalide;
         } else if (strcmp(argv[i], "--sans-peripherique") == 0) {
             o.sans_peripherique = 1;
         } else if (strcmp(argv[i], "--ne-pas-drainer") == 0) {

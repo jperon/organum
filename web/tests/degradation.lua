@@ -66,6 +66,25 @@ aide.egal(texte,
   "Aucune sortie audio : vérifiez Réglages Système → Son → Sortie.",
   "etat_audio : message de sortie absente")
 
+-- Un couple hétérogène organum/assistant ne doit jamais être présenté comme
+-- un simple assistant absent : le message explicite (deux versions) reste
+-- visible dans l'interface.
+code, texte = d.etat_audio {supportee = true, socket = true,
+  disponible = false, assistant = 0,
+  erreur = "périphérique par défaut : version du protocole audio incompatible entre organum (2) et l'assistant (1) : recompilez les deux"}
+aide.egal(code, "incompatible", "etat_audio : version de protocole incompatible")
+aide.egal(texte,
+  "périphérique par défaut : version du protocole audio incompatible entre organum (2) et l'assistant (1) : recompilez les deux",
+  "etat_audio : message de version incompatible conservé")
+
+code, texte = d.etat_audio {supportee = true, socket = true,
+  disponible = false, assistant = 0,
+  erreur = "périphérique par défaut : version de l'anneau audio incompatible entre organum (2) et l'assistant (1) : recompilez les deux"}
+aide.egal(code, "incompatible", "etat_audio : version d'anneau incompatible")
+aide.egal(texte,
+  "périphérique par défaut : version de l'anneau audio incompatible entre organum (2) et l'assistant (1) : recompilez les deux",
+  "etat_audio : message d'anneau incompatible conservé")
+
 code, texte = d.etat_audio {supportee = true, socket = true,
   disponible = true, assistant = 1, erreur = ""}
 aide.egal(code, nil, "etat_audio : audio opérationnel, aucun message")

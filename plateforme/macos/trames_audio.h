@@ -10,12 +10,16 @@
 
 #include "trames.h"
 
-// Poignée de main : « OAUD », version 1.
+// Poignée de main : « OAUD ». La version couvre le protocole de contrôle ET
+// la disposition de l'anneau partagé (anneau_audio.h) : les deux binaires
+// doivent être recompilés ensemble. Version 2 : drapeau demarre dans l'en-tête
+// de l'anneau. Toute modification de la disposition impose d'incrémenter les
+// deux constantes et de REFUSER un couple hétérogène.
 #define TRAMES_AUDIO_MAGIC_0 'O'
 #define TRAMES_AUDIO_MAGIC_1 'A'
 #define TRAMES_AUDIO_MAGIC_2 'U'
 #define TRAMES_AUDIO_MAGIC_3 'D'
-#define TRAMES_AUDIO_VERSION 1
+#define TRAMES_AUDIO_VERSION 2
 #define TRAMES_AUDIO_POIGNEE_TAILLE TRAMES_POIGNEE_TAILLE
 
 #define TRAMES_AUDIO_TYPE_CONFIG 0x40

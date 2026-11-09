@@ -63,9 +63,9 @@ static void tester_poignee(void) {
                    "poignée : mauvais magic refusé");
 
   poignee_audio_encoder(poignee, TRAMES_AUDIO_STATUT_OK, 256);
-  poignee[4] = 2;
+  poignee[4] = (uint8_t)(TRAMES_AUDIO_VERSION + 1u);
   verifier_poignee(poignee, -2, TRAMES_AUDIO_STATUT_OK, 256,
-                   "poignée : version 2 refusée");
+                   "poignée : version suivante refusée");
   poignee[4] = 0;
   verifier_poignee(poignee, -2, TRAMES_AUDIO_STATUT_OK, 256,
                    "poignée : version 0 refusée");

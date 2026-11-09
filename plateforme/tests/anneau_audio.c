@@ -83,6 +83,9 @@ static void tester_bornes(void) {
   uint32_t destination[256 * 2];
   remplir_source(source, 0, 256);
 
+  verifier(e->magie == ANNEAU_AUDIO_MAGIE &&
+               e->version == ANNEAU_AUDIO_VERSION,
+           "en-tête : magie et version courantes");
   verifier(anneau_place_libre(e) == 256, "bornes : anneau vide");
   verifier(anneau_disponible(e) == 0, "bornes : rien à lire");
   verifier(atomic_load(&e->demarre) == 0, "démarrage : drapeau à zéro");
