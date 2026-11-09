@@ -155,7 +155,12 @@ jobs:
   # l'artefact produit par le job Linux, puis vérifie l'exécution native.
   validation-arm64:
     needs: construire
-    runs-on: macos-14
+    # macos-latest est bien un Apple Silicon sur ce dépôt (image
+    # macos-26-arm64) ; l'étiquette « macos-14 » est refusée par GitHub
+    # (« The configuration 'macos-14-arm64-us-default' is not supported »),
+    # le job est alors annulé sans même démarrer. Les assertions ci-dessous
+    # vérifient de toute façon que la machine est arm64 sans Rosetta.
+    runs-on: macos-latest
     timeout-minutes: 20
     steps:
       - name: Télécharger organum.com
