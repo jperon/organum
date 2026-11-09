@@ -215,12 +215,40 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   sans reconstruction) télécharge l'artefact `organum-com`, vérifie
   `uname -m` = arm64 et `sysctl -n sysctl.proc_translated` = 0, lance le
   binaire avec un faux `cc` qui échoue en tête de `PATH` (et vérifie qu'il
-  n'a pas été appelé), contrôle la signature du helper extrait et obtient
-  `/api/orgue` sans carte son. **Un `organum.com` construit localement sur
-  Linux n'a pas de helper ni de loader arm64** (build.sh avertit), sauf si
-  l'on place ces fichiers dans `plateforme/macos/build/` avant
-  `web/scripts/build.sh`. Le workflow n'a pas été exécuté : seule sa
-  syntaxe YAML et la construction locale ont été validées.
+  n'a pas été appelé), contrôle la signature du helper extrait, affiche
+  `organum-helper --liste`, puis exécute **deux scénarios distincts** :
+  d'abord le mode dégradé forcé (`ORGANUM_SANS_BACKEND=1`, aucun backend),
+  ensuite `plateforme/macos/tests/valider_audio_midi.sh` **sans forçage**,
+  qui valide le chemin réel audio et MIDI.
+  **Ce que le runner macOS offre réellement** (mesuré le 2026-11-09, run
+  `42651520609`, ne pas le supposer) : `system_profiler SPAudioDataType`
+  annonce « Apple Virtual Sound Device », sortie par défaut, 2 canaux,
+  48 kHz ; la sonde `plateforme/macos/tests/sonde_audio.c` compte
+  « rappels de rendu en 1 s : 99 » (code 0) ; `sonde_midi.c` rend
+  « MIDI fonctionnel (source virtuelle, note reçue) » (code 0) ; le session
+  graphique existe (`who` → console, `launchctl print gui/501` → 0) et
+  `organum-helper --liste` voit la sortie audio. Aucun matériel physique
+  n'est branché, mais les deux chemins CoreAudio et CoreMIDI sont donc
+  exerçables en CI.
+  Contrôles du script : `audio_disponible`, `audio_assistant = 1`,
+  `latence_ms > 0`, `audio_demarre`, cadence sur 3 s à ≤ 2 % de `taux`,
+  `xruns`/`xruns_recents` à 0, puis MIDI de bout en bout (source virtuelle
+  CoreMIDI `emetteur_midi.c` → assistant → socket → orgue :
+  `canaux_actifs` non vide, puis revenu à vide au relâchement). Le scénario
+  dégradé volontaire reste nécessaire : il prouve le repli, alors que le
+  second prouve le chemin nominal. **Limites** : pas de carte son physique
+  (donc pas de mesure de latence audible ni de périphérique USB), pas de
+  test du LaunchAgent ni de quarantaine (l'assistant est lancé par organum),
+  et les suites Linux (`tests-longs.sh`, `tests-e2e.sh`) ne tournent pas
+  sur macOS. Le helper extrait s'exécute bien dans sa tranche arm64 sur ce
+  runner (contrairement à l'ancienne VM x86_64) ; la tranche x86_64 du
+  helper reste seulement vérifiée par `lipo`/`codesign`.
+  Les sondes `plateforme/macos/tests/sonde_audio.c` et `sonde_midi.c`
+  restent utilisables à la main (`clang -framework …`) pour reposer la
+  question si une image de runner change.
+  **Un `organum.com` construit localement sur Linux n'a pas de helper ni de
+  loader arm64** (build.sh avertit), sauf si l'on place ces fichiers dans
+  `plateforme/macos/build/` avant `web/scripts/build.sh`.
   **Étiquette de runner macOS** : ne pas coder `macos-14`. GitHub a retiré
   cette image (`actions/runner-images` : `macos-14*` s'arrête au 31/08/2026)
   et répond « The configuration 'macos-14-arm64-us-default' is not

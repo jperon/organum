@@ -211,6 +211,8 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
+      - uses: actions/checkout@v4
+
       - name: Télécharger organum.com
         uses: actions/download-artifact@v4
         with:
@@ -236,6 +238,11 @@ jobs:
           chmod +x "$RUNNER_TEMP/organum-helper"
           lipo -info "$RUNNER_TEMP/organum-helper"
           codesign --verify --strict "$RUNNER_TEMP/organum-helper"
+          # Trace permanente des capacités de la machine : la sonde du
+          # 2026-11-09 (run 42651520609) a montré un périphérique de sortie
+          # « Apple Virtual Sound Device » (2 canaux, 48 kHz, 99 rappels de
+          # rendu/s). --liste rend ce constat visible à chaque exécution.
+          "$RUNNER_TEMP/organum-helper" --liste || true
 
           # Faux cc : s'il est appelé, la compilation à la volée est prouvée
           # et le marqueur fait échouer le contrôle. Le vrai loader arm64
@@ -250,7 +257,11 @@ jobs:
           chmod +x "$RUNNER_TEMP/faux-cc/cc"
           export PATH="$RUNNER_TEMP/faux-cc:$PATH"
 
-          # Aucune carte son sur un runner : le mode dégradé est attendu.
+          # Scénario dégradé VOLONTAIRE (ORGANUM_SANS_BACKEND=1) : il vérifie
+          # que l'APE arm64 démarre sans backend, indépendamment du matériel.
+          # Le runner fournit en réalité une sortie audio virtuelle ; le
+          # chemin audio réel est validé par l'étape suivante, sans ce
+          # forçage : les deux scénarios sont distincts et nécessaires.
           artefact/organum.com -p 18099 > "$RUNNER_TEMP/organum.log" 2>&1 &
           pid=$!
           # SIGKILL et non SIGTERM : redbean, sur SIGTERM, envoie SIGTERM à tout
@@ -281,3 +292,12 @@ jobs:
           test ! -e "$RUNNER_TEMP/faux-cc/appele"
           grep -q '"audio_disponible"' "$RUNNER_TEMP/orgue.json"
           echo "validation arm64 native : OK"
+
+      # Le runner macos-latest dispose d'une sortie CoreAudio virtuelle et
+      # CoreMIDI accepte une source virtuelle (preuve : run 42651520609,
+      # sonde-audio « rappels de rendu en 1 s : 99 », sonde-midi « MIDI
+      # fonctionnel »). On exerce donc les deux chemins réels : assistant
+      # embarqué, anneau partagé, rappel CoreAudio, puis note CoreMIDI reçue
+      # par l'orgue. Aucune carte son ni clavier physique n'est requis.
+      - name: Audio réel (CoreAudio) et MIDI de bout en bout (CoreMIDI)
+        run: sh plateforme/macos/tests/valider_audio_midi.sh artefact/organum.com
