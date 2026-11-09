@@ -57,5 +57,29 @@ aide.verifie(extraction and extraction:find("/tmp/x.log", 1, true) ~= nil,
 local lancement = a.message("lancement_impossible", "/tmp/y.log")
 aide.verifie(lancement and lancement:find("/tmp/y.log", 1, true) ~= nil,
   "message : lancement impossible nomme le journal", lancement)
+local inutilisable = a.message("inutilisable", "/tmp/z.log")
+aide.verifie(inutilisable and inutilisable:find("/tmp/z.log", 1, true) ~= nil
+  and inutilisable:find("signature", 1, true) ~= nil,
+  "message : binaire inutilisable explique la signature", inutilisable)
+
+-- Intégrité de l'extrait : contenu identique à l'archive, puis --aide doit
+-- rendre 0. Un extrait tronqué est une extraction impossible ; un extrait
+-- complet mais refusé par le système (signature absente sous arm64) est
+-- inutilisable.
+local source = "\127ELF faux binaire"
+aide.egal(a.verifier_extrait(source, source, 0), nil,
+  "extrait : contenu identique et --aide à 0, aucun état")
+aide.egal(a.verifier_extrait(source, source, 1), "inutilisable",
+  "extrait : --aide en échec, inutilisable")
+aide.egal(a.verifier_extrait(source, source, nil), "inutilisable",
+  "extrait : --aide sans code, inutilisable")
+aide.egal(a.verifier_extrait(source, source:sub(1, 8), 0),
+  "extraction_impossible", "extrait : tronqué, extraction impossible")
+aide.egal(a.verifier_extrait(source, "", 0), "extraction_impossible",
+  "extrait : vide, extraction impossible")
+aide.egal(a.verifier_extrait(source, nil, 0), "extraction_impossible",
+  "extrait : absent, extraction impossible")
+aide.egal(a.verifier_extrait(source, source .. "x", 0),
+  "extraction_impossible", "extrait : plus long que l'archive, refusé")
 
 aide.termine()

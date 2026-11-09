@@ -487,7 +487,7 @@ lancer_assistant = ->
 surveiller_assistant = ->
   return unless HELPER and HELPER.chemin
   return if HELPER.etat == "non_embarque" or HELPER.etat == "extraction_impossible" or
-    HELPER.etat == "lancement_impossible"
+    HELPER.etat == "inutilisable" or HELPER.etat == "lancement_impossible"
   now = maintenant! or 0
   if assistant_vivant!
     HELPER.etat = "actif"
@@ -551,6 +551,22 @@ installer_assistant = ->
   unless unix.access HELPER.chemin, unix.X_OK
     HELPER.etat = "lancement_impossible"
     Log kLogWarn, "organum : assistant natif macOS non exécutable après installation : #{HELPER.chemin}"
+    return
+  -- Vérification d'intégrité puis d'exécution : un extrait tronqué, non signé
+  -- (refusé par macOS arm64), d'une autre architecture ou frappé de
+  -- quarantaine doit donner un état clair, jamais un échec obscur plus tard.
+  extrait = Slurp HELPER.chemin
+  code_aide = nil
+  sortie_aide = nil
+  if extrait and #extrait == #source and extrait == source
+    sortie_aide, code_aide = run HELPER.chemin, {"--aide"}, nil, 5
+  etat_verif = assistant.verifier_extrait source, extrait, code_aide
+  if etat_verif
+    HELPER.etat = etat_verif
+    if etat_verif == "extraction_impossible"
+      Log kLogWarn, "organum : assistant natif macOS extrait incomplet (taille #{extrait and #extrait or 0} au lieu de #{#source}) : #{HELPER.chemin}"
+    else
+      Log kLogWarn, "organum : assistant natif macOS inutilisable (--aide, code #{code_aide}) : #{HELPER.chemin}#{sortie_aide and sortie_aide != "" and " : #{sortie_aide}" or ""}"
     return
   if assistant_vivant!
     HELPER.etat = "actif"

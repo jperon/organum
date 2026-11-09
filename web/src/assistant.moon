@@ -45,10 +45,27 @@ besoin = (plateforme, sans_backend, midi_actif, midi_socket) ->
 --   nil                     : pas concerné (Linux, ou aucun axe socket) ;
 --   "actif"                 : lancé par organum, ou instance déjà vivante ;
 --   "non_embarque"          : archive construite sans organum-helper ;
---   "extraction_impossible" : écriture de l'extrait refusée ;
+--   "extraction_impossible" : écriture de l'extrait refusée, ou contenu
+--                             extrait différent de l'archive (tronqué) ;
+--   "inutilisable"          : l'extrait refuse de démarrer (--aide en échec :
+--                             signature absente sous arm64, architecture
+--                             inconnue, quarantaine, binaire corrompu) ;
 --   "lancement_impossible"  : extrait présent mais exécution impossible.
 -- Tout autre état (processus mort en attente de relance) se tait : le
 -- heartbeat s'en occupe, sans alarmer l'utilisateur.
+
+-- Intégrité de l'extrait, puis test d'exécution réel. Le contenu doit être
+-- identique à l'archive (une écriture partielle est ainsi démasquée) ;
+-- `--aide` doit rendre 0. C'est le seul contrôle qui couvre aussi une
+-- signature absente (macOS arm64 refuse alors l'exécution) et un attribut de
+-- quarantaine, sans dépendre d'un outil externe (codesign, xattr).
+-- `source` et `extrait` sont des chaînes ; `code_aide` le code de sortie de
+-- l'extrait lancé avec --aide (nil si le lancement n'a pas rendu de code).
+verifier_extrait = (source, extrait, code_aide) ->
+  return "extraction_impossible" unless type(extrait) == "string" and #extrait > 0
+  return "extraction_impossible" unless #extrait == #source and extrait == source
+  return "inutilisable" unless code_aide == 0
+  nil
 
 -- Message d'état de l'assistant : nil quand tout va bien (ou hors macOS).
 -- Le journal n'est nommé que pour les échecs qui demandent une enquête ; le
@@ -58,10 +75,12 @@ message = (etat, log) ->
     "Assistant natif macOS absent de cette archive : reconstruisez organum avec plateforme/macos/build/organum-helper présent (voir plateforme/macos/LANCEMENT.md)."
   elseif etat == "extraction_impossible"
     "Assistant natif macOS impossible à installer : l'orgue fonctionne sans audio ni MIDI natifs. Voir le journal « #{log or "?"} » et plateforme/macos/LANCEMENT.md."
+  elseif etat == "inutilisable"
+    "Assistant natif macOS inutilisable : le système refuse de l'exécuter (signature absente, architecture non prise en charge ou fichier corrompu). L'orgue fonctionne sans audio ni MIDI natifs. Voir le journal « #{log or "?"} » et plateforme/macos/LANCEMENT.md."
   elseif etat == "lancement_impossible"
     "Assistant natif macOS impossible à lancer : l'orgue fonctionne sans audio ni MIDI natifs. Voir le journal « #{log or "?"} » et plateforme/macos/LANCEMENT.md."
   else
     nil
 
 { :ARCHIVE, :base_dossier, :dossier, :chemin, :chemin_log, :chemin_socket,
-  :besoin, :message }
+  :besoin, :verifier_extrait, :message }
