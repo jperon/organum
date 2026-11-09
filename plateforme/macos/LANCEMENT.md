@@ -27,9 +27,12 @@ sh plateforme/macos/construire_assistant.sh
 ```
 
 Le script refuse de continuer, avec la marche à suivre et le code 2, si
-`xcode-select -p` échoue. Il produit un binaire unique :
+`xcode-select -p` échoue. Il produit deux fichiers :
 
-- `plateforme/macos/build/organum-helper`
+- `plateforme/macos/build/organum-helper`, l'assistant natif ;
+- `plateforme/macos/build/ape-m1-arm64`, le loader APE arm64 précompilé et
+  signé qui permet à `organum.com` de démarrer nativement sur Apple Silicon
+  sans appel à `cc` (voir « Architecture » plus bas).
 
 Par défaut, le binaire est **universel** (Intel et Apple Silicon) quand le
 SDK fournit les deux architectures ; sinon le script se replie sur
@@ -59,34 +62,63 @@ embarqué dans `organum.com` ; c'est ce que fait la recette macOS.
 
 ### Construction automatisée (GitHub Actions)
 
-Le workflow `.github/workflows/rolling.yml` construit le helper sur un runner
-`macos-latest` (clang + codesign + lipo seulement, ni cosmocc ni moteur), le
-signe, vérifie `lipo -info` et `codesign --verify`, puis le publie comme
-artefact **`organum-helper`**. Le job Linux le récupère dans
-`plateforme/macos/build/` avant `scripts/construire.sh` : l'`organum.com` de
-la CI contient donc le helper universel signé. Si l'artefact est absent, le
+Le workflow `.github/workflows/rolling.yml` construit le helper et le loader
+sur un runner `macos-latest` (clang + codesign + lipo seulement, ni cosmocc
+ni moteur), les signe, vérifie `lipo -info` et `codesign --verify`, puis les
+publie comme artefacts **`organum-helper`** et **`ape-m1-arm64`**. Le job
+Linux les récupère dans `plateforme/macos/build/` avant
+`scripts/construire.sh` : l'`organum.com` de la CI contient donc le helper
+universel signé et le loader arm64 précompilé. Si un artefact est absent, le
 job Linux continue avec un avertissement et produit un `organum.com` sans
-helper.
+helper, ou avec le repli `ape-m1.c` (compilation exigée au premier lancement
+sur Apple Silicon).
+
+Un job séparé **`validation-arm64`** tourne sur un runner Apple Silicon
+(`macos-14`). Il ne recompile ni cosmocc ni le projet : il télécharge
+l'artefact `organum-com` produit par le job Linux, vérifie `uname -m` =
+`arm64` et `sysctl -n sysctl.proc_translated` = 0 (donc pas Rosetta), puis
+lance le binaire avec un **faux `cc` qui échoue** en tête de `PATH` et
+contrôle qu'il n'a pas été appelé. Il vérifie aussi `codesign --verify
+--strict` sur le helper extrait de l'APE, et obtient une réponse de
+`/api/orgue` sans carte son (mode dégradé attendu sur un runner).
 
 **Conséquence pour une construction locale sous Linux** : un `organum.com`
 construit ainsi n'a **pas** de helper (sauf si l'on copie soi-même
-`plateforme/macos/build/organum-helper` avant `web/scripts/build.sh`).
-L'archive reste utilisable sous Linux ; sous macOS, elle affiche l'état
-`non_embarque` et fonctionne sans audio ni MIDI natifs tant qu'on ne
-reconstruit pas avec le helper.
+`plateforme/macos/build/organum-helper` avant `web/scripts/build.sh`), et
+n'a pas de loader arm64 préconstruit (sauf si l'on copie
+`plateforme/macos/build/ape-m1-arm64`). L'APE universel est quand même
+produit si l'outillage aarch64 est présent ; sans loader préconstruit, il
+embarque `ape-m1.c` et demandera Xcode CLT au premier lancement sur Apple
+Silicon. L'archive reste utilisable sous Linux ; sous macOS, elle affiche
+l'état `non_embarque` pour l'assistant et fonctionne sans audio ni MIDI
+natifs tant qu'on ne reconstruit pas avec le helper.
 
-### Architecture : helper universel, organum.com x86-64
+### Architecture : organum.com universel x86-64 + arm64
 
-Le helper est universel, mais `organum.com` lui-même reste un **APE x86-64**.
-Sur Apple Silicon, il tourne donc via **Rosetta 2** (installé à la demande par
-macOS). C'est suffisant pour le fonctionnement actuel, mais ce n'est pas un
-binaire natif arm64.
+`scripts/construire.sh` produit par défaut un **APE universel** : moteur et
+exécutable x86-64, moteur et exécutable aarch64, puis fusion avec
+`apelink`. Sur Apple Silicon, `organum.com` s'exécute donc **nativement**,
+sans Rosetta 2. Le zip de l'interface web est partagé par les deux
+architectures.
 
-Pour un APE natif arm64, il faudrait reconstruire la chaîne cosmocc en
-aarch64, puis lier avec `apelink -M ape/ape-m1.c` ; cela impose `cc`/Xcode au
-premier lancement (l'APE se déplie et se lie sur la machine cible) et fait
-perdre le support Intel dans le même fichier exécutable. Cette étape n'est
-**pas** implémentée : la note documente la piste, pas une recette validée.
+Le loader arm64 précompilé `plateforme/macos/build/ape-m1-arm64` est produit
+par `plateforme/macos/construire_assistant.sh` (ou directement par
+`plateforme/macos/construire_loader.sh`) : compilation de
+`plateforme/macos/ape-m1.c` avec `clang -arch arm64 -O2 -w
+-mmacosx-version-min=11.0`, puis signature ad-hoc et vérifications
+`codesign`/`lipo`. `-mmacosx-version-min=11.0` est indispensable : sans lui,
+le loader prend le SDK de compilation comme cible et exige macOS 15.
+`apelink` ne vérifie pas la signature ; c'est ce script qui la produit.
+Le source embarqué est la copie fidèle de `cosmopolitan/ape/ape-m1.c`
+(licence ISC, © Justine Tunney), figée pour que le job macOS de la CI n'ait
+pas besoin de construire cosmocc.
+
+Sans ce loader, la fusion utilise `apelink -M ape/ape-m1.c` et l'APE compile
+son loader sur la machine cible : il exige alors Xcode CLT au premier
+lancement. C'est un repli annoncé explicitement, pas le mode normal de la
+CI. `ORGANUM_UNIVERSEL=0 scripts/construire.sh` force l'ancien comportement
+(APE x86-64 seulement) ; si l'outillage aarch64 manque ou échoue, la
+construction se replie d'elle-même sur cet APE x86-64 sans échouer.
 
 ### Après extraction : intégrité et signature
 

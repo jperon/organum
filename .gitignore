@@ -2,6 +2,7 @@
 /externe/
 # Produits de construction
 o/
+/moteur/o-aarch64/
 .aarch64/
 *.o
 *.a

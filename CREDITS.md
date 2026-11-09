@@ -11,7 +11,7 @@ organum © 2026 jperon, sous licence AGPL-3.0 (voir `LICENSE.txt`).
 | JUCE 8.0.7 (juce_core, juce_events, juce_data_structures, juce_audio_basics, juce_audio_formats) | téléchargé dans `externe/` | Raw Material Software | AGPLv3 (ou commerciale) |
 | libMTSClient | `moteur/mts/` | © 2021 ODDSound Ltd | permissive (type 0BSD) |
 | Nuklear (et ses moteurs de rendu rawfb, stb_truetype, stb_rect_pack) | `ui/externe/` | © 2017 Micha Mettke et contributeurs ; stb © Sean Barrett | MIT ou domaine public (au choix) |
-| cosmopolitan, redbean | téléchargé dans `externe/` | © Justine Tunney | ISC |
+| cosmopolitan, redbean, loader APE arm64 (`plateforme/macos/ape-m1.c`) | téléchargé dans `externe/` ; copie du loader dans `plateforme/macos/` | © Justine Tunney | ISC |
 
 ## Police
 

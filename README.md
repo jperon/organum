@@ -449,11 +449,36 @@ Le résultat est `web/build/organum.com`. Le script :
 1. place les dépendances dans `externe/` (`scripts/dependances.sh`) :
    cosmopolitan à un commit fixe, corrigé par `cosmo/cosmopolitan.patch`,
    la chaîne cosmocc construite depuis cet arbre (**longue** la première
-   fois), et JUCE ;
+   fois), et JUCE ; le dossier aarch64 de cosmocc est complété depuis
+   l'arbre cosmopolitan s'il manque ;
 2. construit les programmes d'aide de `cosmo_dlopen` (glibc et musl) ;
 3. compile le moteur (`moteur/`) en `libaeolus.a` ;
 4. lie l'exécutable dans l'arbre cosmopolitan (`tool/organum` → `cosmo/`) ;
 5. compile l'interface MoonScript et l'ajoute au zip de l'exécutable.
+
+Quand l'outillage aarch64 est disponible, le script construit aussi le
+moteur (`libaeolus-aarch64.a`) et l'exécutable aarch64, puis fusionne les
+deux avec `apelink` : `web/build/organum.com` est alors un **APE universel**
+x86-64 + arm64, avec le zip d'interface partagé. Sur Apple Silicon il
+s'exécute nativement, sans Rosetta. Si `plateforme/macos/build/ape-m1-arm64`
+existe (loader arm64 précompilé et signé, produit par
+`plateforme/macos/construire_assistant.sh`), il est embarqué : aucun `cc`
+n'est appelé au premier lancement. Sinon `ape/ape-m1.c` est embarqué et
+le binaire exigera Xcode CLT au premier lancement sur Apple Silicon (le
+script l'annonce clairement).
+
+Si l'outillage aarch64 manque ou échoue, la construction **ne s'arrête
+pas** : elle produit l'APE x86-64 comme avant, avec un avertissement. Pour
+retrouver volontairement ce comportement :
+
+```bash
+ORGANUM_UNIVERSEL=0 scripts/construire.sh
+```
+
+Une construction locale sous Linux ne peut pas produire le helper macOS
+(CoreMIDI/CoreAudio) ; elle n'embarque pas non plus `ape-m1-arm64` si le
+fichier n'a pas été récupéré ou construit sur un Mac. L'APE universel reste
+néanmoins produit, avec le repli `ape-m1.c` décrit ci-dessus.
 
 Les tests de la couche plate-forme (dont le diagnostic libasound) se lancent
 séparément, après une construction :

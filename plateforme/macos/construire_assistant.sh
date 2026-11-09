@@ -11,6 +11,9 @@
 # message explicite. Il est toujours signé ad-hoc : macOS arm64 refuse
 # d'exécuter un Mach-O non signé, même sans compte de développeur.
 #
+# Le script produit aussi, via construire_loader.sh, le loader APE arm64
+# précompilé et signé plateforme/macos/build/ape-m1-arm64.
+#
 # Usage :
 #   sh plateforme/macos/construire_assistant.sh              # universel
 #   ARCHIVES=0 sh plateforme/macos/construire_assistant.sh   # hôte seul
@@ -142,3 +145,13 @@ else
 fi
 
 echo "organum-helper : assistant compilé : $sortie"
+
+# Loader APE arm64 précompilé et signé, utilisé par scripts/construire.sh
+# pour produire l'APE universel sans compilation à la volée sur Apple
+# Silicon. Il est produit ici pour que le job macOS de la CI publie les deux
+# artefacts en une seule étape.
+echo "== loader APE arm64"
+if ! sh "$ici/construire_loader.sh"; then
+  echo "organum : avertissement : loader arm64 non produit ;" >&2
+  echo "organum : l'APE universel se repliera sur ape-m1.c (Xcode CLT requis)." >&2
+fi

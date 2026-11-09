@@ -205,23 +205,38 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   réel sur un Mac Apple Silicon avec clavier physique reste à confirmer.
 - **CI et binaire universel** : le job `assistant-macos` de
   `.github/workflows/rolling.yml` (runner `macos-latest` hébergé) ne fait que
-  compiler et signer le helper (ni cosmocc ni moteur) et le publie comme
-  artefact `organum-helper` ; le job Linux le télécharge dans
-  `plateforme/macos/build/` avant `scripts/construire.sh`, donc l'`organum.com`
-  de la CI embarque le helper. Si l'artefact manque (job macOS en échec), le
-  job Linux continue avec un avertissement et produit un `organum.com` sans
-  helper. **Un `organum.com` construit localement sur Linux n'a pas de
-  helper** (build.sh avertit), sauf si l'on place soi-même
-  `plateforme/macos/build/organum-helper` avant `web/scripts/build.sh`.
-  Le workflow n'a pas été exécuté lors de son ajout : seule sa syntaxe YAML
-  a été validée.
-- **architectures macOS** : le helper est universel, mais `organum.com`
-  lui-même reste un APE **x86-64** ; sur Apple Silicon il tourne donc via
-  **Rosetta 2**. Un APE natif arm64 demanderait de reconstruire cosmocc en
-  aarch64 puis d'utiliser `apelink -M ape/ape-m1.c`, avec `cc`/Xcode requis
-  au premier lancement et la perte du support Intel dans le même fichier.
-  C'est une note d'architecture, pas une implémentation (voir
-  `plateforme/macos/LANCEMENT.md`).
+  compiler et signer le helper et le loader arm64 (ni cosmocc ni moteur), et
+  les publie comme artefacts `organum-helper` et `ape-m1-arm64` ; le job
+  Linux les télécharge dans `plateforme/macos/build/` avant
+  `scripts/construire.sh`, donc l'`organum.com` de la CI embarque le helper
+  et le loader. Si un artefact manque (job macOS en échec), le job Linux
+  continue avec un avertissement : sans helper, ou avec le repli
+  `ape-m1.c`. Le job `validation-arm64` (runner Apple Silicon `macos-14`,
+  sans reconstruction) télécharge l'artefact `organum-com`, vérifie
+  `uname -m` = arm64 et `sysctl -n sysctl.proc_translated` = 0, lance le
+  binaire avec un faux `cc` qui échoue en tête de `PATH` (et vérifie qu'il
+  n'a pas été appelé), contrôle la signature du helper extrait et obtient
+  `/api/orgue` sans carte son. **Un `organum.com` construit localement sur
+  Linux n'a pas de helper ni de loader arm64** (build.sh avertit), sauf si
+  l'on place ces fichiers dans `plateforme/macos/build/` avant
+  `web/scripts/build.sh`. Le workflow n'a pas été exécuté : seule sa
+  syntaxe YAML et la construction locale ont été validées.
+- **architectures macOS** : `scripts/construire.sh` produit désormais par
+  défaut un APE **universel x86-64 + arm64** : moteur x86-64 et aarch64
+  (`moteur/Makefile` avec `ARCH=aarch64`, objets `o-aarch64/`, archive
+  `libaeolus-aarch64.a`), exécutables x86-64 et aarch64, puis fusion
+  `apelink -l ape-x86_64.elf -l ape-aarch64.elf` avec, si présent,
+  `plateforme/macos/build/ape-m1-arm64` (loader Mach-O arm64 précompilé et
+  signé, sinon `-M ape/ape-m1.c` avec Xcode CLT requis au premier
+  lancement). `web/scripts/build.sh` n'est appelé qu'une fois sur l'APE
+  fusionné : le zip d'interface est partagé. `ORGANUM_UNIVERSEL=0` force
+  l'ancien APE x86-64 ; tout échec aarch64 se replie dessus sans faire
+  échouer la construction. `scripts/dependances.sh` complète
+  `externe/cosmocc/aarch64-linux-cosmo/lib` depuis
+  `externe/cosmopolitan/o/aarch64/` s'il manque (idempotent). Le loader est
+  produit par `plateforme/macos/construire_loader.sh`, appelé par
+  `construire_assistant.sh`, à partir de la copie fidèle
+  `plateforme/macos/ape-m1.c` (ISC, `-mmacosx-version-min=11.0`).
 - Horloge sous XNU (piège `CLOCK_MONOTONIC`) : sous XNU x86-64, cosmocc
   reconstitue `CLOCK_MONOTONIC` depuis le TSC avec un diviseur supposant
   3 GHz (`libc/intrin/clock_gettime-mono.c:80`) ; sur une VM à 0,88 GHz, il

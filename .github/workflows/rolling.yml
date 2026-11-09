@@ -29,7 +29,7 @@ jobs:
       - name: Construire et signer le helper universel
         run: sh plateforme/macos/construire_assistant.sh
 
-      - name: Vérifier architectures et signature
+      - name: Vérifier architectures et signature du helper
         run: |
           test -x plateforme/macos/build/organum-helper
           lipo -info plateforme/macos/build/organum-helper
@@ -41,6 +41,21 @@ jobs:
         with:
           name: organum-helper
           path: plateforme/macos/build/organum-helper
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Vérifier le loader APE arm64
+        run: |
+          test -x plateforme/macos/build/ape-m1-arm64
+          lipo -info plateforme/macos/build/ape-m1-arm64
+          codesign --verify --strict plateforme/macos/build/ape-m1-arm64
+          codesign -dv plateforme/macos/build/ape-m1-arm64
+
+      - name: Publier le loader APE arm64
+        uses: actions/upload-artifact@v4
+        with:
+          name: ape-m1-arm64
+          path: plateforme/macos/build/ape-m1-arm64
           if-no-files-found: error
           retention-days: 7
 
@@ -63,12 +78,24 @@ jobs:
           name: organum-helper
           path: plateforme/macos/build
 
-      - name: Vérifier l'assistant macOS
+      - name: Récupérer le loader APE arm64
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: ape-m1-arm64
+          path: plateforme/macos/build
+
+      - name: Vérifier l'assistant macOS et le loader arm64
         run: |
           if [ -s plateforme/macos/build/organum-helper ]; then
             echo "assistant macOS récupéré ($(wc -c < plateforme/macos/build/organum-helper) octets)"
           else
             echo "::warning::assistant macOS absent ; organum.com sera construit sans helper natif macOS"
+          fi
+          if [ -s plateforme/macos/build/ape-m1-arm64 ]; then
+            echo "loader arm64 récupéré ($(wc -c < plateforme/macos/build/ape-m1-arm64) octets)"
+          else
+            echo "::warning::loader arm64 absent ; l'APE universel embarquera ape-m1.c et exigera Xcode CLT au premier lancement"
           fi
 
       - name: Outils
@@ -101,6 +128,14 @@ jobs:
             unzip -l web/build/organum.com | grep -q '\.organum/organum-helper'
           fi
 
+      - name: Publier organum.com pour la validation arm64
+        uses: actions/upload-artifact@v4
+        with:
+          name: organum-com
+          path: web/build/organum.com
+          if-no-files-found: error
+          retention-days: 3
+
       # Sur une branche (workflow_dispatch, par exemple la validation macOS),
       # la construction et les tests servent à vérifier, sans remplacer la
       # publication « rolling » qui doit rester adossée à master.
@@ -114,3 +149,76 @@ jobs:
             --target "$GITHUB_SHA" --prerelease \
             --title "organum (rolling)" \
             --notes "Construction automatique du commit $GITHUB_SHA. Linux x86-64 : chmod +x organum.com && ./organum.com puis http://localhost:8080"
+
+  # Validation de l'APE universel sur un vrai Apple Silicon. Le runner macOS
+  # est facturé plus cher : ce job ne recompile rien, il ne télécharge que
+  # l'artefact produit par le job Linux, puis vérifie l'exécution native.
+  validation-arm64:
+    needs: construire
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - name: Télécharger organum.com
+        uses: actions/download-artifact@v4
+        with:
+          name: organum-com
+          path: artefact
+
+      - name: Vérifier l'exécution arm64 native sans compilation à la volée
+        env:
+          ORGANUM_SANS_BACKEND: "1"
+          ORGANUM_FENETRE: "non"
+        run: |
+          set -eu
+          # Le runner doit être Apple Silicon, pas un Intel sous Rosetta.
+          test "$(uname -m)" = arm64
+          test "$(sysctl -n sysctl.proc_translated)" = 0
+
+          chmod +x artefact/organum.com
+          test -s artefact/organum.com
+
+          # Le helper embarqué doit être signé, même extrait de l'APE.
+          unzip -p artefact/organum.com .organum/organum-helper > "$RUNNER_TEMP/organum-helper"
+          test -s "$RUNNER_TEMP/organum-helper"
+          chmod +x "$RUNNER_TEMP/organum-helper"
+          lipo -info "$RUNNER_TEMP/organum-helper"
+          codesign --verify --strict "$RUNNER_TEMP/organum-helper"
+
+          # Faux cc : s'il est appelé, la compilation à la volée est prouvée
+          # et le marqueur fait échouer le contrôle. Le vrai loader arm64
+          # précompilé doit suffire.
+          mkdir -p "$RUNNER_TEMP/faux-cc"
+          cat > "$RUNNER_TEMP/faux-cc/cc" <<'CC'
+          #!/bin/sh
+          : > "$(dirname "$0")/appele"
+          echo "faux cc : compilation à la volée détectée" >&2
+          exit 1
+          CC
+          chmod +x "$RUNNER_TEMP/faux-cc/cc"
+          export PATH="$RUNNER_TEMP/faux-cc:$PATH"
+
+          # Aucune carte son sur un runner : le mode dégradé est attendu.
+          artefact/organum.com -p 18099 > "$RUNNER_TEMP/organum.log" 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true' EXIT INT TERM
+
+          ok=0
+          i=0
+          while [ "$i" -lt 60 ]; do
+            if curl -fsS --max-time 2 http://127.0.0.1:18099/api/orgue > "$RUNNER_TEMP/orgue.json"; then
+              ok=1
+              break
+            fi
+            i=$((i + 1))
+            sleep 1
+          done
+          if [ "$ok" != 1 ]; then
+            echo "---- journal organum ----"
+            cat "$RUNNER_TEMP/organum.log" || true
+            echo "--------------------------"
+            exit 1
+          fi
+
+          test ! -e "$RUNNER_TEMP/faux-cc/appele"
+          grep -q '"audio_disponible"' "$RUNNER_TEMP/orgue.json"
+          echo "validation arm64 native : OK"
