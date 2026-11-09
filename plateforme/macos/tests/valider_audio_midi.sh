@@ -192,19 +192,42 @@ else
   echec "a : axe audio jamais disponible (ni périphérique, ni assistant ?)"
   sed 's/^/        /' "$JOURNAL" >&2
 fi
+# audio_disponible (copie partagée du fil audio) et audio_assistant (calculé
+# dans le fil de requête à partir du g_audio hérité au fork) ne sont pas
+# publiés dans le même instantané : un fil né juste avant la connexion répond
+# encore 0. Même leçon que le contrôle d de test-audio-socket.sh : attendre
+# la conjonction, jamais une lecture unique.
+if attendre '"audio_assistant":1' 40; then
+  ok "a : assistant audio connecté (audio_assistant = 1)"
+else
+  echec "a : audio_assistant jamais passé à 1 (après 10 s)"
+fi
+# La production démarre au premier rappel CoreAudio, et latence_ms vient du
+# DEVICE envoyé par l'assistant : les attendre avant de conclure.
+if attendre '"audio_demarre":true' 40; then
+  ok "a : production audio démarrée"
+else
+  echec "a : audio_demarre jamais vrai (après 10 s)"
+fi
 verifie '"audio_socket":true' "$ORQUE" "a : backend socket (assistant) choisi"
-verifie '"audio_assistant":1' "$ORQUE" "a : assistant audio connecté (audio_assistant = 1)"
-verifie '"audio_demarre":true' "$ORQUE" "a : production audio démarrée"
 verifie '"midi_disponible":true' "$ORQUE" "a : axe MIDI disponible"
 
+i=0
+latence=0
+while [ "$i" -lt 40 ]; do
+  latence=$(champ "$ORQUE" latence_ms)
+  [ -n "$latence" ] || latence=0
+  awk -v l="$latence" 'BEGIN { exit !(l + 0 > 0) }' && break
+  i=$((i + 1))
+  sleep 0.25
+  curl -fsS --max-time 2 "$URL/api/orgue" > "$ORQUE" 2>/dev/null || true
+done
 taux=$(champ "$ORQUE" taux)
-latence=$(champ "$ORQUE" latence_ms)
 [ -n "$taux" ] || taux=0
-[ -n "$latence" ] || latence=0
 if awk -v l="$latence" 'BEGIN { exit !(l + 0 > 0) }'; then
   ok "a : latence audio publiée (${latence} ms, taux ${taux} Hz)"
 else
-  echec "a : latence_ms absente ou nulle (${latence})"
+  echec "a : latence_ms absente ou nulle après $((i * 250)) ms (${latence})"
 fi
 if [ "$taux" -gt 0 ] 2>/dev/null; then
   ok "a : taux effectif ${taux} Hz"
