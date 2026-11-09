@@ -26,17 +26,24 @@ MIDI_SOCKET = midi_actif.socket_actif PLATEFORME, midi_socket
 
 -- Écoute : redbean, sans adresse explicite (-l), ne programme que 0.0.0.0
 -- (tool/net/redbean.c, Listen) ; on ajoute « :: » pour répondre aussi en
--- IPv6. Un -l explicite reste seul appliqué : la ligne de commande du
--- processus est lue dans /proc (absente sous Windows, on garde le défaut).
+-- IPv6. Un -l explicite reste seul appliqué : les arguments réels du
+-- processus sont lus par organum.arguments() (__argc/__argv de la libc),
+-- qui fonctionne aussi sous macOS où /proc n'existe pas ; à défaut, on
+-- retombe sur /proc/self/cmdline (Windows n'en a pas).
 -- redbean pose IPV6_V6ONLY, les deux écoutes coexistent sur le même port.
 a_un_l = ->
-  -- /proc n'existe ni sous Windows ni sous macOS : on garde le défaut.
-  fd = unix.open "/proc/self/cmdline", unix.O_RDONLY
-  return false unless type(fd) == "number" and fd >= 0
-  contenu = unix.read fd, 65536
-  unix.close fd
-  return false unless type(contenu) == "string"
-  for morceau in contenu\gmatch "[^%z]+"
+  args = {}
+  if type(organum.arguments) == "function"
+    args = organum.arguments!
+  else
+    fd = unix.open "/proc/self/cmdline", unix.O_RDONLY
+    return false unless type(fd) == "number" and fd >= 0
+    contenu = unix.read fd, 65536
+    unix.close fd
+    return false unless type(contenu) == "string"
+    for morceau in contenu\gmatch "[^%z]+"
+      table.insert args, morceau
+  for morceau in *args
     return true if morceau == "-l" or (morceau\sub(1, 2) == "-l" and #morceau > 2)
   false
 

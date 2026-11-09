@@ -14,6 +14,7 @@
 // traités à la suite dans la boucle audio, sans verrou.
 #include "libc/calls/syscall-sysv.internal.h"
 #include "libc/dce.h"
+#include "libc/runtime/runtime.h"
 #include "third_party/lua/lauxlib.h"
 #include "third_party/lua/lua.h"
 
@@ -2075,6 +2076,19 @@ static int l_plateforme(lua_State *L) {
   return 1;
 }
 
+// organum.arguments() → table des arguments réels du processus. Sous XNU
+// /proc n'existe pas : init.moon s'en sert pour reconnaître un -l explicite
+// sans dépendre de la ligne de commande exposée par le système.
+static int l_arguments(lua_State *L) {
+  int n = __argc > 0 ? __argc : 0;
+  lua_createtable(L, n, 0);
+  for (int i = 0; i < n; ++i) {
+    lua_pushstring(L, __argv && __argv[i] ? __argv[i] : "");
+    lua_rawseti(L, -2, i + 1);
+  }
+  return 1;
+}
+
 static const luaL_Reg kFonctions[] = {
     {"demarrer", l_demarrer}, {"etat", l_etat},     {"attendre", l_attendre},
     {"jeu", l_jeu},           {"gain", l_gain},     {"volume", l_volume},
@@ -2088,6 +2102,7 @@ static const luaL_Reg kFonctions[] = {
     {"midi_assistant", l_midi_assistant},
     {"midi_chemin", l_midi_chemin},
     {"plateforme", l_plateforme},
+    {"arguments", l_arguments},
     {"temperament", l_temperament},
     {"oublier_audio", l_oublier_audio},
     {"reconfigurer_audio", l_reconfigurer_audio},
