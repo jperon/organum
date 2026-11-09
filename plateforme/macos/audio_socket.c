@@ -66,6 +66,14 @@ struct audio {
     uint32_t generation;
     uint16_t max_frame;
 
+    /* Décodeur alimenté au fil des octets par sonder_socket() : l'état d'une
+       trame incomplète survit d'un appel à l'autre, sans allocation. */
+    struct trame_decodeur decodeur;
+    uint8_t nom_peripherique[TRAMES_AUDIO_NOM_MAX + 1];
+    uint32_t taux_natif;
+    uint32_t latence_us;
+    int peripherique_vu;
+
     int taux;
     int periode;
     int canaux;
@@ -538,6 +546,7 @@ audio_t *audio_socket_audio_ouvrir(const char *peripherique, int taux,
     a->max_frame = vue.max_frame;
     if (a->max_frame > AUDIO_SOCKET_MAX_FRAME)
         a->max_frame = AUDIO_SOCKET_MAX_FRAME;
+    trame_decodeur_init(&a->decodeur, a->max_frame);
 
     int fd_anneau = open(a->chemin_pcm, O_RDWR);
     if (fd_anneau < 0) {
@@ -615,30 +624,78 @@ audio_t *audio_socket_audio_ouvrir(const char *peripherique, int taux,
     return a;
 }
 
-/* Sonde la socket sans bloquer : un EOF ou une erreur signifie que
-   l'assistant a disparu. Les octets inattendus sont ignorés (BYE excepté). */
-static void sonder_socket(struct audio *a)
+static void marquer_perdu(struct audio *a)
 {
-    uint8_t tampon[64];
+    atomic_store_explicit(&a->perdu, 1, memory_order_release);
+    atomic_store_explicit(&a->connecte, 0, memory_order_release);
+}
+
+static void memoriser_peripherique(struct audio *a,
+                                   const struct audio_device_vue *dev)
+{
+    size_t n = dev->nom_len;
+    if (n > TRAMES_AUDIO_NOM_MAX)
+        n = TRAMES_AUDIO_NOM_MAX;
+    if (n != 0)
+        memcpy(a->nom_peripherique, dev->nom, n);
+    a->nom_peripherique[n] = '\0';
+    a->taux_natif = dev->taux_natif;
+    a->latence_us = dev->latence_us;
+    a->peripherique_vu = 1;
+}
+
+/* Sonde la socket sans bloquer et décode réellement les trames reçues. Un EOF
+   ou une erreur signifie que l'assistant a disparu ; une trame plus longue
+   que max_frame est une erreur de décodage, donc aussi une déconnexion. Ne
+   jamais chercher un octet brut ici : un corps de trame peut contenir 0x7E
+   (BYE), par exemple dans le nom d'un périphérique. */
+static void sonder_socket(struct audio *a, int64_t echeance)
+{
+    uint8_t tampon[AUDIO_SOCKET_TAMPON];
     const ssize_t r = recv(a->fd, tampon, sizeof tampon, MSG_DONTWAIT);
     if (r == 0) {
-        atomic_store_explicit(&a->perdu, 1, memory_order_release);
-        atomic_store_explicit(&a->connecte, 0, memory_order_release);
+        marquer_perdu(a);
         return;
     }
     if (r < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
             return;
-        atomic_store_explicit(&a->perdu, 1, memory_order_release);
-        atomic_store_explicit(&a->connecte, 0, memory_order_release);
+        marquer_perdu(a);
         return;
     }
-    for (ssize_t i = 0; i < r; ++i)
-        if (tampon[i] == TRAMES_AUDIO_TYPE_BYE) {
-            atomic_store_explicit(&a->perdu, 1, memory_order_release);
-            atomic_store_explicit(&a->connecte, 0, memory_order_release);
+
+    size_t pos = 0;
+    while (pos < (size_t)r) {
+        struct trame_vue vue;
+        size_t consommes = 0;
+        const int code = trame_decoder(&a->decodeur, tampon + pos,
+                                       (size_t)r - pos, &vue, &consommes);
+        if (code < 0) {
+            marquer_perdu(a);
             return;
         }
+        if (code == 0)
+            return; /* trame incomplète : l'état reste dans a->decodeur */
+        pos += consommes;
+        switch (vue.type) {
+        case TRAMES_AUDIO_TYPE_BYE:
+        case TRAMES_AUDIO_TYPE_STOP:
+            marquer_perdu(a);
+            return;
+        case TRAMES_AUDIO_TYPE_PING:
+            /* Un PONG perdu ne coupe pas la session. */
+            envoyer_trame(a->fd, TRAMES_AUDIO_TYPE_PONG, NULL, 0, echeance);
+            break;
+        case TRAMES_AUDIO_TYPE_DEVICE: {
+            struct audio_device_vue dev;
+            if (audio_device_decoder(vue.corps, vue.longueur, &dev) == 0)
+                memoriser_peripherique(a, &dev);
+            break;
+        }
+        default:
+            break; /* type inconnu : ignoré */
+        }
+    }
 }
 
 int audio_socket_audio_ecrire(audio_t *a, const float *entrelace, int trames)
@@ -690,7 +747,7 @@ int audio_socket_audio_ecrire(audio_t *a, const float *entrelace, int trames)
             errno = ENOSPC;
             return -1;
         }
-        sonder_socket(a);
+        sonder_socket(a, echeance);
         if (atomic_load_explicit(&a->perdu, memory_order_acquire) != 0) {
             errno = ENODEV;
             return -1;

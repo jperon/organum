@@ -20,7 +20,7 @@
  *                        [--tomber-apres MS] [--duree MS]
  *                        [--refuser-version] [--sans-peripherique]
  *                        [--taux-blocage POURCENT] [--ne-pas-drainer]
- *                        [--rampe] [--aide]
+ *                        [--rampe] [--device-tilde-apres MS] [--aide]
  *
  * --tomber-apres ferme la connexion puis sort après MS (panne simulée).
  * --duree borne la vie du programme. --refuser-version répond le statut 1.
@@ -29,6 +29,9 @@
  * --ne-pas-drainer ne consomme rien. --rampe vérifie que les échantillons
  * reçus sont exactement la rampe émise par un producteur synthétique (utile
  * hors intégration organum, dont le signal est de l'audio réel).
+ * --device-tilde-apres envoie MS après la poignée un AUDIO_DEVICE dont le
+ * nom contient le caractère « ~ » (0x7E, valeur du type BYE) : le client ne
+ * doit pas confondre un octet de corps avec une trame de déconnexion.
  *
  * Compilation hôte, sans cosmocc :
  *   cc -O2 -Wall -Wextra -std=c11 -o faux_assistant_audio \
@@ -286,6 +289,8 @@ struct session {
        comme une famine. */
     long long base_ns;
     long long dernier_journal_ns;
+    long long device_tilde_echeance;
+    int device_tilde_envoye;
     uint64_t consomme;      /* trames du rythme simulé (silence compris) */
     uint64_t pings, pongs;  /* PING envoyés, PONG reçus */
     int rampe_attendue;
@@ -300,6 +305,7 @@ struct options {
     int ne_pas_drainer;
     int rampe;
     int taux_blocage; /* 0 = 100 % */
+    long device_tilde_apres; /* < 0 : jamais */
 };
 
 static struct anneau_entete *g_anneau;
@@ -559,6 +565,9 @@ static int servir_client(int fd, const struct options *o, long tomber_apres,
     trame_decodeur_init(&s.decodeur, MAX_FRAME);
     s.controle = 1469598103934665603ULL;
     s.rampe_attendue = o->rampe;
+    if (o->device_tilde_apres >= 0)
+        s.device_tilde_echeance =
+            maintenant_ns() + (long long)o->device_tilde_apres * 1000000LL;
 
     uint8_t poignee[TRAMES_AUDIO_POIGNEE_TAILLE];
     const int lu = lire_exact(fd, poignee, sizeof poignee, DELAI_POIGNEE);
@@ -601,6 +610,23 @@ static int servir_client(int fd, const struct options *o, long tomber_apres,
         if (chute != 0 && maintenant >= chute) {
             journal("chute demandée après %ld ms", tomber_apres);
             break;
+        }
+        if (s.device_tilde_echeance != 0 && !s.device_tilde_envoye &&
+            maintenant >= s.device_tilde_echeance) {
+            static const char nom_tilde[] = "Sortie ~ fictive (0x7E)";
+            struct audio_device_vue dev;
+            dev.nom_len = (uint8_t)(sizeof nom_tilde - 1);
+            dev.nom = (const uint8_t *)nom_tilde;
+            dev.taux_natif = s.taux;
+            dev.latence_us = 10000;
+            uint8_t corps[TRAMES_AUDIO_DEVICE_TAILLE_MIN + 128];
+            const int nd = audio_device_encoder(corps, sizeof corps, &dev);
+            if (nd < 0 ||
+                envoyer_trame(fd, TRAMES_AUDIO_TYPE_DEVICE, corps,
+                              (uint16_t)nd) < 0)
+                break;
+            s.device_tilde_envoye = 1;
+            journal("DEVICE tilde envoyé : %s", nom_tilde);
         }
         if (traiter_trames(&s, o) < 0)
             break;
@@ -674,7 +700,8 @@ static void aide(const char *programme)
     printf("Usage : %s [--socket CHEMIN] [--attendre-client MS]\n"
            "       [--tomber-apres MS] [--duree MS] [--refuser-version]\n"
            "       [--sans-peripherique] [--taux-blocage POURCENT]\n"
-           "       [--ne-pas-drainer] [--rampe]\n",
+           "       [--ne-pas-drainer] [--rampe]\n"
+           "       [--device-tilde-apres MS]\n",
            programme);
 }
 
@@ -687,6 +714,7 @@ int main(int argc, char **argv)
     struct options o;
     memset(&o, 0, sizeof o);
     o.taux_blocage = 0;
+    o.device_tilde_apres = -1;
 
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--socket") == 0 && i + 1 < argc) {
@@ -715,6 +743,11 @@ int main(int argc, char **argv)
             o.ne_pas_drainer = 1;
         } else if (strcmp(argv[i], "--rampe") == 0) {
             o.rampe = 1;
+        } else if (strcmp(argv[i], "--device-tilde-apres") == 0 &&
+                   i + 1 < argc) {
+            o.device_tilde_apres = strtol(argv[++i], NULL, 10);
+            if (o.device_tilde_apres < 0)
+                goto invalide;
         } else if (strcmp(argv[i], "--aide") == 0 ||
                    strcmp(argv[i], "-h") == 0) {
             aide(argv[0]);

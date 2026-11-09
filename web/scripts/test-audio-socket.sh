@@ -24,7 +24,9 @@
 #      PONG par PING (leçon du MIDI) ;
 #   h. non-régression : ORGANUM_SANS_BACKEND=1 + ORGANUM_AUDIO_SOCKET coupe
 #      l'axe audio (aucune connexion) ;
-#   i. fichier `.pcm` périmé (assistant tué par SIGKILL) : reprise propre.
+#   i. fichier `.pcm` périmé (assistant tué par SIGKILL) : reprise propre ;
+#   j. AUDIO_DEVICE dont le nom contient « ~ » (0x7E, type BYE) pendant une
+#      attente d'écriture : aucune fausse déconnexion, le son continue.
 #
 # Sortie : une ligne OK/ÉCHEC par contrôle ; code non nul au premier échec.
 set -u
@@ -461,6 +463,67 @@ if lancer_assistant --attendre-client 15000; then
       ok "g : un seul PONG par PING ($nb_pong/$nb_ping)"
     else
       echec "g : PONG incohérents ($nb_pong pour $nb_ping PING)"
+    fi
+
+    # --- j. Un 0x7E dans un corps n'est pas un BYE ------------------------
+    # Pendant l'attente d'écriture, la socket est sondée. Un octet brut 0x7E
+    # dans un AUDIO_DEVICE (nom de périphérique) ne doit pas être pris pour
+    # une déconnexion : on remplit l'anneau (drain à 10 %) pour forcer la
+    # sonde, puis l'assistant envoie un DEVICE dont le nom contient « ~ ».
+    arreter_assistant
+    attendre_absence 100 || true
+    rm -f "$SOCKET" "$SOCKET.pcm"
+    if lancer_assistant --taux-blocage 10 --device-tilde-apres 600 \
+        --attendre-client 15000; then
+      if corps=$(attendre_motif "$URL/api/orgue" '"audio_disponible":true' 200); then
+        ok "j : assistant vu avant l'envoi du DEVICE à 0x7E"
+      else
+        echec "j : axe audio jamais disponible ; vu : $corps"
+      fi
+      i=0
+      while [ "$i" -lt 200 ]; do
+        grep -qF 'DEVICE tilde envoyé' "$JOURNAL_ASSISTANT" 2>/dev/null && break
+        sleep 0.05
+        i=$((i + 1))
+      done
+      if grep -qF 'DEVICE tilde envoyé' "$JOURNAL_ASSISTANT" 2>/dev/null; then
+        ok "j : AUDIO_DEVICE contenant 0x7E envoyé pendant le jeu"
+      else
+        echec "j : DEVICE à 0x7E jamais envoyé"
+      fi
+      avant=$(extrait trames_jouees)
+      vu_deconnecte=0
+      i=0
+      while [ "$i" -lt 30 ]; do
+        corps=$(curl -s --max-time 2 "$URL/api/orgue")
+        if printf '%s' "$corps" | grep -qF '"audio_disponible":false' ||
+           printf '%s' "$corps" | grep -qF '"audio_assistant":0'; then
+          vu_deconnecte=1
+        fi
+        sleep 0.05
+        i=$((i + 1))
+      done
+      apres=$(extrait trames_jouees)
+      corps=$(curl -s --max-time 2 "$URL/api/orgue")
+      verifie "j : le serveur ne se croit pas déconnecté" \
+        '"audio_disponible":true' "$corps"
+      verifie "j : assistant toujours connecté" '"audio_assistant":1' "$corps"
+      if [ "$vu_deconnecte" -eq 0 ]; then
+        ok "j : aucune déconnexion observée pendant 1,5 s après le DEVICE"
+      else
+        echec "j : déconnexion observée après le DEVICE à 0x7E"
+      fi
+      if [ "${apres:-0}" -gt "${avant:-0}" ]; then
+        ok "j : le son continue après le DEVICE ($avant → $apres trames)"
+      else
+        echec "j : le son s'est arrêté après le DEVICE ($avant → $apres)"
+      fi
+      nb=$(grep -cF 'client connecté' "$JOURNAL_ASSISTANT" 2>/dev/null || true)
+      if [ "$nb" -eq 1 ]; then
+        ok "j : aucune reconnexion (1 seul client connecté)"
+      else
+        echec "j : fausse déconnexion et reconnexion ($nb clients connectés)"
+      fi
     fi
 
     # --- f. Assistant sans sortie (ACK statut 2) --------------------------
