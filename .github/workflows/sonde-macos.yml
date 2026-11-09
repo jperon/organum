@@ -1,0 +1,53 @@
+# Sonde TEMPORAIRE (branche macos) : que fournit réellement un runner
+# macos-latest en audio et en MIDI ? Sert à décider ce que le job
+# validation-arm64 peut vérifier honnêtement. Ne s'exécute que quand ce
+# fichier ou les sondes changent.
+name: sonde-macos
+on:
+  push:
+    branches: [macos]
+    paths:
+      - '.github/workflows/sonde-macos.yml'
+      - 'plateforme/macos/tests/sonde_*.c'
+  workflow_dispatch:
+
+jobs:
+  sonde:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Contexte du runner
+        run: |
+          set -x
+          uname -a
+          uname -m
+          sysctl -n sysctl.proc_translated || true
+          sw_vers || true
+          id
+          who || true
+          stat /dev/console || true
+          launchctl print "gui/$(id -u)" > /dev/null 2>&1; echo "launchctl gui: $?" || true
+          system_profiler SPAudioDataType 2>&1 | head -60 || true
+          echo "ORGANUM_AUDIO_SOCKET=${ORGANUM_AUDIO_SOCKET:-}" || true
+
+      - name: Sonde CoreAudio
+        run: |
+          set -x
+          clang -O2 -Wall -Wextra -framework CoreAudio -framework AudioToolbox \
+            plateforme/macos/tests/sonde_audio.c -o "$RUNNER_TEMP/sonde_audio"
+          "$RUNNER_TEMP/sonde_audio"; echo "sonde_audio code=$?" || true
+
+      - name: Sonde CoreMIDI
+        run: |
+          set -x
+          clang -O2 -Wall -Wextra -framework CoreMIDI \
+            plateforme/macos/tests/sonde_midi.c -o "$RUNNER_TEMP/sonde_midi"
+          "$RUNNER_TEMP/sonde_midi"; echo "sonde_midi code=$?" || true
+
+      - name: Construire le helper et l'interroger
+        run: |
+          set -x
+          sh plateforme/macos/construire_assistant.sh
+          plateforme/macos/build/organum-helper --liste; echo "liste code=$?" || true
