@@ -1,0 +1,42 @@
+# TEMPORAIRE (branche macos) : valider le script audio/MIDI macOS contre
+# l'artefact organum-com d'un run réussi, sans attendre la réparation du job
+# construire (les tests Linux y échouent sur le séquenceur MIDI absent).
+# À supprimer une fois la validation faite ; le contrôle permanent vit dans
+# .github/workflows/rolling.yml, job validation-arm64.
+name: validation-macos-temporaire
+on:
+  push:
+    branches: [macos]
+    paths:
+      - '.github/workflows/validation-macos-temporaire.yml'
+      - 'plateforme/macos/tests/**'
+  workflow_dispatch:
+
+jobs:
+  valider:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Récupérer l'artefact organum-com du run 42645691736
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh run download 42645691736 --name organum-com --dir artefact
+          chmod +x artefact/organum.com
+          test -s artefact/organum.com
+
+      - name: Vérifier architecture et signature
+        run: |
+          set -eu
+          test "$(uname -m)" = arm64
+          test "$(sysctl -n sysctl.proc_translated)" = 0
+          unzip -p artefact/organum.com .organum/organum-helper > "$RUNNER_TEMP/organum-helper"
+          chmod +x "$RUNNER_TEMP/organum-helper"
+          codesign --verify --strict "$RUNNER_TEMP/organum-helper"
+          "$RUNNER_TEMP/organum-helper" --liste || true
+
+      - name: Audio réel et MIDI de bout en bout
+        run: sh plateforme/macos/tests/valider_audio_midi.sh artefact/organum.com
