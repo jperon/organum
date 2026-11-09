@@ -43,6 +43,9 @@
   void p##_audio_oublier_fils(void);                                          \
   int p##_audio_connecte(audio_t *);                                          \
   uint64_t p##_audio_trames_jouees(audio_t *);                                \
+  uint32_t p##_audio_capacite(audio_t *);                                     \
+  uint32_t p##_audio_latence_us(audio_t *);                                   \
+  int p##_audio_demarre(audio_t *);                                           \
   int p##_audio_chemin_assistant(audio_t *, char *, int);
 
 /* Backend MIDI seul (l'assistant macOS n'apporte pas d'audio). */

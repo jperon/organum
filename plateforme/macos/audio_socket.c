@@ -71,7 +71,7 @@ struct audio {
     struct trame_decodeur decodeur;
     uint8_t nom_peripherique[TRAMES_AUDIO_NOM_MAX + 1];
     uint32_t taux_natif;
-    uint32_t latence_us;
+    _Atomic uint32_t latence_us;
     int peripherique_vu;
 
     int taux;
@@ -81,6 +81,7 @@ struct audio {
     /* Publiés par le processus créateur, lus par l'API dans les fils. */
     atomic_int perdu;
     atomic_int connecte;
+    atomic_int demarre;
     atomic_uint_fast64_t trames_jouees;
 };
 
@@ -387,7 +388,6 @@ audio_t *audio_socket_audio_ouvrir(const char *peripherique, int taux,
                                    int canaux, int periode, int nb_periodes)
 {
     (void)peripherique;  /* v1 : sortie système par défaut de l'assistant. */
-    (void)nb_periodes;   /* la profondeur est celle de l'anneau de l'assistant. */
 
     g_erreur[0] = '\0';
     if (taux <= 0 || canaux <= 0 || periode <= 0) {
@@ -422,7 +422,9 @@ audio_t *audio_socket_audio_ouvrir(const char *peripherique, int taux,
     a->max_frame = AUDIO_SOCKET_MAX_FRAME;
     atomic_init(&a->perdu, 0);
     atomic_init(&a->connecte, 0);
+    atomic_init(&a->demarre, 0);
     atomic_init(&a->trames_jouees, 0);
+    atomic_init(&a->latence_us, 0);
 
     const int64_t echeance = instant_ns() + AUDIO_SOCKET_DELAI_NS;
 
@@ -586,8 +588,25 @@ audio_t *audio_socket_audio_ouvrir(const char *peripherique, int taux,
         return NULL;
     }
 
-    /* En-tête : taux et période demandés, capacité validée par l'assistant.
-       Repartir de compteurs nuls évite d'hériter d'une session précédente. */
+    /* Capacité négociée sur la profondeur demandée (nb_periodes périodes),
+       et non sur la taille du fichier : le fichier .pcm garde la taille
+       maximale, seule la fenêtre de l'anneau rétrécit. Une fenêtre de 16384
+       trames imposait ~341 ms de latence à 48 kHz. */
+    const uint32_t capacite = anneau_capacite_negocier(
+        (uint32_t)periode, (uint32_t)nb_periodes);
+    const uint64_t besoin_negocie =
+        (uint64_t)sizeof(struct anneau_entete) +
+        (uint64_t)capacite * a->anneau->octets_trame;
+    if (st.st_size < 0 || (uint64_t)st.st_size < besoin_negocie) {
+        definir_erreur("anneau audio : fichier trop court pour la capacité");
+        errno = EPROTO;
+        liberer_echec(a);
+        return NULL;
+    }
+    a->capacite = capacite;
+
+    /* En-tête : taux et période demandés, capacité négociée. Repartir de
+       compteurs nuls évite d'hériter d'une session précédente. */
     a->anneau->taux = (uint32_t)taux;
     a->anneau->periode = (uint32_t)periode;
     a->generation = 1;
@@ -612,6 +631,21 @@ audio_t *audio_socket_audio_ouvrir(const char *peripherique, int taux,
         return NULL;
     }
     if (attendre_ack(a, echeance) != 0) {
+        liberer_echec(a);
+        return NULL;
+    }
+    /* L'assistant réécrit l'en-tête avec la capacité de la configuration
+       avant son ACK. Refuser une capacité différente évite de croire à une
+       petite fenêtre alors que l'anneau en garde une grande. */
+    if (valider_anneau(a, &st) != 0) {
+        liberer_echec(a);
+        return NULL;
+    }
+    if (a->capacite != capacite ||
+        a->anneau->taux != (uint32_t)taux ||
+        a->anneau->periode != (uint32_t)periode) {
+        definir_erreur("anneau audio : configuration négociée non appliquée");
+        errno = EPROTO;
         liberer_echec(a);
         return NULL;
     }
@@ -640,7 +674,8 @@ static void memoriser_peripherique(struct audio *a,
         memcpy(a->nom_peripherique, dev->nom, n);
     a->nom_peripherique[n] = '\0';
     a->taux_natif = dev->taux_natif;
-    a->latence_us = dev->latence_us;
+    atomic_store_explicit(&a->latence_us, dev->latence_us,
+                          memory_order_relaxed);
     a->peripherique_vu = 1;
 }
 
@@ -724,8 +759,12 @@ int audio_socket_audio_ecrire(audio_t *a, const float *entrelace, int trames)
 
     const uint64_t periode_ns =
         (uint64_t)a->periode * 1000000000ULL / (uint32_t)a->taux;
-    /* Quelques périodes : au-delà, l'assistant ne consomme plus. */
-    int64_t echeance = instant_ns() + (int64_t)(periode_ns * 4ULL);
+    /* Huit périodes : au-delà, l'assistant ne consomme plus. La fenêtre de
+       l'anneau ne fait que quelques périodes ; ce délai ne fixe pas la
+       latence, seulement le seuil au-delà duquel une écriture est comptée
+       en overrun. Trop court, il transforme une gigue d'ordonnancement en
+       xrun ; trop long, un assistant mort fige le fil audio. */
+    int64_t echeance = instant_ns() + (int64_t)(periode_ns * 8ULL);
     size_t attente_ns = (size_t)(periode_ns / 8ULL);
     if (attente_ns < 200000ULL)
         attente_ns = 200000ULL;
@@ -769,6 +808,7 @@ int audio_socket_audio_ecrire(audio_t *a, const float *entrelace, int trames)
         }
         return -1;
     }
+    atomic_store_explicit(&a->demarre, 1, memory_order_release);
     atomic_store_explicit(
         &a->trames_jouees,
         (uint64_t)atomic_load_explicit(&a->anneau->trames_jouees,
@@ -811,6 +851,32 @@ int audio_socket_audio_connecte(audio_t *a)
         return 0;
     return atomic_load_explicit(&a->connecte, memory_order_acquire) != 0 ? 1
                                                                          : 0;
+}
+
+uint32_t audio_socket_audio_capacite(audio_t *a)
+{
+    return a != NULL ? a->capacite : 0;
+}
+
+uint32_t audio_socket_audio_latence_us(audio_t *a)
+{
+    if (a == NULL || a->capacite == 0 || a->taux <= 0)
+        return 0;
+    const uint64_t anneau_us =
+        (uint64_t)a->capacite * 1000000ULL / (uint32_t)a->taux;
+    const uint64_t totale =
+        anneau_us + atomic_load_explicit(&a->latence_us, memory_order_relaxed);
+    return totale > UINT32_MAX ? UINT32_MAX : (uint32_t)totale;
+}
+
+int audio_socket_audio_demarre(audio_t *a)
+{
+    if (a == NULL)
+        return 0;
+    /* Copie atomique publiée par le producteur : un fils de requête a oublié
+       l'anneau, il ne doit jamais le déréférencer ici. */
+    return atomic_load_explicit(&a->demarre, memory_order_acquire) != 0 ? 1
+                                                                        : 0;
 }
 
 int audio_socket_audio_chemin_assistant(audio_t *a, char *sortie, int capacite)

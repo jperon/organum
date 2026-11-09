@@ -153,9 +153,19 @@ Corps de 24 octets, entiers en petit-boutiste :
 
 `format` vaut `0` : float32 **entrelacé**. `capacite` est un nombre de trames,
 puissance de deux entre 256 et 16384 ; `octets` vaut
-`capacite * canaux * 4` et doit correspondre à la taille des données de
+`capacite * canaux * 4` et doit correspondre à la taille des données utiles de
 l'anneau. `periode` est la période nominale du fil audio d'organum (nombre de
 trames par tampon) ; elle sert de repère, pas de contrainte de rendu.
+
+Organum **négocie** la capacité sur la profondeur demandée à l'ouverture
+(`nb_periodes` périodes, 3 par défaut) : plus petite puissance de deux ≥
+`nb_periodes × periode`, bornée par 256 et 16384. Avec 512 trames de période,
+la fenêtre vaut ainsi 2048 trames (43 ms à 48 kHz), et non 16384 (341 ms).
+Le fichier `.pcm` reste dimensionné à `ANNEAU_AUDIO_CAPACITE_MAX` : c'est sa
+taille, pas la fenêtre utilisée. L'assistant réécrit l'en-tête avec la
+capacité de la configuration avant l'ACK ; un assistant qui garderait une
+autre capacité fait échouer l'ouverture (erreur explicite), pour ne jamais
+annoncer une petite latence avec une grande fenêtre.
 
 Un `AUDIO_CONFIG` peut arriver plusieurs fois sur la même connexion ou sur
 une connexion neuve : c'est ainsi que se fait un **changement de taux à
@@ -251,7 +261,8 @@ petit-boutiste natif (aucune sérialisation : la mémoire est partagée).
 | 88 | `overruns` (trames) | \_Atomic u64 |
 | 96 | `trames_jouees` | \_Atomic u64 |
 | 104 | `arret` (drapeau) | \_Atomic u32 |
-| 108..127 | réserve d'alignement | u32[5] |
+| 108 | `demarre` (drapeau producteur) | \_Atomic u32 |
+| 112..127 | réserve d'alignement | u32[4] |
 
 Les données commencent à l'octet 128 : `capacite` trames de `octets_trame`
 octets. La position réelle d'un compteur vaut `compteur & (capacite - 1)`.
@@ -268,6 +279,16 @@ touchent plus aux données. L'assistant le positionne sur perte de
 périphérique ou de client ; `anneau_reinitialiser` (à chaque
 `AUDIO_CONFIG`) le remet à zéro.
 
+`demarre` est positionné par le producteur à sa première écriture d'une
+génération, et remis à zéro par `anneau_initialiser` et
+`anneau_reinitialiser`. Tant qu'il vaut 0, `anneau_lire` rend 0 **sans**
+compter d'underrun : le consommateur complète le bloc par du silence. Une
+ouverture, ou la recréation du moteur pendant un changement de taux, n'est
+donc plus une famine de centaines de milliers de trames ; organum publie
+`audio_demarre` faux et l'interface annonce explicitement que le son est
+suspendu. Dès la première écriture, les underruns réels sont de nouveau
+comptés.
+
 ## 5. Le rappel de rendu CoreAudio
 
 L'assistant utilise une AudioUnit `kAudioUnitType_Output` /
@@ -282,7 +303,8 @@ borné (512 trames). Le rappel :
 - n'alloue jamais, ne prend aucun verrou, n'appelle ni `printf` ni aucune
   fonction libc bloquante ;
 - lit l'anneau par blocs de 512 trames au plus, et complète le manque par du
-  silence en comptant un underrun ;
+  silence en comptant un underrun (sauf avant `demarre`, où le silence est un
+  démarrage et n'est pas compté) ;
 - respecte `arret` (anneau arrêté ⇒ silence) ;
 - n'écrit jamais au-delà de `mDataByteSize`.
 

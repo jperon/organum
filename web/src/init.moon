@@ -1014,6 +1014,8 @@ qualite_etat = ->
     assistant: e.qualite.audio_assistant
     disponible: e.audio_disponible
     erreur: e.qualite.audio_erreur
+    demarre: e.qualite.audio_demarre
+    application: e.qualite.application_audio == true
   }
   etat_qualite = {
     temperament: e.temperament
@@ -1052,6 +1054,9 @@ qualite_etat = ->
     audio_assistant: e.qualite.audio_assistant or -1
     audio_chemin: e.qualite.audio_chemin or ""
     trames_jouees: e.qualite.trames_jouees or 0
+    capacite: e.qualite.capacite or 0
+    latence_ms: e.qualite.latence_ms or 0
+    audio_demarre: e.qualite.audio_demarre == true
     niveau: q.niveau
     auto: q.auto
     audio_disponible: e.audio_disponible == true

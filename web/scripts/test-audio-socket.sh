@@ -15,9 +15,12 @@
 #      audio est indisponible, audio_erreur est renseignée et le CPU au repos
 #      reste faible ;
 #   c. cadence sur 3 s : |trames_jouees − 3 × taux| ≤ 2 %, underruns = 0,
-#      overruns = 0 (contrôle central) ;
+#      overruns = 0 (contrôle central), capacité négociée ≈ 4 périodes et non
+#      le maximum de 16384 trames ;
 #   d. mort et relance de l'assistant : reprise en ≤ 2 s de temps mural ;
-#   e. reconfiguration à chaud 48 000 → 44 100 : taux publié, underruns = 0 ;
+#   e. reconfiguration à chaud 48 000 → 44 100 : taux publié, son qui reprend
+#      au nouveau taux, underruns = 0 (le faux assistant consomme un bloc
+#      avant l'ACK, comme un rappel CoreAudio déjà actif) ;
 #   f. assistant sans sortie (ACK statut 2) : message français, pas de
 #      plantage, réessai actif ;
 #   g. martèlement de l'API pendant le jeu : aucune trame perdue et un seul
@@ -315,7 +318,8 @@ arreter_serveur
 rm -f "$SOCKET" "$SOCKET.pcm"
 
 # --- c. Cadence sur 3 s ----------------------------------------------------
-if lancer_assistant --attendre-client 15000; then
+if lancer_assistant --consommer-avant-ack 1 --consommer-apres-config 1 \
+    --attendre-client 15000; then
   if lancer_serveur; then
     if corps=$(attendre_motif "$URL/api/orgue" '"audio_disponible":true' 100); then
       ok "c : assistant vu et axe audio disponible"
@@ -326,6 +330,13 @@ if lancer_assistant --attendre-client 15000; then
     verifie "c : backend socket publié" '"audio_socket":true' "$corps"
     verifie "c : aucun message d'état quand l'audio fonctionne" \
       '"audio_etat":""' "$corps"
+    verifie "c : production audio démarrée (drapeau demarre)" \
+      '"audio_demarre":true' "$corps"
+    verifie "c : capacité négociée sur ~4 périodes, pas le maximum" \
+      '"capacite":2048' "$corps"
+    verifie "c : latence audio publiée" '"latence_ms":' "$corps"
+    refuse "c : la fenêtre n'est plus celle du fichier (16384)" \
+      '"capacite":16384' "$corps"
 
     # Le drain démarre à la première trame ; attendre qu'il ait commencé.
     i=0
@@ -404,9 +415,36 @@ if lancer_assistant --attendre-client 15000; then
     corps=$(curl -s --max-time 2 "$URL/api/orgue")
     verifie "e : taux effectif 44 100" '"taux":44100' "$corps"
     verifie "e : aucun xrun après reconfiguration" '"xruns":0' "$corps"
+    verifie "e : production audio reprise après reconfiguration" \
+      '"audio_demarre":true' "$corps"
     ligne=$(derniere_ligne_drain)
     verifie "e : aucun underrun après reconfiguration" 'underruns=0' "$ligne"
     verifie "e : aucun overrun après reconfiguration" 'overruns=0' "$ligne"
+
+    # Le son doit réellement reprendre au nouveau taux, pas seulement le
+    # champ taux changer. On mesure trames_jouees sur 2 s à 44 100 Hz.
+    i=0
+    while [ "$i" -lt 100 ]; do
+      avant=$(extrait trames_jouees)
+      [ "${avant:-0}" -gt 0 ] && break
+      sleep 0.05
+      i=$((i + 1))
+    done
+    debut=$(date +%s%N)
+    avant=$(extrait trames_jouees)
+    sleep 2
+    fin=$(date +%s%N)
+    apres=$(extrait trames_jouees)
+    ecoule_ns=$((fin - debut))
+    attendu=$((ecoule_ns / 1000000 * 44))
+    jouees=$((apres - avant))
+    erreur=$((jouees - attendu))
+    [ "$erreur" -lt 0 ] && erreur=$((-erreur))
+    if [ "$attendu" -gt 0 ] && [ $((erreur * 100)) -le $((attendu * 5)) ]; then
+      ok "e : le son reprend au nouveau taux ($jouees trames pour $attendu attendues, ≤ 5 %)"
+    else
+      echec "e : pas de reprise au nouveau taux ($jouees pour $attendu attendues)"
+    fi
 
     # --- g. Martèlement de l'API pendant le jeu ---------------------------
     # Deux phases : cadence et absence de trame perdue sous 120 requêtes

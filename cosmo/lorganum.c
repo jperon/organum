@@ -1714,7 +1714,8 @@ static void envoyer(lua_State *L, struct commande c) {
 //                            "" = défaut), limiteur (effectif),
 //                            audio_erreur (dernier échec de reconfiguration),
 //                            audio_socket, audio_assistant (1/0/-1),
-//                            audio_chemin, trames_jouees)},
+//                            audio_chemin, trames_jouees, capacite,
+//                            latence_ms, audio_demarre)},
 //                   divisions={{nom, gain, jeux={{nom, actif}, …}}, …}}
 // canaux_actifs est éphémère (activité des 250 dernières ms) et hors de seq.
 static int l_etat(lua_State *L) {
@@ -1752,6 +1753,9 @@ static int l_etat(lua_State *L) {
       audio_chemin_assistant(g_audio, chemin_audio, sizeof(chemin_audio));
   }
   const uint64_t trames_jouees = audio_trames_jouees(g_audio);
+  const uint32_t capacite_audio = audio_capacite(g_audio);
+  const uint32_t latence_us_audio = audio_latence_us(g_audio);
+  const int production_audio = audio_demarre(g_audio);
 
   lua_createtable(L, 0, 7);
   lua_pushinteger(L, seq), lua_setfield(L, -2, "seq");
@@ -1821,6 +1825,12 @@ static int l_etat(lua_State *L) {
   lua_setfield(L, -2, "audio_chemin");
   lua_pushinteger(L, (lua_Integer)trames_jouees);
   lua_setfield(L, -2, "trames_jouees");
+  lua_pushinteger(L, (lua_Integer)capacite_audio);
+  lua_setfield(L, -2, "capacite");
+  lua_pushnumber(L, (lua_Number)latence_us_audio / 1000.0);
+  lua_setfield(L, -2, "latence_ms");
+  lua_pushboolean(L, production_audio);
+  lua_setfield(L, -2, "audio_demarre");
   lua_setfield(L, -2, "qualite");
   lua_createtable(L, copie.nassociations, 0);
   for (int i = 0; i < copie.nassociations; ++i) {

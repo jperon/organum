@@ -49,7 +49,12 @@ struct anneau_entete {
   _Atomic uint64_t overruns;
   _Atomic uint64_t trames_jouees;
   _Atomic uint32_t arret;
-  uint32_t reserve_alignement[5];
+  /* Producteur : 1 dès la première écriture d'une génération, remis à 0 par
+     anneau_initialiser et anneau_reinitialiser. Tant qu'il vaut 0, le
+     consommateur ne compte pas d'underrun : l'absence de données est un
+     démarrage (ou une reconfiguration), pas une famine. */
+  _Atomic uint32_t demarre;
+  uint32_t reserve_alignement[4];
 };
 
 // Données de l'anneau, juste après l'en-tête. Le tampon doit avoir été
@@ -61,6 +66,24 @@ static inline void *anneau_donnees(struct anneau_entete *e) {
 // Masque de position pour une capacité puissance de deux.
 static inline uint32_t anneau_masque(const struct anneau_entete *e) {
   return e->capacite - 1u;
+}
+
+// Capacité à négocier pour une profondeur de nb_periodes périodes : la plus
+// petite puissance de deux qui les contient, bornée par MIN et MAX. Le
+// fichier .pcm garde sa taille maximale ; seule la fenêtre utile change.
+static inline uint32_t anneau_capacite_negocier(uint32_t periode,
+                                                uint32_t nb_periodes) {
+  if (periode == 0 || nb_periodes == 0)
+    return ANNEAU_AUDIO_CAPACITE_MIN;
+  const uint64_t besoin = (uint64_t)periode * (uint64_t)nb_periodes;
+  if (besoin <= ANNEAU_AUDIO_CAPACITE_MIN)
+    return ANNEAU_AUDIO_CAPACITE_MIN;
+  if (besoin >= ANNEAU_AUDIO_CAPACITE_MAX)
+    return ANNEAU_AUDIO_CAPACITE_MAX;
+  uint32_t capacite = ANNEAU_AUDIO_CAPACITE_MIN;
+  while (capacite < besoin)
+    capacite <<= 1;
+  return capacite;
 }
 
 // Initialise un en-tête dans une mémoire déjà allouée. Renvoie 0 en cas de
@@ -93,6 +116,7 @@ static inline int anneau_initialiser(struct anneau_entete *e, uint32_t canaux,
   atomic_init(&e->overruns, 0);
   atomic_init(&e->trames_jouees, 0);
   atomic_init(&e->arret, 0);
+  atomic_init(&e->demarre, 0);
   return 0;
 }
 
@@ -150,6 +174,8 @@ static inline size_t anneau_ecrire(struct anneau_entete *e, const void *source,
   }
 
   atomic_store_explicit(&e->ecrit, ecrit + trames, memory_order_release);
+  /* Après ecrit : un consommateur qui voit demarre à 1 verra les données. */
+  atomic_store_explicit(&e->demarre, 1, memory_order_release);
   return trames;
 }
 
@@ -161,6 +187,10 @@ static inline size_t anneau_lire(struct anneau_entete *e, void *destination,
                                  size_t trames) {
   if (atomic_load_explicit(&e->arret, memory_order_acquire) != 0) return 0;
   if (trames == 0) return 0;
+  /* Génération pas encore démarrée : silence, sans compter d'underrun. Le
+     consommateur complète le bloc par du silence et l'interface publie cet
+     état comme une suspension explicite, pas comme une famine. */
+  if (atomic_load_explicit(&e->demarre, memory_order_acquire) == 0) return 0;
 
   const uint64_t lu = atomic_load_explicit(&e->lu, memory_order_relaxed);
   const uint64_t ecrit =
@@ -200,4 +230,5 @@ static inline void anneau_reinitialiser(struct anneau_entete *e) {
   atomic_store_explicit(&e->overruns, 0, memory_order_relaxed);
   atomic_store_explicit(&e->trames_jouees, 0, memory_order_relaxed);
   atomic_store_explicit(&e->arret, 0, memory_order_relaxed);
+  atomic_store_explicit(&e->demarre, 0, memory_order_relaxed);
 }

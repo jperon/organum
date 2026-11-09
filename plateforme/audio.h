@@ -38,6 +38,14 @@ int audio_connecte(audio_t *audio);
 void audio_oublier_fils(void);
 /* Trames réellement jouées par l'assistant, ou 0 hors backend socket. */
 uint64_t audio_trames_jouees(audio_t *audio);
+/* Capacité négociée de l'anneau, en trames (0 hors backend socket). */
+uint32_t audio_capacite(audio_t *audio);
+/* Latence estimée anneau + périphérique, en microsecondes (0 hors backend
+   socket ou si l'assistant n'a pas encore publié sa latence). */
+uint32_t audio_latence_us(audio_t *audio);
+/* 1 si le producteur a commencé à écrire la génération courante (toujours 1
+   hors backend socket, où la notion n'existe pas). */
+int audio_demarre(audio_t *audio);
 /* Chemin de la socket de l'assistant, copié dans sortie (capacite octets,
    NUL compris). Renvoie 0, ou -1 hors backend socket / si le chemin ne tient
    pas. */

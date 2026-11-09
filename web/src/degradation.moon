@@ -44,6 +44,15 @@ etat_audio = (info) ->
     "desactive", "Audio désactivé sur cette plate-forme."
   elseif erreur\find "aucune sortie audio", 1, true
     "sans_sortie", "Aucune sortie audio : vérifiez Réglages Système → Son → Sortie."
+  elseif disponible and info.demarre == false
+    -- Production pas encore commencée (ouverture, ou recréation du moteur
+    -- pendant un changement de taux) : le silence est explicite, jamais une
+    -- famine comptée comme un xrun.
+    message = if info.application == true
+      "Son suspendu pendant l'application des réglages audio…"
+    else
+      "Son suspendu : la sortie audio se prépare…"
+    "suspendu", message
   elseif disponible
     nil, nil
   elseif assistant == 0

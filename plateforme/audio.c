@@ -61,6 +61,29 @@ uint64_t audio_trames_jouees(audio_t *a)
     return audio_socket_audio_trames_jouees(a);
 }
 
+uint32_t audio_capacite(audio_t *a)
+{
+    if (a == NULL || !audio_socket_actif())
+        return 0;
+    return audio_socket_audio_capacite(a);
+}
+
+uint32_t audio_latence_us(audio_t *a)
+{
+    if (a == NULL || !audio_socket_actif())
+        return 0;
+    return audio_socket_audio_latence_us(a);
+}
+
+int audio_demarre(audio_t *a)
+{
+    if (a == NULL)
+        return 0;
+    if (!audio_socket_actif())
+        return 1;
+    return audio_socket_audio_demarre(a);
+}
+
 int audio_chemin_assistant(audio_t *a, char *sortie, int capacite)
 {
     if (a == NULL || sortie == NULL || capacite <= 0 || !audio_socket_actif())

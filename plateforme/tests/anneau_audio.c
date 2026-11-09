@@ -23,6 +23,8 @@ _Static_assert(offsetof(struct anneau_entete, ecrit) == 64,
 _Static_assert(offsetof(struct anneau_entete, lu) == 72, "lu attendu à 72");
 _Static_assert(offsetof(struct anneau_entete, arret) == 104,
                "arret attendu à 104");
+_Static_assert(offsetof(struct anneau_entete, demarre) == 108,
+               "demarre attendu à 108");
 _Static_assert(sizeof(struct anneau_entete) == 128,
                "en-tête arrondi à 128 octets");
 _Static_assert(ANNEAU_AUDIO_CAPACITE_MAX * 2u * sizeof(float) == 128u * 1024u,
@@ -83,8 +85,15 @@ static void tester_bornes(void) {
 
   verifier(anneau_place_libre(e) == 256, "bornes : anneau vide");
   verifier(anneau_disponible(e) == 0, "bornes : rien à lire");
+  verifier(atomic_load(&e->demarre) == 0, "démarrage : drapeau à zéro");
+  verifier(anneau_lire(e, destination, 1) == 0,
+           "démarrage : lecture vide refusée");
+  verifier(atomic_load(&e->underruns) == 0,
+           "démarrage : pas d'underrun avant la première écriture");
 
   verifier(anneau_ecrire(e, source, 200) == 200, "bornes : écriture de 200");
+  verifier(atomic_load(&e->demarre) == 1,
+           "démarrage : drapeau posé à la première écriture");
   verifier(anneau_place_libre(e) == 56, "bornes : 56 trames libres");
   verifier(anneau_disponible(e) == 200, "bornes : 200 trames disponibles");
 
@@ -116,9 +125,21 @@ static void tester_bornes(void) {
                atomic_load(&e->underruns) == 0 &&
                atomic_load(&e->overruns) == 0 &&
                atomic_load(&e->trames_jouees) == 0 &&
-               atomic_load(&e->arret) == 0,
+               atomic_load(&e->arret) == 0 && atomic_load(&e->demarre) == 0,
            "bornes : réinitialisation des compteurs");
   verifier(anneau_place_libre(e) == 256, "bornes : libre après remise à zéro");
+  verifier(anneau_lire(e, destination, 1) == 0 &&
+               atomic_load(&e->underruns) == 0,
+           "redémarrage : lecture vide sans underrun après remise à zéro");
+
+  verifier(anneau_capacite_negocier(512, 3) == 2048,
+           "capacité négociée : 3 périodes de 512 → 2048 trames");
+  verifier(anneau_capacite_negocier(512, 1) == 512,
+           "capacité négociée : une période garde sa taille");
+  verifier(anneau_capacite_negocier(128, 1) == ANNEAU_AUDIO_CAPACITE_MIN,
+           "capacité négociée : jamais sous le minimum");
+  verifier(anneau_capacite_negocier(512, 64) == ANNEAU_AUDIO_CAPACITE_MAX,
+           "capacité négociée : jamais au-dessus du maximum");
 
   atomic_store(&e->arret, 1);
   verifier(anneau_ecrire(e, source, 1) == 0, "arrêt : écriture refusée");

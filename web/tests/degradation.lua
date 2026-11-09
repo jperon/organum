@@ -71,6 +71,25 @@ code, texte = d.etat_audio {supportee = true, socket = true,
 aide.egal(code, nil, "etat_audio : audio opérationnel, aucun message")
 aide.egal(texte, nil, "etat_audio : texte nil quand l'audio fonctionne")
 
+-- Le producteur n'a pas encore écrit (ouverture, ou recréation du moteur
+-- pendant un changement de taux) : le silence doit être annoncé, pas compté
+-- comme une famine invisible.
+code, texte = d.etat_audio {supportee = true, socket = true,
+  disponible = true, assistant = 1, erreur = "", demarre = false,
+  application = false}
+aide.egal(code, "suspendu", "etat_audio : production pas encore démarrée")
+aide.egal(texte, "Son suspendu : la sortie audio se prépare…",
+  "etat_audio : message de suspension à l'ouverture")
+code, texte = d.etat_audio {supportee = true, socket = true,
+  disponible = true, assistant = 1, erreur = "", demarre = false,
+  application = true}
+aide.egal(code, "suspendu", "etat_audio : production suspendue pendant une reconfiguration")
+aide.egal(texte, "Son suspendu pendant l'application des réglages audio…",
+  "etat_audio : message de suspension pendant l'application")
+code, texte = d.etat_audio {supportee = true, socket = true,
+  disponible = true, assistant = 1, erreur = "", demarre = true}
+aide.egal(code, nil, "etat_audio : production démarrée, aucun message")
+
 code, texte = d.etat_audio {supportee = true, socket = true,
   disponible = false, assistant = -1, erreur = ""}
 aide.egal(code, "indisponible", "etat_audio : état transitoire sans erreur")

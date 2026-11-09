@@ -72,11 +72,12 @@
 #define TRAMES_PAR_LOT 4096u
 
 /* Tolérance de retard du producteur avant de compter un vrai underrun.
- * L'anneau est profond de 16384 trames (0,34 s à 48 kHz) : le producteur y
- * garde toujours de l'avance. En deçà de 32 périodes (0,37 s à 48 kHz, 512
- * trames), un retard n'est pas une famine mais de la gigue d'ordonnancement
- * (un martèlement de 120 requêtes HTTP en produit). Au-delà, l'anneau est
- * réellement vide et anneau_lire alimente underruns. */
+ * Bornée par la capacité réelle de l'anneau (2048 trames, ~43 ms à
+ * 48 kHz) ; l'ancienne valeur de 32 périodes ne convenait qu'à une fenêtre
+ * de 16384 trames. En deçà, un retard n'est pas une famine mais de la gigue
+ * d'ordonnancement. Au-delà, le faux assistant recale son horloge simulée :
+ * ce n'est pas un consommateur temps réel et il ne doit pas inventer
+ * d'underruns quand il manque ses rendez-vous sous charge. */
 #define TOLERANCE_PERIODES 32u
 
 static volatile sig_atomic_t arret;
@@ -306,11 +307,18 @@ struct options {
     int rampe;
     int taux_blocage; /* 0 = 100 % */
     long device_tilde_apres; /* < 0 : jamais */
+    /* Simule un rappel CoreAudio déjà actif avant l'ACK : consomme N blocs
+       de `periode` trames dans l'anneau, donc du silence tant que le
+       producteur n'a pas démarré. Sert à éprouver le drapeau `demarre` :
+       sans lui, ces lectures comptent des underruns de démarrage. */
+    int consommer_avant_ack;
+    long consommer_apres_config; /* < 0 : jamais */
 };
 
 static struct anneau_entete *g_anneau;
 
 static uint64_t g_trames_drainees;
+static unsigned g_configs;
 static uint64_t g_pings;
 static uint64_t g_pongs;
 static uint64_t g_non_fini;
@@ -373,8 +381,30 @@ static int drainer(struct session *s, const struct options *o,
 
     uint64_t deficit = objectif - s->consomme;
     const uint64_t dispo = anneau_disponible(g_anneau);
-    const uint64_t tolerance =
-        (uint64_t)TOLERANCE_PERIODES * (uint64_t)s->periode;
+    const uint64_t capacite = g_anneau->capacite;
+    /* La tolérance ne peut pas dépasser la fenêtre réelle de l'anneau :
+       depuis la négociation à quelques périodes (2048 trames), une
+       tolérance de 32 périodes laisserait le consommateur courir plus loin
+       que la capacité, puis relire un arriéré qui n'existe pas. */
+    uint64_t tolerance = (uint64_t)TOLERANCE_PERIODES * (uint64_t)s->periode;
+    if (tolerance > capacite)
+        tolerance = capacite;
+    if (deficit > tolerance) {
+        /* Le faux assistant n'est pas temps réel : sous charge (le
+           martèlement de l'API), il peut manquer ses rendez-vous puis
+           vouloir rattraper un arriéré qui n'a jamais existé côté
+           CoreAudio. Recaler l'horloge simulée au lieu d'inventer des
+           underruns ; le contrôle `--consommer-avant-ack` éprouve, lui, le
+           vrai comptage. */
+        const uint64_t pourcent = o->taux_blocage > 0
+                                      ? (uint64_t)o->taux_blocage
+                                      : 100u;
+        const uint64_t effectif = (uint64_t)s->taux * pourcent / 100u;
+        if (effectif != 0)
+            s->base_ns = maintenant -
+                         (long long)(s->consomme * 1000000000ULL / effectif);
+        return 0;
+    }
     uint64_t demander = deficit;
     if (deficit <= tolerance) {
         /* Le producteur peut être en retard d'une ou deux périodes sans que
@@ -382,6 +412,8 @@ static int drainer(struct session *s, const struct options *o,
         if (dispo < deficit)
             return 0;
     }
+    if (demander > capacite)
+        demander = capacite;
     if (demander > TRAMES_PAR_LOT)
         demander = TRAMES_PAR_LOT;
 
@@ -440,22 +472,26 @@ static int repondre_config(struct session *s, const struct options *o,
             cfg.generation, cfg.taux, cfg.periode, cfg.canaux, cfg.format,
             cfg.capacite, cfg.octets);
 
+    ++g_configs;
     uint8_t statut = TRAMES_AUDIO_STATUT_OK;
     if (cfg.format != TRAMES_AUDIO_FORMAT_FLOAT32_ENTRELACE ||
         cfg.canaux != CANAUX ||
         cfg.octets != (uint32_t)(cfg.capacite * CANAUX * sizeof(float)))
         statut = TRAMES_AUDIO_STATUT_FORMAT;
-    else if (cfg.capacite != ANNEAU_AUDIO_CAPACITE_MAX ||
-             (cfg.capacite & (cfg.capacite - 1u)) != 0)
+    else if (cfg.capacite < ANNEAU_AUDIO_CAPACITE_MIN ||
+             cfg.capacite > ANNEAU_AUDIO_CAPACITE_MAX ||
+             (cfg.capacite & (cfg.capacite - 1u)) != 0 ||
+             cfg.periode == 0 || cfg.periode > cfg.capacite)
         statut = TRAMES_AUDIO_STATUT_CONFIG;
     if (o->sans_peripherique)
         statut = TRAMES_AUDIO_STATUT_AUCUNE_SORTIE;
 
     if (statut == TRAMES_AUDIO_STATUT_OK) {
         /* L'en-tête est réécrit avant l'acquittement : le backend a mappé le
-           fichier, il verra la configuration retenue. */
+           fichier, il verra la configuration retenue. Comme le vrai
+           assistant, on honore la capacité négociée (et non le maximum). */
         if (anneau_initialiser(g_anneau, CANAUX, OCTETS_TRAME, cfg.taux,
-                               cfg.periode, ANNEAU_AUDIO_CAPACITE_MAX,
+                               cfg.periode, cfg.capacite,
                                cfg.generation) != 0) {
             journal("erreur : anneau non initialisable");
             return -1;
@@ -466,6 +502,21 @@ static int repondre_config(struct session *s, const struct options *o,
         s->base_ns = 0;
         s->consomme = 0;
         s->controle = 1469598103934665603ULL;
+
+        if (o->consommer_avant_ack > 0 &&
+            o->consommer_apres_config >= 0 &&
+            g_configs >= (unsigned)o->consommer_apres_config) {
+            static float silence[TRAMES_PAR_LOT * CANAUX];
+            for (int i = 0; i < o->consommer_avant_ack; ++i) {
+                const size_t lues = anneau_lire(g_anneau, silence,
+                                                (size_t)cfg.periode);
+                journal("consommation avant ACK : %u trames lues "
+                        "(demarre=%u, underruns=%llu)",
+                        (unsigned)lues,
+                        (unsigned)atomic_load(&g_anneau->demarre),
+                        (unsigned long long)atomic_load(&g_anneau->underruns));
+            }
+        }
     }
 
     /* Un PING avant l'ACK éprouve le chemin de contrôle pendant la poignée :
@@ -479,14 +530,14 @@ static int repondre_config(struct session *s, const struct options *o,
     ack.generation = cfg.generation;
     ack.taux = cfg.taux;
     ack.periode = cfg.periode;
-    ack.capacite = ANNEAU_AUDIO_CAPACITE_MAX;
+    ack.capacite = cfg.capacite;
     uint8_t corps_ack[TRAMES_AUDIO_ACK_TAILLE];
     const int n = audio_ack_encoder(corps_ack, sizeof corps_ack, &ack);
     if (n < 0 || envoyer_trame(s->fd, TRAMES_AUDIO_TYPE_ACK, corps_ack,
                                (uint16_t)n) < 0)
         return -1;
     journal("ACK envoyé : statut=%u taux=%u période=%u capacité=%u", statut,
-            cfg.taux, cfg.periode, (unsigned)ANNEAU_AUDIO_CAPACITE_MAX);
+            cfg.taux, cfg.periode, (unsigned)cfg.capacite);
     if (statut != TRAMES_AUDIO_STATUT_OK) {
         /* Organum va fermer : rester à l'écoute du prochain essai. */
         return 0;
@@ -701,7 +752,8 @@ static void aide(const char *programme)
            "       [--tomber-apres MS] [--duree MS] [--refuser-version]\n"
            "       [--sans-peripherique] [--taux-blocage POURCENT]\n"
            "       [--ne-pas-drainer] [--rampe]\n"
-           "       [--device-tilde-apres MS]\n",
+           "       [--device-tilde-apres MS]\n"
+           "       [--consommer-avant-ack N] [--consommer-apres-config N]\n",
            programme);
 }
 
@@ -715,6 +767,7 @@ int main(int argc, char **argv)
     memset(&o, 0, sizeof o);
     o.taux_blocage = 0;
     o.device_tilde_apres = -1;
+    o.consommer_apres_config = -1;
 
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--socket") == 0 && i + 1 < argc) {
@@ -747,6 +800,16 @@ int main(int argc, char **argv)
                    i + 1 < argc) {
             o.device_tilde_apres = strtol(argv[++i], NULL, 10);
             if (o.device_tilde_apres < 0)
+                goto invalide;
+        } else if (strcmp(argv[i], "--consommer-avant-ack") == 0 &&
+                   i + 1 < argc) {
+            o.consommer_avant_ack = (int)strtol(argv[++i], NULL, 10);
+            if (o.consommer_avant_ack < 0)
+                goto invalide;
+        } else if (strcmp(argv[i], "--consommer-apres-config") == 0 &&
+                   i + 1 < argc) {
+            o.consommer_apres_config = strtol(argv[++i], NULL, 10);
+            if (o.consommer_apres_config < 0)
                 goto invalide;
         } else if (strcmp(argv[i], "--aide") == 0 ||
                    strcmp(argv[i], "-h") == 0) {
