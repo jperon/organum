@@ -162,7 +162,27 @@ verifie "valeur inchangée après refus" '"transposition":0' "$S"
 echo "== transposition : aucun enregistrement dans etat.json"
 post '{"transposition":5}' >/dev/null
 attendre_valeur 5 || echec "POST +5 non publié"
-sleep 3
+# La transposition ne doit jamais entrer dans etat.json. Un simple sommeil
+# pouvait laisser passer le battement de sauvegarde (2 s) : on force une
+# écriture APRÈS le réglage, en changeant un champ réellement persisté, puis
+# on attend que ce champ apparaisse dans le fichier. La vérification porte
+# alors sur une sauvegarde certaine, postérieure à la transposition.
+post '{"volume":0.25}' >/dev/null
+i=0
+sauve=0
+while [ "$i" -lt 100 ]; do
+  if [ -f "$ETAT" ] && grep -qF '"volume":0.25' "$ETAT"; then
+    sauve=1
+    break
+  fi
+  sleep 0.1
+  i=$((i + 1))
+done
+if [ "$sauve" -eq 1 ]; then
+  ok "etat.json réécrit après le réglage (volume 0,25 enregistré)"
+else
+  echec "etat.json jamais réécrit après le réglage (${i} dixièmes de seconde, motif \"volume\":0.25 absent)"
+fi
 if [ -f "$ETAT" ] && grep -q 'transposition' "$ETAT"; then
   echec "etat.json contient une clé transposition"
 else

@@ -861,16 +861,32 @@ PY
   REVERB_X_AVANT=$reverb_x
   eval "$(coords qualite 1920 1080 "$QROWS" "$QCOLS" "$REVERB_FRAC" "$QPER")"
   glisser_xy "$REVERB_X_AVANT" "$reverb_y" "$reverb_x" "$reverb_y"
-  REVERB_APRES=$(lire_api | python3 -c 'import json,sys; print(json.load(sys.stdin)["reverb"])' 2>/dev/null || echo 0)
+  # Le clic part vers la fenêtre native, qui envoie son POST de façon
+  # asynchrone : attendre que la valeur CHANGE (échéance 3 s) au lieu de
+  # lire un unique instantané 0,5 s après le relâchement.
+  REVERB_APRES=$REVERB_AVANT
+  i=0
+  while [ "$i" -lt 30 ]; do
+    REVERB_APRES=$(lire_api | python3 -c 'import json,sys; print(json.load(sys.stdin)["reverb"])' 2>/dev/null || echo 0)
+    if python3 - "$REVERB_AVANT" "$REVERB_APRES" <<'PY'
+import sys
+sys.exit(0 if abs(float(sys.argv[1]) - float(sys.argv[2])) > 0.05 else 1)
+PY
+    then
+      break
+    fi
+    sleep 0.1
+    i=$((i + 1))
+  done
   if python3 - "$REVERB_AVANT" "$REVERB_APRES" <<'PY'
 import sys
 a, b = float(sys.argv[1]), float(sys.argv[2])
 sys.exit(0 if abs(a - b) > 0.05 else 1)
 PY
   then
-    ok "natif : réverbération modifiée par clic et relue dans /api/orgue ($REVERB_AVANT → $REVERB_APRES)"
+    ok "natif : réverbération modifiée par clic et relue dans /api/orgue ($REVERB_AVANT → $REVERB_APRES, $((i * 100)) ms)"
   else
-    echec "natif : le clic sur le curseur de réverbération ne change pas la valeur ($REVERB_AVANT → $REVERB_APRES)"
+    echec "natif : le clic sur le curseur de réverbération ne change pas la valeur ($REVERB_AVANT → $REVERB_APRES, inchangée après $((i * 100)) ms)"
   fi
 
   clic_xy "$retour_x" "$retour_y"

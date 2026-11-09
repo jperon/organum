@@ -223,16 +223,19 @@ lancer_assistant() {
 }
 
 # attendre_motif <url> <motif> <essais> : rend le dernier corps lu ; code 0
-# dès que le motif apparaît.
+# dès que le motif apparaît. ATTENTE_MS reçoit la durée réellement attendue,
+# pour que le message d'échec dise « attendu, vu, et après combien de temps ».
 attendre_motif() {
   url=$1
   motif=$2
   essais=$3
   i=0
   corps=""
+  _debut=$(date +%s%N)
   while [ "$i" -lt "$essais" ]; do
     corps=$(curl -s --max-time 2 "$url")
     if printf '%s' "$corps" | grep -qF -- "$motif"; then
+      ATTENTE_MS=$(( ($(date +%s%N) - _debut) / 1000000 ))
       printf '%s' "$corps"
       return 0
     fi
@@ -242,6 +245,42 @@ attendre_motif() {
   printf '%s' "$corps"
   return 1
 }
+
+# attendre_occurrences <url> <motif> <nombre> <essais> : attend qu'un motif
+# littéral apparaisse exactement <nombre> fois (les ports d'un client sont
+# publiés après la poignée de main, pas au premier octet reçu). Écrit ses
+# diagnostics dans $TMP/occurrences.diag, lus par diag_occurrences_*.
+attendre_occurrences() {
+  _url=$1
+  _motif=$2
+  _voulu=$3
+  _essais=$4
+  _debut=$(date +%s%N)
+  i=0
+  corps=""
+  ATTENTE_OCCURRENCES=0
+  while [ "$i" -lt "$_essais" ]; do
+    corps=$(curl -s --max-time 2 "$_url")
+    ATTENTE_OCCURRENCES=$(printf '%s' "$corps" |
+      grep -oF -- "$_motif" | wc -l)
+    if [ "$ATTENTE_OCCURRENCES" -eq "$_voulu" ]; then
+      _ms=$(( ($(date +%s%N) - _debut) / 1000000 ))
+      printf '%s\n%s\n' "$_ms" "$ATTENTE_OCCURRENCES" >"$TMP/occurrences.diag"
+      printf '%s' "$corps"
+      return 0
+    fi
+    sleep 0.05
+    i=$((i + 1))
+  done
+  _ms=$(( ($(date +%s%N) - _debut) / 1000000 ))
+  printf '%s\n%s\n' "$_ms" "$ATTENTE_OCCURRENCES" >"$TMP/occurrences.diag"
+  printf '%s' "$corps"
+  return 1
+}
+
+# Diagnostics lus hors du sous-shell de la substitution de commande.
+diag_occurrences_ms() { sed -n 1p "$TMP/occurrences.diag" 2>/dev/null; }
+diag_occurrences_nb() { sed -n 2p "$TMP/occurrences.diag" 2>/dev/null; }
 
 # --- a/e. Backend socket seul, sans assistant ------------------------------
 if lancer_serveur; then
@@ -269,25 +308,22 @@ if lancer_serveur; then
 fi
 
 # --- b/d. Note, ports et note OFF -----------------------------------------
-if lancer_assistant 'note:0:60:100,pause:2000,note:0:60:0' --attendre-client 5000; then
+if lancer_assistant 'note:0:60:100,pause:2000,note:0:60:0' --attendre-client 60000; then
   if corps=$(attendre_motif "$URL/api/midi" '"canaux_actifs":[1' 80); then
     ok "b : note ON visible (canal 1 actif)"
   else
     echec "b : note ON non visible dans canaux_actifs ; vu : $corps"
   fi
 
-  ports=$(curl -s --max-time 2 "$URL/api/midi/ports")
-  nb=$(printf '%s' "$ports" | grep -o '"nom_client":"CoreMIDI"' | wc -l)
-  if [ "$nb" -eq 2 ]; then
+  if ports=$(attendre_occurrences "$URL/api/midi/ports" '"nom_client":"CoreMIDI"' 2 100); then
     ok "d : deux ports du client CoreMIDI"
   else
-    echec "d : nombre de ports CoreMIDI = $nb (attendu 2) ; vu : $ports"
+    echec "d : ports CoreMIDI = $(diag_occurrences_nb) au lieu de 2 après $(diag_occurrences_ms) ms ; vu : $ports"
   fi
-  nb=$(printf '%s' "$ports" | grep -o '"connecte":true' | wc -l)
-  if [ "$nb" -eq 2 ]; then
+  if ports=$(attendre_occurrences "$URL/api/midi/ports" '"connecte":true' 2 100); then
     ok "d : les deux ports sont connectés"
   else
-    echec "d : ports connectés = $nb (attendu 2) ; vu : $ports"
+    echec "d : ports connectés = $(diag_occurrences_nb) au lieu de 2 après $(diag_occurrences_ms) ms ; vu : $ports"
   fi
   verifie "d : assistant connecté annoncé" '"assistant":true' "$ports"
 
@@ -308,7 +344,7 @@ arreter_assistant
 
 # --- c/f. Reconnexion et Program Change -----------------------------------
 debut=$(date +%s%N)
-if lancer_assistant 'note:1:64:100,pause:700,pc:15:3' --attendre-client 5000; then
+if lancer_assistant 'note:1:64:100,pause:700,pc:15:3' --attendre-client 60000; then
   if corps=$(attendre_motif "$URL/api/midi" '"canaux_actifs":[2' 40); then
     fin=$(date +%s%N)
     ms=$(( (fin - debut) / 1000000 ))
@@ -338,12 +374,12 @@ arreter_assistant
 # de « assistant » à 2 s, marge comprise. Le défaut propre à XNU est reproduit
 # par plateforme/tests/horloge_midi_socket.c ; ce contrôle-ci garde le chemin
 # réel, y compris sur une machine Apple.
-if lancer_assistant 'pause:8000' --attendre-client 5000; then
+if lancer_assistant 'pause:8000' --attendre-client 60000; then
   if attendre_motif "$URL/api/midi/ports" '"assistant":true' 80 >/dev/null; then
     arreter_assistant
     if attendre_motif "$URL/api/midi/ports" '"assistant":false' 80 >/dev/null; then
       debut=$(date +%s%N)
-      if lancer_assistant 'pause:8000' --attendre-client 5000; then
+      if lancer_assistant 'pause:8000' --attendre-client 60000; then
         if attendre_motif "$URL/api/midi/ports" '"assistant":true' 80 >/dev/null; then
           fin=$(date +%s%N)
           ms=$(( (fin - debut) / 1000000 ))
@@ -372,7 +408,7 @@ arreter_assistant
 # note (canal manquant) et répondrait aussi au PING (deux PONG).
 lancer_assistant \
   'note:0:60:100,pause:300,note:1:61:100,pause:300,note:2:62:100,pause:300,note:3:63:100,pause:1800,note:0:60:0,note:1:61:0,note:2:62:0,note:3:63:0,ping,pause:200,ping,pause:200,ping,pause:1200' \
-  --attendre-client 5000
+  --attendre-client 20000
 marteler_midi &
 MARTELE_PID=$!
 if corps=$(attendre_motif "$URL/api/midi" '"canaux_actifs":[1,2,3,4]' 120); then
@@ -405,7 +441,7 @@ arreter_assistant
 arreter_serveur
 rm -f "$SOCKET"
 if lancer_assistant 'note:0:60:100,pause:2500,note:0:60:0' \
-    --attendre-client 20000; then
+    --attendre-client 60000; then
   assistant_initial=$ASSISTANT_PID
   if lancer_serveur; then
     attendre_motif "$URL/api/midi/ports" '"assistant":true' 100 >/dev/null || true
@@ -515,7 +551,7 @@ if lancer_serveur degrade; then
   verifie "h : backend socket annoncé" '"socket":true' "$ports"
 
   if lancer_assistant 'note:0:60:100,pause:2000,note:0:60:0' \
-      --attendre-client 5000; then
+      --attendre-client 60000; then
     if corps=$(attendre_motif "$URL/api/midi" '"canaux_actifs":[1' 80); then
       ok "h : note reçue par le MIDI socket sans audio"
     else

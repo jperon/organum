@@ -409,6 +409,11 @@ static int drainer(struct session *s, const struct options *o,
                                       ? (uint64_t)o->taux_blocage
                                       : 100u;
         const uint64_t effectif = (uint64_t)s->taux * pourcent / 100u;
+        /* Trace du temps de lecture abandonné : le script de cadence rejette
+           alors la fenêtre (machine chargée, faux assistant non temps réel)
+           au lieu de prendre un simple retard d'ordonnancement pour une
+           dérive de cadence du produit. */
+        journal("recalage: perdu=%llu", (unsigned long long)deficit);
         if (effectif != 0)
             s->base_ns = maintenant -
                          (long long)(s->consomme * 1000000000ULL / effectif);

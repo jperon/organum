@@ -199,14 +199,33 @@ code_post() {
     -H 'Content-Type: application/json' -d "$1" "$URL/api/orgue"
 }
 
-# Laisse le fil audio publier la nouvelle qualité (~40 ms) et le processus
-# principal enregistrer etat.json (battement de 2 s).
+# Laisse le fil audio publier la nouvelle qualité et attend le champ
+# attendu (jamais un sommeil fixe : sous charge, la publication peut
+# dépasser 0,3 s). Imprime le dernier état lu.
 attendre_publication() {
-  sleep 0.3
+  attendre_etat "$1" 100
 }
 
+# Attend que le processus principal ait enregistré etat.json avec le motif
+# donné (battement de 2 s, fichier temporaire puis renommage : jamais de
+# lecture partielle). Imprime le contenu du fichier. Une échéance de 10 s
+# remplace l'ancien « sleep 3 », qui laissait 1 s de marge seulement.
 attendre_sauvegarde() {
-  sleep 3
+  motif=$1
+  max=${2:-100}
+  i=0
+  contenu=""
+  while [ "$i" -lt "$max" ]; do
+    contenu=$(cat "$ETAT" 2>/dev/null || true)
+    if printf '%s' "$contenu" | grep -qF -- "$motif"; then
+      printf '%s' "$contenu"
+      return 0
+    fi
+    sleep 0.1
+    i=$((i + 1))
+  done
+  printf '%s' "$contenu"
+  return 1
 }
 
 # Attend qu'une motif littéral apparaisse dans GET /api/orgue (max dixièmes
@@ -231,6 +250,32 @@ attendre_etat() {
 # Extrait un champ numérique simple (première occurrence).
 champ_num() {
   printf '%s' "$1" | grep -o "\"$2\":[0-9.]*" | head -n 1 | cut -d: -f2
+}
+
+# verifie_niveau_coherent <etat> <contexte> : le niveau choisi par la
+# calibration doit être 0..3 et la présélection correspondante doit être
+# appliquée. Le niveau dépend de la vitesse RÉELLE de la machine : le crochet
+# ORGANUM_CALIBRATION_FACTEUR a disparu avec la décision en MoonScript
+# (commit 845fadf), donc asserter « machine rapide → 3 » rendait le test
+# dépendant de la charge (observé : niveau 2 sur un hôte chargé). La règle de
+# décision elle-même reste couverte par web/tests/calibration_test.lua.
+verifie_niveau_coherent() {
+  etat=$1
+  contexte=$2
+  n=$(champ_num "$etat" niveau)
+  case "$n" in
+    0) spa='"spatialisation":0'; poly='"polyphonie_max":64' ; tete='"tete_reverb":false'; bruit='"bruit_attaque":false'; inst='"instabilite":false' ;;
+    1) spa='"spatialisation":1'; poly='"polyphonie_max":128'; tete='"tete_reverb":false'; bruit='"bruit_attaque":false'; inst='"instabilite":false' ;;
+    2) spa='"spatialisation":1'; poly='"polyphonie_max":192'; tete='"tete_reverb":true' ; bruit='"bruit_attaque":true' ; inst='"instabilite":true'  ;;
+    3) spa='"spatialisation":2'; poly='"polyphonie_max":0'  ; tete='"tete_reverb":true' ; bruit='"bruit_attaque":true' ; inst='"instabilite":true'  ;;
+    *) echec "$contexte : niveau de calibration invalide (« ${n:-absent} »)" ; return ;;
+  esac
+  verifie "$contexte : niveau $n cohérent (présélection appliquée)" "$spa" "$etat"
+  verifie "$contexte : polyphonie du niveau $n" "$poly" "$etat"
+  verifie "$contexte : tête du niveau $n" "$tete" "$etat"
+  verifie "$contexte : bruit d'attaque du niveau $n" "$bruit" "$etat"
+  verifie "$contexte : instabilité du niveau $n" "$inst" "$etat"
+  verifie "$contexte : auto true" '"auto":true' "$etat"
 }
 
 # Vérifie qu'une chaîne ne contient pas un motif littéral.
@@ -464,19 +509,14 @@ echo "== démarrage sur le port $PORT (état temporaire $TMP)"
 effacer_etat
 lancer "" 1 || exit 1
 
-echo "== premier lancement : calibration automatique (facteur 1)"
+echo "== premier lancement : calibration automatique"
 S=$(get)
 verifie "calibration présente" '"calibration":{' "$S"
 verifie "calibration : durée renseignée" '"duree_calibration_ms":' "$S"
 verifie "calibration : échéance = 10,67 ms (512/48000)" '"echeance_ms":10.6666' "$S"
 verifie "calibration : quatre estimations" '"estimation_ms":[' "$S"
 verifie "auto par défaut au premier lancement = true" '"auto":true' "$S"
-verifie "machine rapide (facteur 1) : niveau le plus haut = 3" '"niveau":3' "$S"
-verifie "spatialisation par défaut = 2" '"spatialisation":2' "$S"
-verifie "bruit_attaque par défaut = true" '"bruit_attaque":true' "$S"
-verifie "instabilite par défaut = true" '"instabilite":true' "$S"
-verifie "polyphonie_max par défaut = 0" '"polyphonie_max":0' "$S"
-verifie "tete_reverb par défaut = true" '"tete_reverb":true' "$S"
+verifie_niveau_coherent "$S" "premier lancement"
 verifie "tete_reverb non imposée par défaut" '"tete_reverb_impose":false' "$S"
 
 echo "== charge : champs exposés et règle du niveau"
@@ -544,7 +584,7 @@ R=$(post '{"qualite":{"spatialisation":1}}')
 verifie "réponse 200 avec ok" '"ok":true' "$R"
 verifie "la réponse reflète la spatialisation demandée = 1" '"spatialisation":1' "$R"
 verifie_absent "la réponse ne renvoie pas l'ancienne spatialisation = 2" '"spatialisation":2' "$R"
-attendre_publication
+attendre_publication '"spatialisation":1' >/dev/null
 S=$(get)
 verifie "spatialisation appliquée = 1" '"spatialisation":1' "$S"
 verifie "modification individuelle : niveau = -1" '"niveau":-1' "$S"
@@ -556,8 +596,7 @@ verifie "réponse 200 avec ok" '"ok":true' "$R"
 verifie "réponse : bruit_attaque demandé = false" '"bruit_attaque":false' "$R"
 verifie "réponse : instabilite demandée = false" '"instabilite":false' "$R"
 verifie "réponse : polyphonie_max demandée = 128" '"polyphonie_max":128' "$R"
-attendre_publication
-S=$(get)
+S=$(attendre_publication '"polyphonie_max":128') || true
 verifie "bruit_attaque appliqué = false" '"bruit_attaque":false' "$S"
 verifie "instabilite appliquée = false" '"instabilite":false' "$S"
 verifie "polyphonie_max appliquée = 128" '"polyphonie_max":128' "$S"
@@ -569,8 +608,9 @@ verifie_absent "changement de tête : plus de redemarrage_requis" '"redemarrage_
 verifie "réponse : niveau demandé = 1" '"niveau":1' "$R"
 verifie "réponse : spatialisation demandée = 1" '"spatialisation":1' "$R"
 verifie "réponse : polyphonie_max demandée = 128" '"polyphonie_max":128' "$R"
-attendre_publication
-S=$(get)
+# Le niveau (côté Lua) et la tête effective (fil audio) ne changent pas dans
+# le même instantané : attendre la tête, qui est la dernière appliquée.
+S=$(attendre_publication '"tete_reverb":false') || true
 verifie "niveau 1 : spatialisation = 1" '"spatialisation":1' "$S"
 verifie "niveau 1 : bruit_attaque = false" '"bruit_attaque":false' "$S"
 verifie "niveau 1 : instabilite = false" '"instabilite":false' "$S"
@@ -606,15 +646,14 @@ done
 echo "== modification individuelle après une présélection"
 R=$(post '{"qualite":{"spatialisation":0}}')
 verifie "réponse 200 avec ok" '"ok":true' "$R"
-attendre_publication
-S=$(get)
+S=$(attendre_publication '"spatialisation":0') || true
 verifie "spatialisation = 0" '"spatialisation":0' "$S"
 verifie "niveau repasse à -1" '"niveau":-1' "$S"
 
 echo "== persistance dans etat.json (réglage manuel, auto faux)"
 post '{"qualite":{"niveau":2}}' >/dev/null
-attendre_publication
-attendre_sauvegarde
+S=$(attendre_publication '"niveau":2') || true
+attendre_sauvegarde '"niveau":2' >/dev/null
 verifie "etat.json contient la clé qualite" '"qualite"' "$(cat "$ETAT" 2>/dev/null || true)"
 arreter
 lancer "" 1 || exit 1
@@ -634,26 +673,19 @@ verifie "ORGANUM_QUALITE=1 : spatialisation = 1" '"spatialisation":1' "$S"
 verifie "ORGANUM_QUALITE=1 : polyphonie_max = 128" '"polyphonie_max":128' "$S"
 verifie "ORGANUM_QUALITE=1 : tete_reverb = false" '"tete_reverb":false' "$S"
 
-echo "== calibration automatique : machine lente (facteur 100)"
+echo "== calibration automatique : niveau cohérent (machine réelle)"
 effacer_etat
-lancer "" 100 || exit 1
+lancer "" || exit 1
 S=$(get)
-verifie "machine lente : calibration présente" '"calibration":{' "$S"
-verifie "machine lente : auto true" '"auto":true' "$S"
-verifie "machine lente : niveau retenu = 0" '"niveau":0' "$S"
-verifie "niveau 0 : spatialisation = 0" '"spatialisation":0' "$S"
-verifie "niveau 0 : bruit_attaque = false" '"bruit_attaque":false' "$S"
-verifie "niveau 0 : instabilite = false" '"instabilite":false' "$S"
-verifie "niveau 0 : polyphonie_max = 64" '"polyphonie_max":64' "$S"
-verifie "niveau 0 : tete_reverb = false" '"tete_reverb":false' "$S"
+verifie "calibration présente" '"calibration":{' "$S"
+verifie_niveau_coherent "$S" "calibration automatique"
 
 echo "== modification individuelle en mode auto"
 post '{"qualite":{"spatialisation":1}}' >/dev/null
-attendre_publication
-S=$(get)
+S=$(attendre_publication '"spatialisation":1') || true
 verifie "modification : auto passe à false" '"auto":false' "$S"
 verifie "modification : niveau = -1" '"niveau":-1' "$S"
-attendre_sauvegarde
+attendre_sauvegarde '"spatialisation":1' >/dev/null
 arreter
 
 echo "== relance sur le même état : pas de recalibration"
@@ -664,15 +696,12 @@ verifie "relance manuelle : réglage restauré (spatialisation 1)" '"spatialisat
 verifie "relance manuelle : auto reste false" '"auto":false' "$S"
 verifie "relance manuelle : niveau reste -1" '"niveau":-1' "$S"
 
-echo "== calibration automatique : machine rapide (facteur 1)"
+echo "== calibration automatique : relance propre, niveau cohérent"
 effacer_etat
-lancer "" 1 || exit 1
+lancer "" || exit 1
 S=$(get)
-verifie "machine rapide : calibration présente" '"calibration":{' "$S"
-verifie "machine rapide : auto true" '"auto":true' "$S"
-verifie "machine rapide : niveau le plus haut = 3" '"niveau":3' "$S"
-verifie "niveau 3 : spatialisation = 2" '"spatialisation":2' "$S"
-verifie "niveau 3 : polyphonie_max = 0" '"polyphonie_max":0' "$S"
+verifie "calibration présente (relance)" '"calibration":{' "$S"
+verifie_niveau_coherent "$S" "calibration automatique (relance)"
 
 echo "== ORGANUM_REVERB_TETE=non : la tête effective est coupée"
 effacer_etat
@@ -745,8 +774,7 @@ post '{"qualite":{"spatialisation":2,"polyphonie_max":123}}' >/dev/null
 post '{"stop":{"division":0,"index":0,"on":true}}' >/dev/null
 post '{"gain":{"division":0,"value":0.33}}' >/dev/null
 post '{"reverb":77}' >/dev/null
-attendre_publication
-S=$(get)
+S=$(attendre_publication '"polyphonie_max":123') || true
 REV0=$(champ_num "$S" reverb)
 XR0=$(champ_num "$S" xruns)
 EQ0=$(champ_num "$S" erreurs_ecriture)
@@ -1011,7 +1039,7 @@ if [ "$CODE" = "200" ]; then
 else
   echec "alternances de taux : serveur muet (HTTP $CODE)"
 fi
-attendre_sauvegarde
+attendre_sauvegarde '"taux":48000' >/dev/null
 if command -v python3 >/dev/null 2>&1; then
   if python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$ETAT" 2>/dev/null; then
     ok "etat.json valide après les alternances"
@@ -1025,7 +1053,7 @@ fi
 echo "== persistance après relance (période, tête)"
 post '{"qualite":{"periode":1024,"tete_reverb":false}}' >/dev/null
 S=$(attendre_etat '"periode":1024' 30) || true
-attendre_sauvegarde
+attendre_sauvegarde '"periode":1024' >/dev/null
 verifie "etat.json contient periode" '"periode":1024' "$(cat "$ETAT" 2>/dev/null || true)"
 arreter
 lancer "" 1 "" "-" || exit 1
@@ -1046,7 +1074,7 @@ verifie_absent "tête en auto : pas de redemarrage_requis" '"redemarrage_requis"
 verifie "tête en auto : tête enregistrée false" '"tete_reverb_prochain":false' "$R"
 S=$(attendre_etat '"tete_reverb":false' 30) || true
 verifie "tête en auto : tête effective false à chaud" '"tete_reverb":false' "$S"
-attendre_sauvegarde
+attendre_sauvegarde '"tete_reverb":false' >/dev/null
 arreter
 lancer "" 1 "" "-" || exit 1
 S=$(get)
@@ -1056,8 +1084,8 @@ verifie "tête en auto : après relance tête enregistrée false" '"tete_reverb_
 verifie "tête en auto : après relance tête effective false" '"tete_reverb":false' "$S"
 # Prépare le contrôle suivant : une période enregistrée non imposée à 1024.
 post '{"qualite":{"periode":1024}}' >/dev/null
-attendre_publication
-attendre_sauvegarde
+S=$(attendre_publication '"periode":1024') || true
+attendre_sauvegarde '"periode":1024' >/dev/null
 
 echo "== ORGANUM_PERIODE imposé : valeur enregistrée intacte"
 arreter
@@ -1076,6 +1104,9 @@ cat >"$ALSACONF" <<'EOF'
 pcm.!default {
     type null
 }
+pcm.null {
+    type null
+}
 EOF
 ALSA_CONFIG_PATH="$ALSACONF"
 export ALSA_CONFIG_PATH
@@ -1084,7 +1115,7 @@ lancer "" 1 "" "-" || exit 1
 R=$(post '{"qualite":{"peripherique":"hw:99,99","periode":1024}}')
 verifie "repli : périphérique enregistré = hw:99,99" '"peripherique_prochain":"hw:99,99"' "$R"
 verifie_absent "repli : pas de redemarrage_requis" '"redemarrage_requis"' "$R"
-attendre_sauvegarde
+attendre_sauvegarde '"peripherique":"hw:99,99"' >/dev/null
 arreter
 lancer "" 1 "" "-" || exit 1
 S=$(get)
@@ -1105,6 +1136,21 @@ unset ALSA_CONFIG_PATH
 arreter
 
 echo "== volume moteur : action POST distincte du volume système"
+# La section précédente a retiré ALSA_CONFIG_PATH pour éprouver le repli :
+# sans lui, « default » ouvre la vraie sortie de l'hôte, absente sur un runner
+# ou une machine sans PipeWire (échec fatal de l'audio). On rétablit donc la
+# sortie muette avant les lancements qui utilisent le périphérique par défaut.
+ALSACONF="$TMP/asound-null.conf"
+cat >"$ALSACONF" <<'EOF'
+pcm.!default {
+    type null
+}
+pcm.null {
+    type null
+}
+EOF
+ALSA_CONFIG_PATH="$ALSACONF"
+export ALSA_CONFIG_PATH
 effacer_etat
 lancer "" 1 "" "-" || exit 1
 S=$(get)
@@ -1131,7 +1177,7 @@ for BAD in '{"volume":"0.5"}' '{"volume":-0.1}' '{"volume":1.1}' '{"volume":null
   fi
 done
 
-attendre_sauvegarde
+attendre_sauvegarde '"volume":0.25' >/dev/null
 verifie "etat.json contient le volume moteur 0.25" '"volume":0.25' "$(cat "$ETAT" 2>/dev/null || true)"
 arreter
 lancer "" 1 "" "-" || exit 1
@@ -1236,7 +1282,7 @@ else
 fi
 
 # Persistance : clé temperament d'etat.json, relue au lancement suivant.
-attendre_sauvegarde
+attendre_sauvegarde '"temperament":9' >/dev/null
 verifie "etat.json contient temperament" '"temperament":9' "$(cat "$ETAT" 2>/dev/null || true)"
 arreter
 lancer "" 1 "" "-" || exit 1
