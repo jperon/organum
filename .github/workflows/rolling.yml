@@ -205,7 +205,13 @@ jobs:
           # Aucune carte son sur un runner : le mode dégradé est attendu.
           artefact/organum.com -p 18099 > "$RUNNER_TEMP/organum.log" 2>&1 &
           pid=$!
-          trap 'kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true' EXIT INT TERM
+          # SIGKILL et non SIGTERM : redbean, sur SIGTERM, envoie SIGTERM à tout
+          # son groupe de processus (KillGroup, redbean.c) ; dans un job, le
+          # groupe contient l'agent du runner, qui s'arrête alors en plein
+          # test (« The runner has received a shutdown signal »). SIGKILL
+          # n'est pas capté et ne tue donc que l'orgue, comme le font déjà
+          # web/scripts/test-qualite.sh et test-sans-backend.sh.
+          trap 'kill -KILL "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true' EXIT INT TERM
 
           ok=0
           i=0
