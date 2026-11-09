@@ -125,6 +125,21 @@ jobs:
       # Les tests unitaires ont besoin de redbean comme interpréteur Lua 5.4 ;
       # l'arbre cosmopolitan est déjà construit à cette étape, on y prend le
       # binaire plutôt que d'installer un paquet supplémentaire.
+      # Les runners GitHub n'ont pas de carte son, mais le moteur exige
+      # /dev/snd/seq pour ouvrir ALSA en mode normal. Le module noyau snd-seq
+      # suffit : les suites utilisent la sortie muette « null ».
+      - name: Préparer le séquenceur MIDI ALSA
+        run: |
+          sudo modprobe snd-seq || true
+          if [ -e /dev/snd/seq ]; then
+            sudo chmod a+rw /dev/snd/seq
+          fi
+          ls -l /dev/snd || true
+          if [ ! -e /dev/snd/seq ]; then
+            echo "::error::séquenceur MIDI ALSA indisponible sur ce runner"
+            exit 1
+          fi
+
       - name: Préparer redbean pour les tests unitaires
         run: |
           make -C externe/cosmopolitan -j"$(nproc)" o//tool/net/redbean

@@ -114,7 +114,7 @@ lancer() {
       return 0
     fi
     if ! kill -0 "$PID" 2>/dev/null; then
-      echo "ÉCHEC : $mode : organum s'est arrêté au démarrage" >&2
+      echec "$mode : organum s'est arrêté au démarrage"
       sed 's/^/        /' "$JOURNAL" >&2
       return 1
     fi
