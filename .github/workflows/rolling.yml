@@ -101,7 +101,11 @@ jobs:
             unzip -l web/build/organum.com | grep -q '\.organum/organum-helper'
           fi
 
+      # Sur une branche (workflow_dispatch, par exemple la validation macOS),
+      # la construction et les tests servent à vérifier, sans remplacer la
+      # publication « rolling » qui doit rester adossée à master.
       - name: Publication rolling
+        if: github.ref == 'refs/heads/master'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
