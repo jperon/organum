@@ -234,15 +234,27 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   `latence_ms > 0`, `audio_demarre`, cadence sur 3 s à ≤ 2 % de `taux`,
   `xruns`/`xruns_recents` à 0, puis MIDI de bout en bout (source virtuelle
   CoreMIDI `emetteur_midi.c` → assistant → socket → orgue :
-  `canaux_actifs` non vide, puis revenu à vide au relâchement). Le scénario
-  dégradé volontaire reste nécessaire : il prouve le repli, alors que le
-  second prouve le chemin nominal. **Limites** : pas de carte son physique
-  (donc pas de mesure de latence audible ni de périphérique USB), pas de
-  test du LaunchAgent ni de quarantaine (l'assistant est lancé par organum),
-  et les suites Linux (`tests-longs.sh`, `tests-e2e.sh`) ne tournent pas
-  sur macOS. Le helper extrait s'exécute bien dans sa tranche arm64 sur ce
-  runner (contrairement à l'ancienne VM x86_64) ; la tranche x86_64 du
-  helper reste seulement vérifiée par `lipo`/`codesign`.
+  `canaux_actifs` non vide, puis revenu à vide au relâchement). Mesure
+  réelle du 2026-11-09 (run `42653100117`, 10 s pour le script) :
+  « latence audio publiée (55.416 ms, taux 48000 Hz) », « cadence sur 3 s :
+  151040 trames pour 149263 attendues (119‱ d'écart, ≤ 2 %) », « note
+  CoreMIDI reçue, canaux_actifs non vide ([1]) », « relâchement vu,
+  canaux_actifs revenu à vide ». Le scénario dégradé volontaire reste
+  nécessaire : il prouve le repli, alors que le second prouve le chemin
+  nominal. **Piège de l'émetteur MIDI** : `MIDIPacketListAdd` attend un
+  horodatage en **ticks Mach** ; zéro signifie « maintenant ». Un
+  horodatage en nanosecondes (`CLOCK_MONOTONIC`) place la note très loin
+  dans le futur et elle n'arrive jamais (constaté : aucune activité dans
+  `/api/midi`). **Piège de la mesure de cadence** : prendre `trames_jouees`
+  dans un JSON périmé (dernière requête d'attente) surestime la cadence de
+  ~2,5 % ; le script relit `/api/orgue` juste avant la mesure.
+  **Limites** : pas de carte son physique (donc pas de mesure de latence
+  audible ni de périphérique USB), pas de test du LaunchAgent ni de
+  quarantaine (l'assistant est lancé par organum), et les suites Linux
+  (`tests-longs.sh`, `tests-e2e.sh`) ne tournent pas sur macOS. Le helper
+  extrait s'exécute bien dans sa tranche arm64 sur ce runner (contrairement
+  à l'ancienne VM x86_64) ; la tranche x86_64 du helper reste seulement
+  vérifiée par `lipo`/`codesign`.
   Les sondes `plateforme/macos/tests/sonde_audio.c` et `sonde_midi.c`
   restent utilisables à la main (`clang -framework …`) pour reposer la
   question si une image de runner change.
