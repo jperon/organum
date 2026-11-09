@@ -122,6 +122,18 @@ jobs:
       - name: Construction
         run: scripts/construire.sh
 
+      # Publier l'artefact dès la construction : la validation arm64 ne doit
+      # pas être bloquée par une suite Linux en échec (séquenceur ALSA absent,
+      # flottement d'un test). Elle teste le binaire construit, pas les tests
+      # Linux. Les contrôles de contenu restent dans « Vérification ».
+      - name: Publier organum.com pour la validation arm64
+        uses: actions/upload-artifact@v4
+        with:
+          name: organum-com
+          path: web/build/organum.com
+          if-no-files-found: error
+          retention-days: 3
+
       # Les tests unitaires ont besoin de redbean comme interpréteur Lua 5.4 ;
       # l'arbre cosmopolitan est déjà construit à cette étape, on y prend le
       # binaire plutôt que d'installer un paquet supplémentaire.
@@ -198,14 +210,6 @@ jobs:
             unzip -l web/build/organum.com | grep -q '\.organum/organum-helper'
           fi
 
-      - name: Publier organum.com pour la validation arm64
-        uses: actions/upload-artifact@v4
-        with:
-          name: organum-com
-          path: web/build/organum.com
-          if-no-files-found: error
-          retention-days: 3
-
       # Sur une branche (workflow_dispatch, par exemple la validation macOS),
       # la construction et les tests servent à vérifier, sans remplacer la
       # publication « rolling » qui doit rester adossée à master.
@@ -225,6 +229,11 @@ jobs:
   # l'artefact produit par le job Linux, puis vérifie l'exécution native.
   validation-arm64:
     needs: construire
+    # S'exécute même si le job Linux échoue après avoir publié l'artefact :
+    # une régression d'une suite Linux ne doit pas masquer l'état du binaire
+    # arm64. Sans artefact (échec de construction), le téléchargement échoue
+    # clairement.
+    if: ${{ !cancelled() }}
     # macos-latest est bien un Apple Silicon sur ce dépôt (image
     # macos-26-arm64) ; l'étiquette « macos-14 » est refusée par GitHub
     # (« The configuration 'macos-14-arm64-us-default' is not supported »),
