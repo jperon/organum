@@ -402,6 +402,22 @@ ORGANUM_WEB=1 web/scripts/build.sh    # variante sans UI native : web/build/orga
 Test rapide : lancer `web/build/organum.com -p 8099`, puis
 `curl localhost:8099/api/orgue`. Un clavier MIDI virtuel suffit pour le MIDI.
 
+Les programmes d'aide de `cosmo_dlopen` (`cosmo/aide/`) sont reconstruits à
+chaque `scripts/construire.sh` avec le `cc` de l'hôte, puis embarqués dans
+`/zip/.cosmo/` (`web/scripts/build.sh`) et installés dans `~/.cosmo/` au
+démarrage. Ils sont liés aux symboles `GLIBC_2.2.5` par
+`cosmo/aide/versions-glibc.h`, afin de fonctionner sans compilateur sur une
+machine cible plus ancienne. Le script compile en `-std=gnu11` : à partir de
+GCC 15 (C23 par défaut), les en-têtes de la glibc 2.38+ redirigent `strtol`
+vers `__isoc23_strtol@GLIBC_2.38`, que les `.symver` ne couvrent pas ; la
+vérification finale (`objdump -T`, aucune version postérieure à 2.2.5) refuse
+un tel binaire. Si elle échoue, ajouter le `.symver` du symbole en cause dans
+`versions-glibc.h` (ou une option qui évite la redirection C23), jamais
+contourner le contrôle. La variante musl n'est construite que si `musl-gcc`
+est présent (un avertissement suffit sinon). Les binaires produits sont ignorés
+par git : rien à mettre à jour dans le dépôt, il suffit de relancer
+`scripts/construire.sh`.
+
 Quatre commandes, du plus rapide au plus complet :
 
 ```bash
