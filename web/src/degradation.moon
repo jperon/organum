@@ -7,6 +7,8 @@
 -- fonction : on retombe alors sur l'ancienne règle par nom de plate-forme.
 -- L'axe MIDI est décidé séparément (midi_actif.moon).
 
+helper = require "assistant"
+
 sans_backend = (plateforme, supportee) ->
   if supportee == nil
     plateforme != "linux" and plateforme != "windows"
@@ -62,9 +64,15 @@ etat_audio = (info) ->
     "suspendu", message
   elseif disponible
     nil, nil
-  elseif assistant == 0
-    "assistant_absent", "Assistant audio absent : lancez organum-audio (voir plateforme/macos/LANCEMENT.md)."
   else
-    "indisponible", "Audio momentanément indisponible."
+    -- Assistant absent de l'archive, ou impossible à installer ou à lancer :
+    -- le message nomme la cause et le journal, sans accuser l'utilisateur.
+    code = helper.message info.assistant_etat, info.assistant_log
+    if code
+      info.assistant_etat, code
+    elseif assistant == 0
+      "assistant_absent", "Assistant audio absent : organum ne l'a pas lancé (voir plateforme/macos/LANCEMENT.md)."
+    else
+      "indisponible", "Audio momentanément indisponible."
 
 { :sans_backend, :detecter, :etat_audio }

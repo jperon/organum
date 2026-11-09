@@ -38,7 +38,9 @@ ARCHIVES=1 sh plateforme/macos/construire_assistant.sh
 ```
 
 La compilation ne fait pas partie de `scripts/construire.sh` : elle demande
-les frameworks Apple, absents de la chaîne cosmocc.
+les frameworks Apple, absents de la chaîne cosmocc. Construire l'assistant
+**avant** `web/scripts/build.sh` (ou `scripts/construire.sh`) pour qu'il soit
+embarqué dans `organum.com` ; c'est ce que fait la recette macOS.
 
 **Recompiler l'assistant en même temps qu'organum** à chaque mise à jour : la
 version du protocole audio et celle de l'anneau partagé changent ensemble
@@ -75,7 +77,53 @@ L'assistant utilise **toujours le périphérique audio système par défaut**. L
 champ `peripherique` des réglages d'organum est ignoré en v1 : pour changer de
 sortie, passer par **Réglages Système → Son → Sortie**.
 
-## Lancer
+## Lancement automatique par organum (cas normal)
+
+L'utilisateur ne lance **qu'un seul binaire** : `organum.com`. Si
+`plateforme/macos/build/organum-helper` existe au moment de la construction,
+`web/scripts/build.sh` l'embarque dans l'archive sous
+`.organum/organum-helper` (avertissement sans échec s'il est absent, pour
+pouvoir construire sous Linux).
+
+Au démarrage sous macOS, organum :
+
+1. extrait l'assistant dans `$TMPDIR/.organum/organum-helper` (droits
+   `0700`, écriture par fichier temporaire puis renommage : jamais
+   par-dessus un binaire en cours d'exécution) ;
+2. sonde les sockets `$TMPDIR/organum-midi-<uid>.sock` et
+   `$TMPDIR/organum-audio-<uid>.sock` ; si un assistant y répond déjà, il le
+   **réutilise** (lancement manuel ou LaunchAgent) au lieu d'en créer un
+   second ;
+3. sinon, lance l'assistant dans son propre groupe de processus, avec sa
+   sortie dans `$TMPDIR/.organum/organum-helper.log`. Un drapeau de
+   débogage, `ORGANUM_ASSISTANT_VERBOSE=1`, ajoute `--verbose` ;
+4. vérifie périodiquement, depuis `OnServerHeartbeat`, que l'assistant vit
+   encore et le relance s'il est tombé. Trois échecs rapprochés sont
+   annoncés comme « impossible à lancer » au lieu de relancer sans fin.
+
+À l'arrêt d'organum, redbean envoie `SIGTERM` à son groupe de processus :
+l'assistant lancé par organum meurt avec lui. Les sockets et le `.pcm`
+doivent alors disparaître (arrêt propre). S'il a été lancé par LaunchAgent,
+il est dans un autre groupe et survit, par choix.
+
+Trois situations sont distinguées dans `/api/orgue` (champs
+`qualite.assistant_etat`, `audio_etat`, `audio_message`, `midi_message`) et
+dans les pages web :
+
+| Situation | Message affiché |
+|---|---|
+| tout fonctionne | aucun |
+| archive construite sans assistant (`non_embarque`) | reconstruire organum avec `plateforme/macos/build/organum-helper` présent |
+| extraction impossible (`extraction_impossible`) | chemin du journal à consulter |
+| lancement impossible (`lancement_impossible`) | chemin du journal à consulter |
+| assistant connecté mais aucune sortie audio | vérifier Réglages Système → Son → Sortie |
+
+Dans tous ces cas l'orgue démarre et reste utilisable ; aucun n'est fatal.
+
+## Lancer l'assistant à la main (dépannage)
+
+Normalement inutile : organum s'en charge. Pour diagnostiquer, ou pour un
+service permanent indépendant de l'orgue :
 
 ```bash
 plateforme/macos/build/organum-helper --verbose
@@ -92,8 +140,8 @@ Options (noms harmonisés) :
 | `--aide`, `-h` | rappel de l'usage |
 
 Sans option, les chemins sont `$TMPDIR/organum-midi-<uid>.sock` et
-`$TMPDIR/organum-audio-<uid>.sock` (ou `/tmp/…`), les mêmes que ceux
-calculés par organum. Si organum est lancé avec `ORGANUM_MIDI_SOCKET` /
+`$TMPDIR/organum-audio-<uid>.sock` (ou `/tmp/…`), **exactement** ceux que
+calcule organum. Si organum est lancé avec `ORGANUM_MIDI_SOCKET` /
 `ORGANUM_AUDIO_SOCKET`, l'assistant doit recevoir la même variable (ou le
 même `--socket-midi` / `--socket-audio`).
 
@@ -103,7 +151,8 @@ Chaque message du journal est préfixé `organum-helper : midi :` ou
 L'assistant possède la socket audio **et** le fichier `<socket>.pcm`
 (l'anneau partagé, `0600`) : il les crée au démarrage et les retire à l'arrêt
 propre. Un second exemplaire sort avec le code 3 et laisse les sockets et
-les clients du premier intacts.
+les clients du premier intacts : c'est ce qui protège une instance déjà
+vivante lorsqu'organum en lance une autre par erreur.
 
 Organum et l'assistant peuvent démarrer dans n'importe quel ordre : si une
 socket manque, organum reste dégradé sur l'axe concerné et réessaie ; si
@@ -156,19 +205,23 @@ sockets (`ECONNREFUSED`), les remplace, et tronque le `.pcm` (`O_TRUNC` +
 
 ## Ordre de démarrage
 
-L'assistant est unique ; l'ordre avec organum n'a pas d'importance. En
-pratique :
+L'assistant est unique. Le cas normal est simplement :
 
-1. `organum-helper` (démarrage automatique par LaunchAgent, ou à la main) ;
-2. `organum`.
+```bash
+./organum.com
+```
 
-Un assistant lancé après organum est vu au réessai suivant (environ une
-seconde), sans redémarrer l'orgue. Un assistant arrêté laisse les deux axes
-indisponibles ; organum continue de fonctionner en mode dégradé.
+Organum extrait, lance ou réutilise l'assistant, puis se connecte. Un
+assistant lancé à la main **avant** organum est réutilisé ; lancé **après**,
+il est vu au réessai suivant (environ une seconde), sans redémarrer l'orgue.
+Un assistant arrêté laisse les deux axes indisponibles ; organum continue de
+fonctionner en mode dégradé et publie le message correspondant.
 
-## Lancement automatique (LaunchAgent)
+## Service permanent facultatif (LaunchAgent)
 
-Un seul agent suffit désormais. Créer
+Organum lance déjà l'assistant ; un LaunchAgent n'est utile que pour le faire
+survivre aux arrêts de l'orgue (par exemple pour un autre client). Un seul
+agent suffit. Créer
 `~/Library/LaunchAgents/com.organum.helper.plist` avec des chemins absolus
 (remplacer `/Users/jacques` par le compte réel) :
 

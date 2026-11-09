@@ -1910,10 +1910,13 @@ int main(int argc, char **argv)
     }
   }
 
-  if (choisir_chemin(socket_midi, "ORGANUM_MIDI_SOCKET", "midi", g_midi.chemin,
-                     sizeof g_midi.chemin) != 0)
+  /* trame_chemin_socket_nom attend le préfixe complet du nom de fichier
+     (« organum-midi- »), pas le nom du domaine : avec « midi », le helper
+     créerait $TMPDIR/midi<uid>.sock et organum ne le trouverait jamais. */
+  if (choisir_chemin(socket_midi, "ORGANUM_MIDI_SOCKET", "organum-midi-",
+                     g_midi.chemin, sizeof g_midi.chemin) != 0)
     return 2;
-  if (choisir_chemin(socket_audio, "ORGANUM_AUDIO_SOCKET", "audio",
+  if (choisir_chemin(socket_audio, "ORGANUM_AUDIO_SOCKET", "organum-audio-",
                      g_audio.chemin, sizeof g_audio.chemin) != 0)
     return 2;
 

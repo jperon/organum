@@ -53,8 +53,39 @@ code, texte = d.etat_audio {supportee = true, socket = true,
   erreur = "périphérique par défaut : assistant audio absent (socket /tmp/a) : connexion refusée"}
 aide.egal(code, "assistant_absent", "etat_audio : assistant audio absent")
 aide.egal(texte,
-  "Assistant audio absent : lancez organum-audio (voir plateforme/macos/LANCEMENT.md).",
+  "Assistant audio absent : organum ne l'a pas lancé (voir plateforme/macos/LANCEMENT.md).",
   "etat_audio : message d'assistant absent")
+
+-- Assistant natif macOS embarqué : les échecs de l'archive et du lancement
+-- ne disent pas la même chose que « assistant absent ».
+code, texte = d.etat_audio {supportee = true, socket = true,
+  disponible = false, assistant = 0, erreur = "",
+  assistant_etat = "non_embarque"}
+aide.egal(code, "non_embarque", "etat_audio : assistant absent de l'archive")
+aide.verifie(texte:find("pas embarqué", 1, true) ~= nil or
+  texte:find("absent de cette archive", 1, true) ~= nil,
+  "etat_audio : message d'archive sans assistant", texte)
+
+code, texte = d.etat_audio {supportee = true, socket = true,
+  disponible = false, assistant = 0, erreur = "",
+  assistant_etat = "extraction_impossible", assistant_log = "/tmp/x.log"}
+aide.egal(code, "extraction_impossible", "etat_audio : extraction impossible")
+aide.verifie(texte:find("/tmp/x.log", 1, true) ~= nil,
+  "etat_audio : journal nommé pour l'extraction impossible", texte)
+
+code, texte = d.etat_audio {supportee = true, socket = true,
+  disponible = false, assistant = 0, erreur = "",
+  assistant_etat = "lancement_impossible", assistant_log = "/tmp/y.log"}
+aide.egal(code, "lancement_impossible", "etat_audio : lancement impossible")
+aide.verifie(texte:find("/tmp/y.log", 1, true) ~= nil,
+  "etat_audio : journal nommé pour le lancement impossible", texte)
+
+-- Même en échec d'assistant, un audio opérationnel ne doit rien afficher.
+code, texte = d.etat_audio {supportee = true, socket = true,
+  disponible = true, assistant = 1, erreur = "",
+  assistant_etat = "non_embarque"}
+aide.egal(code, nil, "etat_audio : audio opérationnel prime sur l'état du helper")
+aide.egal(texte, nil, "etat_audio : aucun message si l'audio fonctionne")
 
 -- L'ACK statut 2 donne aussi audio_assistant = 0 : le message d'erreur doit
 -- primer, sinon une machine sans sortie serait présentée comme sans assistant.

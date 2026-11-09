@@ -9,6 +9,7 @@ authentification = require "authentification"
 controle_acces = require "controle_acces"
 degradation = require "degradation"
 midi_actif = require "midi_actif"
+assistant = require "assistant"
 
 -- Plate-forme et mode dégradé : décidés une fois au démarrage.
 PLATEFORME = if type(organum.plateforme) == "function" then organum.plateforme! else "autre"
@@ -34,6 +35,10 @@ MIDI_ACTIF = midi_actif.actif midi_supportee, os.getenv("ORGANUM_SANS_BACKEND"),
 -- assistant à lancer. Publié par /api/midi/ports pour la page /midi.
 MIDI_SOCKET = midi_actif.socket_actif PLATEFORME, midi_socket
 
+-- Assistant natif macOS géré par organum (extrait du zip et lancé plus bas).
+-- nil hors macOS, ou quand aucun axe socket n'a besoin de lui.
+HELPER = nil
+
 -- Message de l'axe MIDI pour le bandeau de la page d'orgue. Même règle pure
 -- que la page /midi, mais état de l'assistant lu ici : le bandeau n'a pas
 -- besoin d'attendre /api/midi/ports.
@@ -42,7 +47,9 @@ message_midi_courant = ->
   if type(organum.midi_assistant) == "function"
     ok, valeur = pcall organum.midi_assistant
     assistant = ok and valeur == 1
-  midi_actif.message MIDI_ACTIF, assistant, MIDI_SOCKET
+  etat = HELPER and HELPER.etat
+  log = HELPER and HELPER.log
+  midi_actif.message MIDI_ACTIF, assistant, MIDI_SOCKET, etat, log
 
 -- Écoute : redbean, sans adresse explicite (-l), ne programme que 0.0.0.0
 -- (tool/net/redbean.c, Listen) ; on ajoute « :: » pour répondre aussi en
@@ -396,6 +403,169 @@ installer_aide = ->
 
 installer_aide!
 
+-- Assistant natif macOS (CoreMIDI et CoreAudio) embarqué dans
+-- /zip/.organum/organum-helper. On l'installe dans un dossier stable par
+-- utilisateur puis on le lance dans notre groupe de processus, pour qu'il
+-- meure avec organum (SIGTERM de redbean). Un assistant déjà vivant (lancement
+-- manuel ou LaunchAgent) est réutilisé : on sonde les sockets avant de lancer.
+-- L'extraction et le lancement ne sont jamais fatals : l'état publié dit ce
+-- qui manque, et l'orgue démarre quand même.
+assistant_vivant = ->
+  return false unless HELPER
+  -- Le moteur voit déjà l'assistant : inutile de sonder, et une connexion
+  -- audio sonde bloquerait sa poignée de main.
+  for nom in *{"audio_assistant", "midi_assistant"}
+    if type(organum[nom]) == "function"
+      ok, valeur = pcall organum[nom]
+      return true if ok and valeur == 1
+  -- Le MIDI d'abord : une connexion sonde y est brève. L'audio n'est sondé
+  -- que sans MIDI, et jamais quand le moteur y est déjà connecté (le helper
+  -- attendrait notre poignée de main en bloquant sa boucle).
+  midi = HELPER.midi
+  if midi and unix.stat midi
+    fd = unix.socket unix.AF_UNIX, unix.SOCK_STREAM
+    if fd
+      ok = unix.connect fd, midi
+      unix.close fd
+      return true if ok
+  audio_connecte = false
+  if type(organum.audio_assistant) == "function"
+    ok, valeur = pcall organum.audio_assistant
+    audio_connecte = ok and valeur == 1
+  audio = HELPER.audio
+  if not audio_connecte and audio and unix.stat audio
+    fd = unix.socket unix.AF_UNIX, unix.SOCK_STREAM
+    if fd
+      ok = unix.connect fd, audio
+      unix.close fd
+      return true if ok
+  false
+
+lancer_assistant = ->
+  return unless HELPER and HELPER.chemin
+  unless unix.access HELPER.chemin, unix.X_OK
+    HELPER.etat = "lancement_impossible"
+    Log kLogWarn, "organum : assistant natif macOS non exécutable : #{HELPER.chemin}"
+    return
+  fd = unix.open HELPER.log, unix.O_WRONLY | unix.O_CREAT | unix.O_TRUNC, tonumber("600", 8)
+  -- --verbose seulement sur un drapeau de débogage : le journal ordinaire
+  -- reste court, même si le helper explique toujours ses échecs.
+  verbose = os.getenv("ORGANUM_ASSISTANT_VERBOSE") == "1"
+  pid = unix.fork!
+  unless pid
+    pcall unix.close, fd if fd
+    HELPER.etat = "lancement_impossible"
+    Log kLogWarn, "organum : fork de l'assistant natif macOS impossible"
+    return
+  if pid == 0
+    -- Le fils ne garde pas le PCM hérité (il retarderait une reconfiguration).
+    pcall organum.oublier_audio if organum and organum.oublier_audio
+    if fd
+      unix.close 0
+      unix.close 1
+      unix.dup fd
+      unix.close 2
+      unix.dup fd
+      unix.close fd
+    argv = {HELPER.chemin}
+    argv[#argv + 1] = "--verbose" if verbose
+    pcall unix.execve, HELPER.chemin, argv, unix.environ!
+    unix.exit 126
+  pcall unix.close, fd if fd
+  HELPER.pid = pid
+  HELPER.etat = "actif"
+  HELPER.externe = false
+  HELPER.lance_a = maintenant! or 0
+  Log kLogInfo, "organum : assistant natif macOS lancé (#{HELPER.chemin}, journal #{HELPER.log})"
+
+-- Relance après la mort du helper, depuis le heartbeat : pas de fil dédié,
+-- pas de boucle qui consomme un cœur. Redbean récolte lui-même tous ses fils
+-- (wait4(-1)), donc un wait ciblé sur le helper est illisible : on détecte sa
+-- présence en sondant les sockets. Un assistant lancé à la main (ou par
+-- LaunchAgent) est ainsi réutilisé, et trois échecs rapprochés sont annoncés
+-- comme « impossible à lancer » au lieu de relancer sans fin.
+surveiller_assistant = ->
+  return unless HELPER and HELPER.chemin
+  return if HELPER.etat == "non_embarque" or HELPER.etat == "extraction_impossible" or
+    HELPER.etat == "lancement_impossible"
+  now = maintenant! or 0
+  if assistant_vivant!
+    HELPER.etat = "actif"
+    -- Un helper qui a vécu laisse repartir le compteur d'échecs.
+    HELPER.echecs = 0 if not HELPER.lance_a or now - HELPER.lance_a >= 10
+    return
+  if HELPER.pid
+    -- Laisse au nouveau processus le temps de lier ses sockets avant de le
+    -- déclarer mort (le heartbeat passe toutes les 2 s).
+    return if now - (HELPER.lance_a or 0) < 3
+    HELPER.pid = nil
+    HELPER.echecs = (HELPER.echecs or 0) + 1
+    Log kLogWarn, "organum : assistant natif macOS sans socket après lancement (#{HELPER.echecs} échec(s))"
+    if HELPER.echecs >= 3
+      HELPER.etat = "lancement_impossible"
+      Log kLogWarn, "organum : assistant natif macOS impossible à lancer (#{HELPER.chemin}, journal #{HELPER.log})"
+      return
+  return if now < (HELPER.prochain_essai or 0)
+  lancer_assistant!
+  delai = math.min 30, 2 ^ math.min(HELPER.echecs or 0, 4)
+  HELPER.prochain_essai = (maintenant! or now) + delai
+
+installer_assistant = ->
+  return unless assistant.besoin PLATEFORME, SANS_BACKEND, MIDI_ACTIF, MIDI_SOCKET
+  tmpdir = os.getenv "TMPDIR"
+  homedir = os.getenv "HOME"
+  HELPER = {
+    chemin: assistant.chemin tmpdir, homedir
+    dossier: assistant.dossier tmpdir, homedir
+    log: assistant.chemin_log tmpdir, homedir
+    midi: assistant.chemin_socket os.getenv("ORGANUM_MIDI_SOCKET"), tmpdir, unix.getuid!, "organum-midi"
+    audio: assistant.chemin_socket os.getenv("ORGANUM_AUDIO_SOCKET"), tmpdir, unix.getuid!, "organum-audio"
+    pid: nil, etat: nil, echecs: 0, prochain_essai: 0, lance_a: 0, externe: false
+  }
+  source = Slurp assistant.ARCHIVE
+  unless source and #source > 0
+    HELPER.etat = "non_embarque"
+    Log kLogWarn, "organum : assistant natif macOS non embarqué (#{assistant.ARCHIVE} absent)"
+    return
+  unless unix.makedirs HELPER.dossier, tonumber("700", 8)
+    HELPER.etat = "extraction_impossible"
+    Log kLogWarn, "organum : dossier de l'assistant natif macOS impossible à créer : #{HELPER.dossier}"
+    return
+  pcall unix.chmod, HELPER.dossier, tonumber("700", 8)
+  -- Fichier temporaire puis renommage : un assistant en cours d'exécution
+  -- garde son inode, et aucun extrait à moitié écrit n'est jamais exécuté.
+  deja = Slurp HELPER.chemin
+  unless deja == source
+    tmp = "#{HELPER.chemin}.tmp.#{unix.getpid!}"
+    unless Barf tmp, source, tonumber("700", 8)
+      pcall unix.unlink, tmp
+      HELPER.etat = "extraction_impossible"
+      Log kLogWarn, "organum : extraction de l'assistant natif macOS impossible : #{tmp}"
+      return
+    unless pcall unix.rename, tmp, HELPER.chemin
+      pcall unix.unlink, tmp
+      HELPER.etat = "extraction_impossible"
+      Log kLogWarn, "organum : installation de l'assistant natif macOS impossible : #{HELPER.chemin}"
+      return
+  pcall unix.chmod, HELPER.chemin, tonumber("700", 8)
+  unless unix.access HELPER.chemin, unix.X_OK
+    HELPER.etat = "lancement_impossible"
+    Log kLogWarn, "organum : assistant natif macOS non exécutable après installation : #{HELPER.chemin}"
+    return
+  if assistant_vivant!
+    HELPER.etat = "actif"
+    HELPER.externe = true
+    Log kLogInfo, "organum : assistant natif macOS déjà vivant, réutilisé"
+    return
+  lancer_assistant!
+
+do
+  ok, err = pcall installer_assistant
+  unless ok
+    HELPER = {etat: "extraction_impossible", log: HELPER and HELPER.log} unless HELPER
+    HELPER.etat = "extraction_impossible"
+    Log kLogWarn, "organum : préparation de l'assistant natif macOS impossible : #{err}"
+
 etat_sauve = do
   contenu = Slurp ETAT_FICHIER
   ok, e = pcall DecodeJson, contenu if contenu
@@ -735,11 +905,18 @@ if organum.demarrer
     chemin = if type(organum.midi_chemin) == "function" then organum.midi_chemin!
     -- Une socket peut exister sans que la connexion soit encore établie, ou
     -- survivre à un assistant tué : rester neutre plutôt que d'annoncer
-    -- « absent » ou « périmée » à tort.
-    if chemin and unix.stat chemin
-      Log kLogWarn, "organum : assistant MIDI pas encore connecté (socket présente) : #{chemin} ; s'il est arrêté ou si la socket est périmée, relancez plateforme/macos/build/organum-midi"
+    -- « absent » ou « périmée » à tort. Sous macOS, organum gère l'assistant
+    -- et le relancera ; ailleurs (socket simulée par les tests Linux), il
+    -- n'y a rien à lancer à la main.
+    if HELPER
+      if chemin and unix.stat chemin
+        Log kLogWarn, "organum : assistant MIDI pas encore connecté (socket présente) : #{chemin} ; organum le relancera si besoin (journal #{HELPER.log})"
+      else
+        Log kLogWarn, "organum : assistant MIDI absent (socket #{chemin or "inconnue"}) ; organum va le relancer (journal #{HELPER.log})"
+    else if chemin and unix.stat chemin
+      Log kLogWarn, "organum : assistant MIDI pas encore connecté (socket présente) : #{chemin}"
     else
-      Log kLogWarn, "organum : assistant MIDI absent (socket #{chemin or "inconnue"}) ; lancez plateforme/macos/build/organum-midi"
+      Log kLogWarn, "organum : assistant MIDI absent (socket #{chemin or "inconnue"})"
   EFFECTIF.taux = etat_effectif.taux
   EFFECTIF.periode = etat_effectif.periode
   EFFECTIF.peripherique = periph_effectif
@@ -788,6 +965,7 @@ sauvegarder_etat = ->
 
 _G.OnServerHeartbeat = ->
   pcall sauvegarder_etat
+  pcall surveiller_assistant if HELPER
   return
 ProgramHeartbeatInterval 2000
 
@@ -1022,6 +1200,8 @@ qualite_etat = ->
     erreur: e.qualite.audio_erreur
     demarre: e.qualite.audio_demarre
     application: e.qualite.application_audio == true
+    assistant_etat: HELPER and HELPER.etat
+    assistant_log: HELPER and HELPER.log
   }
   etat_qualite = {
     temperament: e.temperament
@@ -1063,6 +1243,10 @@ qualite_etat = ->
     capacite: e.qualite.capacite or 0
     latence_ms: e.qualite.latence_ms or 0
     audio_demarre: e.qualite.audio_demarre == true
+    assistant_etat: HELPER and HELPER.etat or ""
+    assistant_embarque: HELPER != nil and HELPER.etat != "non_embarque"
+    assistant_log: HELPER and HELPER.log or ""
+    assistant_pid: HELPER and HELPER.pid or 0
     niveau: q.niveau
     auto: q.auto
     audio_disponible: e.audio_disponible == true
@@ -1581,7 +1765,7 @@ _G.OnHttpRequest = ->
   elseif path == "/midi"
     SetStatus 200
     SetHeader "Content-Type", "text/html; charset=utf-8"
-    Write page_midi MIDI_SOCKET
+    Write page_midi MIDI_SOCKET, HELPER and HELPER.etat, HELPER and HELPER.log
   elseif path == "/audio"
     SetStatus 200
     SetHeader "Content-Type", "text/html; charset=utf-8"

@@ -411,12 +411,14 @@ script = [[
 })();
 ]]
 
-(socket) ->
+(socket, assistant_etat, assistant_log) ->
   -- Le texte d'avertissement n'est embarqué que si le backend socket est
-  -- celui qui est utilisé : sous ALSA/WinMM, aucun organum-midi à lancer.
+  -- celui qui est utilisé : sous ALSA/WinMM, aucun assistant à lancer. Le
+  -- message vient de la règle pure partagée, avec l'état de l'assistant
+  -- embarqué (absent de l'archive, ou impossible à lancer).
   attributs_ports = {}
   if socket == true
-    attributs_ports["data-message-assistant-absent"] = escape(modele.message_ports_vide(true, false, true) or "")
+    attributs_ports["data-message-assistant-absent"] = escape(modele.message_ports_vide(true, false, true, assistant_etat, assistant_log) or "")
   page = h.html lang: "fr",
     h.head {},
       h.meta charset: "utf-8",

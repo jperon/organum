@@ -46,6 +46,20 @@ if [ -z "$WEB" ]; then
   cp "$ROOT/../ui/polices/"* "$STAGE/.polices/"
   FICHIERS+=" .polices/*"
 fi
+# Assistant natif macOS (CoreMIDI et CoreAudio) : embarqué pour que
+# l'utilisateur n'ait qu'un seul binaire à lancer. Absent d'une machine
+# Linux : avertissement sans échec, organum.com reste utilisable. Les droits
+# du zip ne sont pas fiables pour un exécutable : init.moon refait chmod 0700
+# après extraction.
+HELPER="$ROOT/../plateforme/macos/build/organum-helper"
+if [ -f "$HELPER" ]; then
+  mkdir -p "$STAGE/.organum"
+  cp "$HELPER" "$STAGE/.organum/organum-helper"
+  chmod 0755 "$STAGE/.organum/organum-helper"
+  FICHIERS+=" .organum/*"
+else
+  echo "avertissement : $HELPER absent ; organum.com sera sans assistant natif macOS" >&2
+fi
 
 cp "$ORGANUM" "$OUT.tmp"
 (cd "$STAGE" && zip -q "$OUT.tmp" $FICHIERS)

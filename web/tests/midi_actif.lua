@@ -40,10 +40,21 @@ aide.egal(m.message(false, false, false),
   "MIDI désactivé sur cette plate-forme.",
   "message : MIDI coupé")
 aide.egal(m.message(true, false, true),
-  "Assistant MIDI absent : lancez organum-midi (voir plateforme/macos/LANCEMENT.md).",
+  "Assistant MIDI absent : organum ne l'a pas lancé (voir plateforme/macos/LANCEMENT.md).",
   "message : assistant socket absent")
 aide.egal(m.message(nil, false, true),
   "MIDI désactivé sur cette plate-forme.",
   "message : état indisponible annoncé")
+
+-- Assistant embarqué : l'archive sans helper et l'échec de lancement ont
+-- chacun leur message, plus précis que « assistant absent ».
+local non_embarque = m.message(true, false, true, "non_embarque")
+aide.verifie(non_embarque and non_embarque:find("archive", 1, true) ~= nil,
+  "message : archive sans assistant")
+local echec = m.message(true, false, true, "lancement_impossible", "/tmp/h.log")
+aide.verifie(echec and echec:find("/tmp/h.log", 1, true) ~= nil,
+  "message : lancement impossible nomme le journal")
+aide.egal(m.message(true, true, true, "non_embarque"), nil,
+  "message : assistant connecté, aucun message malgré l'état")
 
 aide.termine()

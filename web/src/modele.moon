@@ -8,6 +8,8 @@
 --   modele.etat_puce true, false     --> "orange"
 --   modele.libelle_association a, divisions
 
+assistant_module = require "assistant"
+
 -- Abréviation d'un clavier pour les accouplements : « Manual III » → III,
 -- « Pedal » → P ; sinon le nom tel quel.
 abrege = (nom) ->
@@ -221,11 +223,14 @@ etat_port = (p) ->
 
 -- Message de la liste vide des ports MIDI : le backend socket est celui
 -- qui est utilisé, mais son assistant n'est pas connecté (cas macOS sans
--- organum-midi). Hors backend socket (ALSA, WinMM), il n'y a pas d'assistant
--- à lancer : nil laisse le script afficher son message habituel.
-message_ports_vide = (disponible, assistant, socket) ->
+-- assistant lancé). Hors backend socket (ALSA, WinMM), il n'y a pas
+-- d'assistant à lancer : nil laisse le script afficher son message habituel.
+-- `etat` et `log` viennent de la gestion de l'assistant embarqué : ils
+-- distinguent une archive sans helper d'un helper impossible à lancer.
+message_ports_vide = (disponible, assistant, socket, etat, log) ->
   if disponible == true and assistant == false and socket == true
-    "Assistant MIDI absent : aucun port ne sera visible. Lancez organum-midi (voir plateforme/macos/LANCEMENT.md)."
+    assistant_module.message(etat, log) or
+      "Assistant MIDI absent : aucun port ne sera visible. organum ne l'a pas lancé (voir plateforme/macos/LANCEMENT.md)."
 
 {
   :abrege

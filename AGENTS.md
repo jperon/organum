@@ -82,30 +82,35 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   backend socket (macOS, ou forçage Linux ; jamais Windows) ; `GET
   /api/midi/ports` publie ce choix en `socket` à côté d'`assistant`, et
   `/midi` n'affiche son message « assistant absent » que si `socket` est
-  vrai, au lieu d'inviter à lancer `organum-midi` sous ALSA. L'échec audio reste fatal sur Linux
+  vrai, au lieu d'inviter à lancer un assistant sous ALSA. L'échec audio reste fatal sur Linux
   quand un backend existe ; le mode dégradé n'appelle jamais `unix.exit`.
   Tests : `web/tests/degradation.lua`,
   `web/tests/midi_actif.lua`, `web/scripts/test-sans-backend.sh` et
   `web/scripts/test-midi-socket.sh` (dont MIDI socket + audio dégradé).
-- États audio affichés (étape 7 du chantier audio) : la règle pure
+- États audio affichés : la règle pure
   `degradation.etat_audio {supportee, sans_backend, socket, assistant,
-  disponible, erreur}` (dans `web/src/degradation.moon`) distingue cinq
-  situations, dans cet ordre : `sans_backend` (aucun backend sur la
-  plate-forme → « Audio non pris en charge sur cette plate-forme. »),
+  disponible, erreur, assistant_etat, assistant_log}` (dans
+  `web/src/degradation.moon`) distingue notamment, dans cet ordre :
+  `sans_backend` (aucun backend sur la plate-forme → « Audio non pris en
+  charge sur cette plate-forme. »),
   `desactive` (forçage `ORGANUM_SANS_BACKEND` ou axe coupé), `sans_sortie`
   (`audio_erreur` contient « aucune sortie audio », ACK statut 2 de
   l'assistant → « Aucune sortie audio : vérifiez Réglages Système → Son →
   Sortie. »), `incompatible` (`audio_erreur` contient « version du protocole
   audio incompatible » ou « version de l'anneau audio incompatible » : le
   message brut, qui nomme les deux versions et demande de recompiler les deux
-  binaires, reste affiché), puis `assistant_absent` (`audio_assistant == 0`
-  → « Assistant audio absent : lancez `organum-audio`… », non alarmant).
+  binaires, reste affiché), puis les états de l'assistant embarqué
+  (`non_embarque` : archive sans binaire ; `extraction_impossible` ;
+  `lancement_impossible`), avec le message de `web/src/assistant.moon`, puis
+  `assistant_absent` (`audio_assistant == 0` → « Assistant audio absent :
+  organum ne l'a pas lancé… », non alarmant).
   Audio opérationnel : `nil, nil`, aucun message. L'erreur est examinée
   **avant** l'assistant, car un ACK statut 2 ou un refus de version laisse
   aussi `audio_assistant` à 0.
   `web/src/midi_actif.moon` expose de même `midi_actif.message(disponible,
-  assistant, socket)` (« MIDI désactivé… » ou « Assistant MIDI absent… »),
-  nil quand le MIDI fonctionne. `qualite_etat` publie `audio_etat`,
+  connecte, socket, etat, log)` (« MIDI désactivé… », état précis de
+  l'assistant, ou « Assistant MIDI absent… »), nil quand le MIDI fonctionne.
+  `qualite_etat` publie `audio_etat`,
   `audio_message` et `midi_message` dans `/api/orgue` ; `page.moon`
   (bandeau, id `mode-degrade` conservé), `page_audio.moon` (ligne
   `qualite-plateforme`) et `fenetre.moon` (une ligne tronquée par message)
@@ -152,8 +157,30 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   organum** : il n'a plus la protection `LOCAL_PEERPID` de l'ancien
   assistant MIDI et meurt donc avec le groupe de processus de son parent
   (SIGTERM de redbean) ; un service permanent passe par un LaunchAgent, dans
-  son propre groupe. Mode d'emploi et LaunchAgent unique :
-  `plateforme/macos/LANCEMENT.md`. Compilé sur la VM macOS de test (clang 17,
+  son propre groupe. `web/scripts/build.sh` l'embarque sous
+  `.organum/organum-helper` **si le fichier existe** (avertissement sans échec
+  sinon, pour construire sous Linux). Au démarrage macOS, `init.moon`
+  l'extrait dans `$TMPDIR/.organum/organum-helper` (`0700`, écriture par
+  fichier temporaire puis renommage), sonde les sockets pour **réutiliser**
+  une instance existante (lancement manuel ou LaunchAgent), sinon le lance
+  dans son groupe de processus avec sa sortie dans
+  `$TMPDIR/.organum/organum-helper.log` (`ORGANUM_ASSISTANT_VERBOSE=1` ajoute
+  `--verbose`). Redbean récolte lui-même tous ses fils (`wait4(-1)`) : la
+  surveillance depuis `OnServerHeartbeat` ne fait donc pas de `wait` ciblé,
+  elle sonde les sockets et relance ; trois échecs rapprochés, ou un `exec`
+  en code 126, donnent `assistant_etat = "lancement_impossible"`. États
+  publiés : `non_embarque` (archive sans binaire), `extraction_impossible`,
+  `lancement_impossible`, `actif` (nil = pas concerné) ; les messages
+  correspondants, en français et sans reproche, sont dans
+  `web/src/assistant.moon` et repris par `degradation.moon`,
+  `midi_actif.moon` et `modele.moon`. Rien de tout cela n'existe sous Linux
+  (aucune extraction, aucun lancement, aucune variable). Les chemins de
+  socket par défaut du helper sont bien `organum-midi-<uid>.sock` et
+  `organum-audio-<uid>.sock` : `choisir_chemin` recevait `"midi"`/`"audio"`
+  au lieu des préfixes complets, ce qui créait `midi<uid>.sock` et rendait
+  l'assistant invisible. Tests purs : `web/tests/assistant.lua`. Mode
+  d'emploi et dépannage : `plateforme/macos/LANCEMENT.md`. Compilé sur la VM
+  macOS de test (clang 17,
   SDK 15.5) ; MIDI et audio simultanés validés sur cette VM (VMPK abonné,
   `audio_assistant:1`, `latence_ms` ≈ 56, `trames_jouees` en progression,
   crête non nulle dans l'anneau avec un jeu allumé), ainsi que les échecs

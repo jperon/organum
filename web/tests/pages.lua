@@ -139,7 +139,7 @@ aide.verifie(piege:find('&amp;&lt;&gt;&quot;', 1, true) ~= nil,
 -- Bandeau d'état : chaque axe a son message, et un axe qui fonctionne se
 -- tait. L'ancien texte « Audio et MIDI indisponibles » ne doit plus revenir.
 local page_audio_seule = page(divisions, 32, 0, {
-  audio_message = "Assistant audio absent : lancez organum-audio (voir plateforme/macos/LANCEMENT.md).",
+  audio_message = "Assistant audio absent : organum ne l'a pas lancé (voir plateforme/macos/LANCEMENT.md).",
   midi_message = "",
 })
 aide.verifie(page_audio_seule:find('id="mode-degrade"', 1, true) ~= nil,
@@ -150,7 +150,7 @@ aide.verifie(page_audio_seule:find("Audio et MIDI indisponibles", 1, true) == ni
   "page : plus de message global audio et MIDI")
 local page_midi_seul = page(divisions, 32, 0, {
   audio_message = "",
-  midi_message = "Assistant MIDI absent : lancez organum-midi (voir plateforme/macos/LANCEMENT.md).",
+  midi_message = "Assistant MIDI absent : organum ne l'a pas lancé (voir plateforme/macos/LANCEMENT.md).",
 })
 aide.verifie(page_midi_seul:find("Assistant MIDI absent", 1, true) ~= nil,
   "page : message d'assistant MIDI séparé")
@@ -228,7 +228,7 @@ aide.verifie(audio:find("q.audio_message", 1, true) ~= nil,
   "page audio : message d'état calculé côté serveur")
 aide.verifie(audio:find("Audio et MIDI indisponibles", 1, true) == nil,
   "page audio : plus de message global audio et MIDI")
-local audio_absent = page_audio("Assistant audio absent : lancez organum-audio (voir plateforme/macos/LANCEMENT.md).")
+local audio_absent = page_audio("Assistant audio absent : organum ne l'a pas lancé (voir plateforme/macos/LANCEMENT.md).")
 aide.verifie(audio_absent:find("Assistant audio absent", 1, true) ~= nil,
   "page audio : message d'état rendu côté serveur")
 -- L'ordre des attributs vient de pairs() : ne pas supposer « id » puis

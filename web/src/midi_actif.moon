@@ -5,6 +5,8 @@
 -- garde le MIDI actif sous ce forçage : c'est le cas d'un Mac sans audio et
 -- celui des tests Linux qui simulent l'assistant CoreMIDI.
 
+assistant = require "assistant"
+
 actif = (supportee, force, socket) ->
   supportee == true and (force != "1" or socket == true)
 
@@ -19,12 +21,14 @@ socket_actif = (plateforme, imposee) ->
 -- modele.message_ports_vide (qui ne parle que des ports). Un backend absent
 -- ou coupé est annoncé ; un backend socket sans assistant l'est aussi, car
 -- aucun port ne peut alors apparaître. Sinon nil : le MIDI fonctionne, ou
--- utilise ALSA/WinMM sans assistant à lancer.
-message = (disponible, assistant, socket) ->
+-- utilise ALSA/WinMM sans assistant à lancer. `etat` et `log` décrivent
+-- l'assistant natif macOS quand il est embarqué et géré par organum.
+message = (disponible, connecte, socket, etat, log) ->
   if disponible != true
     "MIDI désactivé sur cette plate-forme."
-  elseif socket == true and assistant == false
-    "Assistant MIDI absent : lancez organum-midi (voir plateforme/macos/LANCEMENT.md)."
+  elseif socket == true and connecte == false
+    assistant.message(etat, log) or
+      "Assistant MIDI absent : organum ne l'a pas lancé (voir plateforme/macos/LANCEMENT.md)."
   else
     nil
 

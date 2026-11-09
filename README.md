@@ -31,21 +31,29 @@ exécutable [cosmopolitan](https://github.com/jart/cosmopolitan)/redbean.
   au démarrage.
 
 Plate-forme : **Linux x86-64** pleinement éprouvé. Le code Windows (WinMM)
-est écrit mais non testé. **macOS** (XNU) fonctionne avec deux assistants
-externes, indépendants l'un de l'autre :
+est écrit mais non testé. **macOS** (XNU) fonctionne avec un **seul**
+assistant natif, `organum-helper`, qui sert à la fois CoreMIDI et CoreAudio
+par deux sockets Unix indépendantes :
 
-- le **MIDI** passe par un assistant CoreMIDI (`organum-midi`) et une socket
-  Unix ; sans lui, le MIDI est absent mais le reste fonctionne ;
-- l'**audio** passe par un assistant CoreAudio (`organum-audio`) et une
-  socket Unix avec un anneau partagé ; sans lui, ou sans périphérique de
-  sortie, l'orgue démarre quand même, sans son, et réessaie périodiquement.
+- le **MIDI** passe par CoreMIDI et la socket `organum-midi-<uid>.sock` ;
+- l'**audio** passe par CoreAudio, la socket `organum-audio-<uid>.sock` et
+  son anneau partagé `.pcm`.
 
-Les deux assistants se compilent sur un Mac avec
-`sh plateforme/macos/construire_assistant.sh` (résultats
-`plateforme/macos/build/organum-midi` et `organum-audio`, mode d'emploi dans
-`plateforme/macos/LANCEMENT.md`). L'interface distingue quatre états audio :
-plate-forme sans backend, axe désactivé, assistant absent, et aucune sortie
-audio ; aucun n'est présenté comme un plantage. `ORGANUM_SANS_BACKEND=1`
+La promesse « un seul fichier » vaut aussi sous macOS : si
+`plateforme/macos/build/organum-helper` existe au moment de la construction,
+il est **embarqué dans `organum.com`**. Au démarrage, organum l'extrait dans
+`$TMPDIR/.organum/`, le lance dans son groupe de processus, le relance s'il
+tombe, et réutilise une instance déjà lancée à la main ou par LaunchAgent.
+L'utilisateur ne lance donc que `organum.com`. L'assistant se compile une
+fois sur un Mac avec `sh plateforme/macos/construire_assistant.sh` ; sans ce
+fichier, la construction reste possible (sous Linux par exemple) et
+`organum.com` démarre normalement, en annonçant que l'assistant natif manque.
+
+L'interface distingue notamment : plate-forme sans backend, axe désactivé,
+assistant natif absent de l'archive, impossible à installer, impossible à
+lancer, assistant absent, et aucune sortie audio ; aucun n'est présenté
+comme un plantage. Le MIDI est dégradé indépendamment. Mode d'emploi
+et dépannage : `plateforme/macos/LANCEMENT.md`. `ORGANUM_SANS_BACKEND=1`
 permet de reproduire le mode sans audio sous Linux pour les tests ; l'axe
 MIDI reste pilotable séparément.
 
@@ -313,6 +321,7 @@ livrer le son à temps. Ne pas la relever au-dessus de PipeWire.
 | `ORGANUM_CALIBRATION_VOIX` | `250` | Réservé aux tests : nombre de voix de référence de la calibration |
 | `ORGANUM_MIDI_SOCKET` | auto | Chemin de la socket de l'assistant MIDI macOS ; non vide sous Linux, impose le backend socket (tests) |
 | `ORGANUM_AUDIO_SOCKET` | auto | Chemin de la socket de l'assistant audio macOS ; non vide sous Linux, impose le backend socket et le démarrage opportuniste (tests) |
+| `ORGANUM_ASSISTANT_VERBOSE` | non | `1` : lance `organum-helper` avec `--verbose` (journal dans `$TMPDIR/.organum/organum-helper.log`) |
 | `ORGANUM_DIGEST` | `etat.json.digest` | Fichier texte `utilisateur:organum:HA1` (absent ou vide : chemin par défaut) |
 | `ORGANUM_RESEAUX_FICHIER` | `etat.json.reseaux` | Fichier texte des sous-réseaux autorisés, un par ligne (absent ou vide : chemin par défaut) |
 
@@ -474,7 +483,7 @@ un lien) dans `externe/` avant de lancer le script.
 | Dossier | Contenu |
 |---|---|
 | `moteur/` | Moteur d'Aeolus (C++/JUCE), API C (`api/`), ressources embarquées |
-| `plateforme/` | Audio et MIDI : ALSA (Linux), WinMM (Windows), sockets vers les assistants CoreMIDI et CoreAudio (macOS) ; quatre états audio distincts, gérés par `cosmo/lorganum.c` et `web/src/degradation.moon` |
+| `plateforme/` | Audio et MIDI : ALSA (Linux), WinMM (Windows), sockets vers l'assistant CoreMIDI et CoreAudio (macOS) ; états audio distincts (dont archive sans assistant, installation ou lancement impossible), gérés par `cosmo/lorganum.c`, `web/src/degradation.moon` et `web/src/assistant.moon` |
 | `cosmo/` | Module Lua `organum`, intégration à redbean, correctif cosmopolitan |
 | `ui/` | Fenêtre sans bibliothèque (protocoles Wayland et X11), Nuklear |
 | `web/` | Interfaces web et native (MoonScript), assemblage de `organum.com` |
