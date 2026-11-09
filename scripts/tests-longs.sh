@@ -132,6 +132,8 @@ if [ -x "$RACINE/web/build/organum.com" ]; then
     sh "$RACINE/web/scripts/test-reseaux.sh"
   executer "transposition (web/scripts/test-transposition.sh)" \
     sh "$RACINE/web/scripts/test-transposition.sh"
+  executer "clavier web (web/scripts/test-clavier.sh)" \
+    sh "$RACINE/web/scripts/test-clavier.sh"
 else
   ignore "API qualité (web/build/organum.com absent ; lancer web/scripts/build.sh)"
   ignore "délai de première réponse (web/build/organum.com absent ; lancer web/scripts/build.sh)"
@@ -141,6 +143,7 @@ else
   ignore "authentification Digest (web/build/organum.com absent ; lancer web/scripts/build.sh)"
   ignore "contrôle d'accès par sous-réseau (web/build/organum.com absent ; lancer web/scripts/build.sh)"
   ignore "transposition (web/build/organum.com absent ; lancer web/scripts/build.sh)"
+  ignore "clavier web (web/build/organum.com absent ; lancer web/scripts/build.sh)"
 fi
 
 # --- Couche plate-forme sans carte -----------------------------------------

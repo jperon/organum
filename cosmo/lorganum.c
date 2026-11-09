@@ -572,6 +572,14 @@ static void appliquer(const struct commande *c) {
       break;
     case CMD_MIDI: {
       unsigned char m[3] = {c->a, c->b, c->c};
+      // Même marquage d'activité que le fil MIDI du système : une note
+      // injectée par le tube (clavier web) doit apparaître dans
+      // canaux_actifs, sans allocation ni verrou dans le fil audio.
+      if ((m[0] & 0xF0) < 0xF0) {
+        int canal = m[0] & 0x0F;
+        g_echeances[canal] =
+            g_echantillons + (unsigned long long)(g_taux * 250 + 999) / 1000;
+      }
       envoyer_midi_filtre(m);
       break;
     }

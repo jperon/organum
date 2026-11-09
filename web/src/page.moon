@@ -6,6 +6,7 @@ h = require "html"
 style = require "style"
 client = require "client"
 modele = require "modele"
+clavier = require "clavier"
 
 escape = (s) ->
   s = tostring s
@@ -76,6 +77,49 @@ division_html = (di, div, divisions, transposition = 0, colonne_transposition = 
     commande_transposition,
     h.button class: "btn small cancel-division", ["data-division"]: d, type: "button", "Tout annuler"
 
+-- Panneau repliable « Clavier », replié par défaut : <details> natif, sans
+-- JavaScript pour le repli. Une option par division réellement publiée par
+-- /api/orgue ; sa valeur est le premier canal MIDI que la division écoute.
+-- Un jeu de deux octaves (do 4 à si 5) est rendu en touches blanches et
+-- noires ; le script client gère l'appui, le glissando et le relâchement.
+clavier_html = (divisions) ->
+  options = {}
+  for i, div in ipairs(divisions or {})
+    nom = escape div.name
+    canal = clavier.canal_division div
+    attrs = {["data-division"]: tostring(i - 1)}
+    if canal
+      attrs.value = tostring canal
+      options[#options + 1] = h.option attrs, nom
+    else
+      attrs.value = ""
+      attrs.disabled = true
+      options[#options + 1] = h.option attrs, "#{nom} (aucun canal)"
+
+  octaves = for groupe in *clavier.octaves(60, 2)
+    touches = {}
+    for t in *groupe.blanches
+      touches[#touches + 1] = h.button type: "button", class: "touche touche-blanche", ["data-note"]: tostring(t.note), ["aria-label"]: escape(t.libelle), ["aria-pressed"]: "false", t.nom
+    for t in *groupe.noires
+      touches[#touches + 1] = h.button type: "button", class: "touche touche-noire noire-position-#{t.position}", ["data-note"]: tostring(t.note), ["aria-label"]: escape(t.libelle), ["aria-pressed"]: "false", ""
+    h.div class: "octave", table.unpack(touches)
+
+  avertissement_attrs = {class: "note clavier-avertissement", id: "clavier-avertissement"}
+  avertissement_attrs.hidden = true unless clavier.aucun_jeu_actif divisions
+  avertissement = h.p avertissement_attrs, "Aucun jeu n'est allumé : allumez au moins un jeu pour entendre le clavier."
+
+  barre = h.div class: "clavier-barre",
+    h.label class: "clavier-etiquette", ["for"]: "clavier-canal", "Jouer sur",
+    h.select id: "clavier-canal", ["aria-label"]: "Clavier MIDI de destination", table.unpack options,
+    h.span class: "note clavier-aide", "Souris ou doigt ; relâchez pour arrêter la note."
+  corps = h.div class: "clavier-corps",
+    barre,
+    avertissement,
+    h.div class: "clavier-octaves", role: "group", ["aria-label"]: "Clavier, deux octaves", table.unpack octaves
+  h.details class: "clavier-panneau", id: "clavier-panneau",
+    h.summary class: "clavier-summary", "Clavier",
+    corps
+
 (divisions, steps = 32, transposition = 0, infos = {}) ->
   colonne_transposition = modele.colonne_transposition divisions
   -- Bandeau d'état : chaque axe (audio, MIDI) a son propre message, calculé
@@ -126,6 +170,7 @@ division_html = (di, div, divisions, transposition = 0, colonne_transposition = 
           h.p class: "note", "L'affichage reflète l'état mémorisé par le serveur ; il peut différer si les jeux sont tirés ailleurs.",
           h.div class: "divisions", table.unpack [division_html(di - 1, div, divisions, transposition, colonne_transposition) for di, div in ipairs divisions],
           h.p class: "note", h.a(href: "https://github.com/jperon/organum", "Code source (AGPL-3.0)"),
+        clavier_html divisions,
       h.script client
 
   "<!DOCTYPE html>\n" .. page

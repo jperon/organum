@@ -370,6 +370,41 @@ JS = [[
       return -1;
     }
 
+    // Message discret du clavier : tant qu'aucun jeu publié n'est allumé,
+    // jouer ne produira rien. Aucun jeu n'est allumé automatiquement.
+    function majClavierAvertissement() {
+      var p = document.getElementById('clavier-avertissement');
+      if (!p) { return; }
+      var actif = false;
+      (orgueState.stops || []).forEach(function (ligne) {
+        if (!Array.isArray(ligne)) { return; }
+        ligne.forEach(function (v) { if (v === 1) { actif = true; } });
+      });
+      p.hidden = actif;
+    }
+
+    // Le premier canal de chaque division peut changer depuis la page MIDI :
+    // le sélecteur du clavier suit les valeurs publiées, sans nom en dur.
+    function majClavierCanaux(divisions) {
+      var select = document.getElementById('clavier-canal');
+      if (!select || !Array.isArray(divisions)) { return; }
+      var options = select.querySelectorAll('option[data-division]');
+      var premier = null;
+      for (var k = 0; k < options.length; k++) {
+        var div = divisions[parseInt(options[k].getAttribute('data-division'), 10)];
+        var canaux = div && Array.isArray(div.canaux) ? div.canaux : [];
+        var canal = canaux.length ? Number(canaux[0]) : NaN;
+        var valide = isFinite(canal) && canal >= 1 && canal <= 16;
+        options[k].value = valide ? String(canal) : '';
+        options[k].disabled = !valide;
+        if (valide && premier === null) { premier = String(canal); }
+      }
+      var choisi = select.options[select.selectedIndex];
+      if (!select.value || (choisi && choisi.disabled)) {
+        select.value = premier === null ? '' : premier;
+      }
+    }
+
     function renderMemoire(data) {
       if (typeof data.step === 'number') { orgueState.step = data.step; }
       if (typeof data.reverb === 'number') { orgueState.reverb = data.reverb; }
@@ -385,6 +420,7 @@ JS = [[
       if (comboInput) { comboInput.value = String((orgueState.step || 0) + 1); }
       majCombos();
       updateSyncUI();
+      majClavierAvertissement();
     }
 
     function renderAeolus(data) {
@@ -431,6 +467,7 @@ JS = [[
         orgueState.stops = stops;
         if (window.majGains) { window.majGains(data.divisions); }
         if (window.majLiens) { window.majLiens(data.divisions); }
+        majClavierCanaux(data.divisions);
       }
       document.querySelectorAll('.stop').forEach(function (btn) {
         var d = parseInt(btn.getAttribute('data-division'), 10);
@@ -439,6 +476,7 @@ JS = [[
         btn.setAttribute('data-state', s === 1 ? 'on' : 'off');
       });
       updateSyncUI();
+      majClavierAvertissement();
     }
 
     function applyOrgueData(data) {
@@ -608,6 +646,177 @@ JS = [[
         postOrgue({ panic: true });
       });
     }
+
+    // --- Clavier jouable (panneau replié par défaut) --------------------
+    // Les notes partent par POST /api/orgue {note:{canal,note,actif,…}} :
+    // le serveur les écrit dans le tube du moteur (CMD_MIDI), jamais dans
+    // le fil MIDI du système. Pointer Events couvre souris et doigt ; les
+    // navigateurs sans PointerEvent gardent les événements tactiles.
+    (function () {
+      var panneau = document.getElementById('clavier-panneau');
+      if (!panneau) { return; }
+      var select = document.getElementById('clavier-canal');
+      var notesActives = Object.create(null);
+      var pointeurs = Object.create(null);
+      var touchers = Object.create(null);
+      var VELOCITE = 100;
+
+      function canalCourant() {
+        if (!select) { return null; }
+        var canal = parseInt(select.value, 10);
+        return (isFinite(canal) && canal >= 1 && canal <= 16) ? canal : null;
+      }
+
+      function toucheDepuisElement(el) {
+        while (el && el !== panneau) {
+          if (el.classList && el.classList.contains('touche')) { return el; }
+          el = el.parentNode;
+        }
+        return null;
+      }
+
+      function toucheSous(x, y) {
+        return toucheDepuisElement(document.elementFromPoint(x, y));
+      }
+
+      function noteDe(touche) {
+        var note = parseInt(touche.getAttribute('data-note'), 10);
+        return (isFinite(note) && note >= 0 && note <= 127) ? note : null;
+      }
+
+      function envoyerNote(canal, note, actif, velocite) {
+        fetch(ORGUE_API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            note: { canal: canal, note: note, velocite: velocite, actif: actif }
+          }),
+          keepalive: true
+        }).catch(function () {});
+      }
+
+      function presser(touche, canal) {
+        var note = noteDe(touche);
+        if (note === null) { return; }
+        var cle = canal + ':' + note;
+        var etat = notesActives[cle];
+        if (etat) { etat.compte += 1; return; }
+        notesActives[cle] = { touche: touche, canal: canal, note: note, compte: 1 };
+        touche.setAttribute('aria-pressed', 'true');
+        envoyerNote(canal, note, true, VELOCITE);
+      }
+
+      function relacher(touche, canal) {
+        var note = noteDe(touche);
+        if (note === null) { return; }
+        var cle = canal + ':' + note;
+        var etat = notesActives[cle];
+        if (!etat) { return; }
+        etat.compte -= 1;
+        if (etat.compte > 0) { return; }
+        delete notesActives[cle];
+        etat.touche.setAttribute('aria-pressed', 'false');
+        envoyerNote(canal, note, false, 0);
+      }
+
+      function relacherTout() {
+        for (var cle in notesActives) {
+          var etat = notesActives[cle];
+          etat.touche.setAttribute('aria-pressed', 'false');
+          envoyerNote(etat.canal, etat.note, false, 0);
+        }
+        notesActives = Object.create(null);
+        pointeurs = Object.create(null);
+        touchers = Object.create(null);
+      }
+
+      if (select) {
+        select.addEventListener('change', relacherTout);
+      }
+      panneau.addEventListener('toggle', function () {
+        if (!panneau.open) { relacherTout(); }
+      });
+      window.addEventListener('blur', relacherTout);
+      window.addEventListener('pagehide', relacherTout);
+      document.addEventListener('visibilitychange', function () {
+        if (document.hidden) { relacherTout(); }
+      });
+
+      if (window.PointerEvent) {
+        panneau.addEventListener('pointerdown', function (e) {
+          var touche = toucheDepuisElement(e.target);
+          if (!touche) { return; }
+          var canal = canalCourant();
+          if (!canal) { return; }
+          e.preventDefault();
+          pointeurs[e.pointerId] = { touche: touche, canal: canal };
+          presser(touche, canal);
+          try { panneau.setPointerCapture(e.pointerId); } catch (err) {}
+        }, { passive: false });
+
+        document.addEventListener('pointermove', function (e) {
+          var p = pointeurs[e.pointerId];
+          if (!p) { return; }
+          e.preventDefault();
+          var touche = toucheSous(e.clientX, e.clientY);
+          if (touche === p.touche) { return; }
+          if (p.touche) { relacher(p.touche, p.canal); }
+          p.touche = touche;
+          if (touche) { presser(touche, p.canal); }
+        }, { passive: false });
+
+        function finPointeur(e) {
+          var p = pointeurs[e.pointerId];
+          if (!p) { return; }
+          if (p.touche) { relacher(p.touche, p.canal); }
+          delete pointeurs[e.pointerId];
+        }
+        document.addEventListener('pointerup', finPointeur);
+        document.addEventListener('pointercancel', finPointeur);
+      } else {
+        panneau.addEventListener('touchstart', function (e) {
+          var canal = canalCourant();
+          if (!canal) { return; }
+          var pris = false;
+          for (var i = 0; i < e.changedTouches.length; i++) {
+            var t = e.changedTouches[i];
+            var touche = toucheSous(t.clientX, t.clientY);
+            if (!touche) { continue; }
+            pris = true;
+            touchers[t.identifier] = { touche: touche, canal: canal };
+            presser(touche, canal);
+          }
+          if (pris) { e.preventDefault(); }
+        }, { passive: false });
+
+        panneau.addEventListener('touchmove', function (e) {
+          if (!Object.keys(touchers).length) { return; }
+          e.preventDefault();
+          for (var i = 0; i < e.changedTouches.length; i++) {
+            var t = e.changedTouches[i];
+            var p = touchers[t.identifier];
+            if (!p) { continue; }
+            var touche = toucheSous(t.clientX, t.clientY);
+            if (touche === p.touche) { continue; }
+            relacher(p.touche, p.canal);
+            p.touche = touche;
+            if (touche) { presser(touche, p.canal); }
+          }
+        }, { passive: false });
+
+        function finToucher(e) {
+          for (var i = 0; i < e.changedTouches.length; i++) {
+            var t = e.changedTouches[i];
+            var p = touchers[t.identifier];
+            if (!p) { continue; }
+            if (p.touche) { relacher(p.touche, p.canal); }
+            delete touchers[t.identifier];
+          }
+        }
+        document.addEventListener('touchend', finToucher);
+        document.addEventListener('touchcancel', finToucher);
+      }
+    })();
 
     // Transposition globale : −, valeur signée, +. La valeur vient de l'API
     // (GET ou attente longue), donc un changement fait dans la fenêtre native

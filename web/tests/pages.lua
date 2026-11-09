@@ -26,14 +26,14 @@ local page_midi = require "page_midi"
 local page_audio = require "page_audio"
 
 local divisions = {
-  {name = "Pedal", gain = 0.25, links = {}, stops = {
+  {name = "Pedal", gain = 0.25, links = {}, canaux = {1}, stops = {
     {name = "Bourdon\n16", on = true},
     {name = "<script>", on = false},
     {name = "Sans état"},
   }},
   {name = "Manual I", gain = 0.5, links = {{division = 0, on = true}},
-   stops = {{name = "Montre 8", on = true}}},
-  {name = "Manual II", gain = nil, links = {}, stops = {}},
+   canaux = {2}, stops = {{name = "Montre 8", on = true}}},
+  {name = "Manual II", gain = nil, links = {}, canaux = {3}, stops = {}},
 }
 local html_page = page(divisions, 32)
 
@@ -77,6 +77,56 @@ aide.verifie(html_page:find('data-step="32"', 1, true) == nil,
   "page : pas de combinaison 32 avec 32 étapes")
 aide.verifie(html_page:find('data-charge-classe-3="charge-rouge"', 1, true) ~= nil,
   "page : classes de charge exposées")
+
+-- Clavier jouable : panneau <details> replié par défaut, deux octaves,
+-- touches noires et sélecteur de division fondé sur les canaux publiés.
+aide.verifie(html_page:find('id="clavier-panneau"', 1, true) ~= nil,
+  "page : panneau Clavier présent")
+local debut_details = html_page:find("<details", 1, true)
+local fin_details = html_page:find(">", debut_details or 1, true)
+local balise_details = debut_details and html_page:sub(debut_details, fin_details) or ""
+aide.verifie(balise_details:find("open", 1, true) == nil,
+  "page : panneau Clavier replié par défaut")
+aide.verifie(html_page:find("<summary", 1, true) ~= nil and
+  html_page:find(">Clavier</summary>", 1, true) ~= nil,
+  "page : résumé Clavier natif")
+local debut_clavier = html_page:find('class="clavier-octaves"', 1, true) or 1
+local corps_clavier = html_page:sub(debut_clavier)
+local _, blanches = corps_clavier:gsub("touche%-blanche", "")
+local _, noires = corps_clavier:gsub("touche%-noire", "")
+aide.egal(blanches, 14, "page : 14 touches blanches (deux octaves)")
+aide.egal(noires, 10, "page : 10 touches noires (deux octaves)")
+aide.verifie(html_page:find('id="clavier-canal"', 1, true) ~= nil,
+  "page : sélecteur de clavier")
+local options_clavier = {}
+for tag in html_page:gmatch("<option[^>]*>") do options_clavier[#options_clavier + 1] = tag end
+local function a_option(valeur, division)
+  for _, tag in ipairs(options_clavier) do
+    if tag:find('value="' .. valeur .. '"', 1, true) and
+       tag:find('data-division="' .. division .. '"', 1, true) then
+      return true
+    end
+  end
+  return false
+end
+aide.verifie(a_option("1", "0"), "page : première division sur son canal")
+aide.verifie(a_option("2", "1"), "page : deuxième division sur son canal")
+local page_sans_jeu = page({{name = "Manual I", gain = 0.5, links = {},
+  canaux = {1}, stops = {{name = "Montre 8", on = false}}}}, 1)
+local pos_avert = page_sans_jeu:find('id="clavier-avertissement"', 1, true)
+local debut_avert = page_sans_jeu:sub(1, pos_avert or 1):find("<p[^>]*$")
+local fin_avert = page_sans_jeu:find(">", pos_avert or 1, true)
+local balise_avert = page_sans_jeu:sub(debut_avert or 1, fin_avert or 1)
+aide.verifie(balise_avert:find("hidden", 1, true) == nil,
+  "page : avertissement visible sans jeu allumé")
+aide.verifie(page_sans_jeu:find("Aucun jeu n'est allumé", 1, true) ~= nil,
+  "page : texte d'avertissement sans jeu allumé")
+local pos_avert_on = html_page:find('id="clavier-avertissement"', 1, true)
+local debut_avert_on = html_page:sub(1, pos_avert_on or 1):find("<p[^>]*$")
+local fin_avert_on = html_page:find(">", pos_avert_on or 1, true)
+local balise_avert_on = html_page:sub(debut_avert_on or 1, fin_avert_on or 1)
+aide.verifie(balise_avert_on:find("hidden", 1, true) ~= nil,
+  "page : avertissement masqué quand un jeu est allumé")
 
 -- Noms contenant des caractères HTML : échappement complet.
 local piege = page({{name = 'A&<>"', gain = 0.5, links = {},

@@ -405,6 +405,142 @@ CSS = [[
     cursor: not-allowed;
     border-color: var(--border);
   }
+  /* Clavier jouable : panneau repliable natif, replié par défaut. Les
+     touches ont une largeur fixe (≥ 44 px) et les deux octaves passent
+     l'une sous l'autre au téléphone ; aucun débordement horizontal. */
+  .clavier-panneau {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--panel);
+    overflow: hidden;
+  }
+  .clavier-panneau > summary {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 10px;
+    font-weight: 700;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .clavier-panneau[open] > summary {
+    border-bottom: 1px solid var(--border);
+  }
+  .clavier-corps {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px;
+    min-width: 0;
+  }
+  .clavier-barre {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .clavier-etiquette {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+  }
+  #clavier-canal {
+    min-height: 44px;
+    min-width: 0;
+    max-width: 100%;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel-raised);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.9rem;
+  }
+  .clavier-aide { flex: 1 1 180px; }
+  .clavier-avertissement { color: #ffcf7a; }
+  .clavier-avertissement[hidden] { display: none; }
+  .clavier-octaves {
+    --touche-largeur: 48px;
+    /* Cible tactile de 44 px ; le capuchon noir visible reste plus étroit. */
+    --touche-noire-largeur: 44px;
+    --touche-noire-visuel: 30px;
+    --touche-hauteur: 150px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-width: 0;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .octave {
+    position: relative;
+    display: flex;
+    flex: 0 0 auto;
+    width: calc(7 * var(--touche-largeur));
+    height: var(--touche-hauteur);
+  }
+  .touche {
+    font: inherit;
+    cursor: pointer;
+    padding: 0;
+    touch-action: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .touche-blanche {
+    flex: 1 1 0;
+    min-width: var(--touche-largeur);
+    height: 100%;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding-bottom: 6px;
+    border: 1px solid var(--border);
+    border-radius: 0 0 6px 6px;
+    background: #f7fafc;
+    color: #10151c;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+  .touche-noire {
+    position: absolute;
+    top: 0;
+    z-index: 2;
+    width: var(--touche-noire-largeur);
+    height: 62%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #f7fafc;
+  }
+  .touche-noire::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: var(--touche-noire-visuel);
+    height: 100%;
+    transform: translateX(-50%);
+    border: 1px solid #05070a;
+    border-radius: 0 0 4px 4px;
+    background: #10151c;
+    box-shadow: 0 2px 3px rgba(0, 0, 0, 0.5);
+  }
+  .touche-blanche[aria-pressed="true"] {
+    background: var(--accent);
+    border-color: var(--accent-bright);
+    color: var(--accent-ink);
+  }
+  .touche-noire[aria-pressed="true"]::before {
+    background: var(--accent);
+    border-color: var(--accent-bright);
+  }
+  .noire-position-1 { left: calc(var(--touche-largeur) - var(--touche-noire-largeur) / 2); }
+  .noire-position-2 { left: calc(2 * var(--touche-largeur) - var(--touche-noire-largeur) / 2); }
+  .noire-position-3 { left: calc(3 * var(--touche-largeur) - var(--touche-noire-largeur) / 2); }
+  .noire-position-4 { left: calc(4 * var(--touche-largeur) - var(--touche-noire-largeur) / 2); }
+  .noire-position-5 { left: calc(5 * var(--touche-largeur) - var(--touche-noire-largeur) / 2); }
+  .noire-position-6 { left: calc(6 * var(--touche-largeur) - var(--touche-noire-largeur) / 2); }
   .stops-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));

@@ -1192,6 +1192,7 @@ etat_orgue = ->
     divisions: for d in *e.divisions
       {
         name: d.nom, gain: d.gain
+        canaux: modele.canaux_liste d.canaux
         links: [{division: l.division - 1, on: l.actif} for l in *d.liens]
         stops: [{name: j.nom\gsub("\n", " "), on: j.actif} for j in *d.jeux]
       }
@@ -1391,6 +1392,14 @@ handle_orgue = ->
       organum.temperament data.temperament
     when "transposition"
       organum.transposition data.transposition
+    when "note"
+      -- Note du clavier web : elle entre par le tube (CMD_MIDI), jamais par
+      -- le fil MIDI du système. Le canal est celui du sélecteur de clavier,
+      -- déjà borné par validation.moon ; le moteur applique sa transposition.
+      n = data.note
+      velocite = if n.actif then (n.velocite or 100) else 0
+      statut = if n.actif then 0x90 else 0x80
+      organum.midi (statut | (n.canal - 1)), n.note, velocite
     when "volume"
       organum.volume data.volume
     when "panic"

@@ -100,8 +100,27 @@ impositions = (env, defaut) ->
 ACTIONS_ORGUE = {
   stop: true, cancel: true, step: true, reverb: true, panic: true,
   gain: true, link: true, qualite: true, volume: true, temperament: true,
-  transposition: true
+  transposition: true, note: true
 }
+
+-- Champs acceptés par POST /api/orgue {note}. Une note du clavier web entre
+-- par le tube du moteur (CMD_MIDI), sur un canal 1..16 ; le numéro de note
+-- est la hauteur MIDI 0..127, la vélocité 0..127 (100 par défaut).
+CHAMPS_NOTE = {canal: true, note: true, velocite: true, actif: true}
+
+valider_note = (n, divisions) ->
+  return nil, "note doit être un objet" unless type(n) == "table"
+  for k in pairs n
+    return nil, "note : champ inconnu : #{k}" unless CHAMPS_NOTE[k]
+  unless is_integer(n.canal) and n.canal >= 1 and n.canal <= 16
+    return nil, "note.canal doit être un entier entre 1 et 16"
+  unless is_integer(n.note) and n.note >= 0 and n.note <= 127
+    return nil, "note.note doit être un entier entre 0 et 127"
+  if n.velocite != nil and not (is_integer(n.velocite) and n.velocite >= 0 and n.velocite <= 127)
+    return nil, "note.velocite doit être un entier entre 0 et 127"
+  unless type(n.actif) == "boolean"
+    return nil, "note.actif doit être un booléen"
+  true
 
 -- Bornes du transpositeur global, en demi-tons (voir cosmo/transposition.h).
 TRANSPOSITION_MIN, TRANSPOSITION_MAX = -12, 12
@@ -160,6 +179,10 @@ valider_orgue = (data, divisions, nb_etapes, max_temperament) ->
     unless entier_borne data.transposition, TRANSPOSITION_MIN, TRANSPOSITION_MAX
       return nil, "transposition doit être un entier entre -12 et 12"
     "transposition"
+  elseif data.note != nil
+    ok, err = valider_note data.note, divisions
+    return nil, err unless ok
+    "note"
   elseif data.volume != nil
     unless is_finite_number(data.volume) and data.volume >= 0 and data.volume <= 1
       return nil, "volume hors limites"
@@ -222,5 +245,6 @@ valider_connexion_midi = (data) ->
   :temperament_depuis_etat
   :qualite_defauts, :qualite_fichier_normalisee, :impositions
   :division_valide, :valider_orgue, :valider_qualite
+  :valider_note
   :valider_connexion_midi
 }

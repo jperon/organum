@@ -444,6 +444,112 @@ async function testAccueil() {
   }
 }
 
+async function testClavier() {
+  await viewport(1100);
+  await navigate('/');
+  await attendre(
+    () => evaluer('document.getElementById("clavier-panneau") !== null'),
+    'web / : panneau Clavier présent'
+  );
+  const etatInitial = await evaluer(`(() => {
+    const d = document.getElementById('clavier-panneau');
+    const s = d && d.querySelector('summary');
+    return { ouvert: !!(d && d.open), libelle: s ? s.textContent.trim() : '' };
+  })()`);
+  verifie(
+    etatInitial.ouvert === false && etatInitial.libelle === 'Clavier',
+    'web / : panneau Clavier replié par défaut, libellé français'
+  );
+
+  await clic('document.querySelector("#clavier-panneau > summary")');
+  const ouvert = await attendre(
+    async () => (await evaluer('document.getElementById("clavier-panneau").open')) === true,
+    'web / : panneau Clavier ouvert par clic sur le résumé'
+  );
+  verifie(!!ouvert, 'web / : panneau Clavier ouvert par clic');
+
+  const disposition = await evaluer(`(() => {
+    const select = document.getElementById('clavier-canal');
+    const blancs = document.querySelectorAll('#clavier-panneau .touche-blanche');
+    const noirs = document.querySelectorAll('#clavier-panneau .touche-noire');
+    return {
+      canal: Number(select && select.value),
+      blancs: blancs.length,
+      noirs: noirs.length,
+      premier: blancs.length ? Number(blancs[0].getAttribute('data-note')) : null,
+      dernier: blancs.length ? Number(blancs[blancs.length - 1].getAttribute('data-note')) : null
+    };
+  })()`);
+  verifie(disposition.blancs >= 14 && disposition.noirs >= 10,
+    `web / : clavier d'au moins deux octaves (${disposition.blancs} blanches, ${disposition.noirs} noires)`);
+  verifie(disposition.canal >= 1 && disposition.canal <= 16,
+    `web / : canal de division sélectionné (${disposition.canal})`);
+  verifie(disposition.dernier - disposition.premier >= 23,
+    'web / : deux octaves continues de do à si');
+
+  const touche = 'document.querySelector("#clavier-panneau .touche-blanche")';
+  const r = await rect(touche);
+  if (!r) return;
+  const x = r.x + r.w / 2;
+  const y = r.y + r.h * 0.8;
+  await cdp.envoyer('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+  await cdp.envoyer('Input.dispatchMouseEvent', {
+    type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1
+  });
+  const recue = await attendre(
+    async () => {
+      const e = await api('/api/midi');
+      return (e.canaux_actifs || []).includes(disposition.canal) ? e : null;
+    },
+    `web / : note du clavier reçue (canal ${disposition.canal} actif)`
+  );
+  verifie(!!recue, 'web / : une touche enfoncée envoie la note au moteur');
+
+  // Sortie de la touche : le glissando relâche la note sans attendre le
+  // relâchement du bouton (piège classique de la note bloquée).
+  await cdp.envoyer('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 2 });
+  await cdp.envoyer('Input.dispatchMouseEvent', {
+    type: 'mouseReleased', x: 2, y: 2, button: 'left', buttons: 0, clickCount: 1
+  });
+  const relachee = await attendre(
+    async () => {
+      const e = await api('/api/midi');
+      return !(e.canaux_actifs || []).includes(disposition.canal) ? e : null;
+    },
+    'web / : sortie de la touche relâche la note'
+  );
+  verifie(!!relachee, 'web / : un clic hors de la touche relâche bien la note');
+
+  // Téléphone : panneau ouvert à 420 px, aucune débordement et cibles ≥ 44 px.
+  await viewport(420);
+  await navigate('/');
+  await attendre(
+    () => evaluer('document.getElementById("clavier-panneau") !== null'),
+    'web / à 420 px : panneau Clavier présent'
+  );
+  await clic('document.querySelector("#clavier-panneau > summary")');
+  await attendre(
+    async () => (await evaluer('document.getElementById("clavier-panneau").open')) === true,
+    'web / à 420 px : panneau Clavier ouvert'
+  );
+  const mesure = await evaluer(`(() => {
+    const d = document.documentElement;
+    const debord = Math.max(d.scrollWidth, document.body.scrollWidth) - d.clientWidth;
+    const petits = [];
+    for (const e of document.querySelectorAll('#clavier-panneau .touche')) {
+      const r = e.getBoundingClientRect();
+      if (r.width < 44 || r.height < 44) {
+        petits.push((e.getAttribute('aria-label') || 'touche') + '=' + r.width.toFixed(0) + 'x' + r.height.toFixed(0));
+      }
+    }
+    return { debord, petits };
+  })()`);
+  verifie(mesure.debord <= 1,
+    `web / à 420 px, clavier ouvert : aucun débordement horizontal (${mesure.debord} px)`);
+  verifie(mesure.petits.length === 0,
+    `web / à 420 px : touches ≥ 44 px (${mesure.petits.join(', ') || 'toutes'})`);
+}
+
 async function testMidi() {
   await viewport(1100);
   await navigate('/midi');
@@ -1168,6 +1274,7 @@ async function principal() {
   if (MODE === 'fill') return modeFill();
 
   await testAccueil();
+  await testClavier();
   await testMidi();
   await testAudio();
   await testReseaux();
