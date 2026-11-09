@@ -216,6 +216,44 @@ else
   ignore "C : gcc absent, codec MIDI macOS non testé"
 fi
 
+# --- Anneau audio partagé ----------------------------------------------------
+if command -v gcc >/dev/null 2>&1; then
+  if gcc -std=c11 -O2 -Wall -Wextra -Werror -I "$RACINE/plateforme" \
+       "$RACINE/plateforme/tests/anneau_audio.c" -o "$TMP/anneau_audio" \
+       -pthread 2>"$TMP/gcc-anneau.log"; then
+    if "$TMP/anneau_audio" >"$TMP/anneau.log" 2>&1; then
+      ok "C : anneau audio (SPSC, compteurs, arrêt, fork)"
+    else
+      cat "$TMP/anneau.log"
+      echec "C : anneau audio"
+    fi
+  else
+    cat "$TMP/gcc-anneau.log" >&2
+    echec "C : compilation anneau audio"
+  fi
+else
+  ignore "C : gcc absent, anneau audio non testé"
+fi
+
+# --- Anneau audio après fork -------------------------------------------------
+if command -v gcc >/dev/null 2>&1; then
+  if gcc -std=c11 -O2 -Wall -Wextra -Werror -I "$RACINE/plateforme" \
+       "$RACINE/plateforme/tests/anneau_fork.c" -o "$TMP/anneau_fork" \
+       2>"$TMP/gcc-anneau-fork.log"; then
+    if "$TMP/anneau_fork" >"$TMP/anneau-fork.log" 2>&1; then
+      ok "C : anneau audio partagé après fork"
+    else
+      cat "$TMP/anneau-fork.log"
+      echec "C : anneau audio après fork"
+    fi
+  else
+    cat "$TMP/gcc-anneau-fork.log" >&2
+    echec "C : compilation anneau fork"
+  fi
+else
+  ignore "C : gcc absent, anneau audio après fork non testé"
+fi
+
 # --- Un seul lecteur de la socket MIDI --------------------------------------
 # Un fils de requête redbean hérite de la socket ; s'il lisait, il volerait
 # des trames au fil audio. Le test inclut midi_socket.c avec un cosmo.h
