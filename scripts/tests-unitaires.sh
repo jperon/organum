@@ -254,6 +254,25 @@ else
   ignore "C : gcc absent, anneau audio après fork non testé"
 fi
 
+# --- Codec des trames audio macOS --------------------------------------------
+if command -v gcc >/dev/null 2>&1; then
+  if gcc -std=c11 -O2 -Wall -Wextra -Werror -I "$RACINE/plateforme" \
+       "$RACINE/plateforme/tests/trames_audio.c" -o "$TMP/trames_audio" \
+       2>"$TMP/gcc-trames-audio.log"; then
+    if "$TMP/trames_audio" >"$TMP/trames-audio.log" 2>&1; then
+      ok "C : codec audio macOS (OAUD, CONFIG, ACK, DEVICE, STOP)"
+    else
+      cat "$TMP/trames-audio.log"
+      echec "C : codec audio macOS"
+    fi
+  else
+    cat "$TMP/gcc-trames-audio.log" >&2
+    echec "C : compilation trames_audio"
+  fi
+else
+  ignore "C : gcc absent, codec audio macOS non testé"
+fi
+
 # --- Un seul lecteur de la socket MIDI --------------------------------------
 # Un fils de requête redbean hérite de la socket ; s'il lisait, il volerait
 # des trames au fil audio. Le test inclut midi_socket.c avec un cosmo.h
