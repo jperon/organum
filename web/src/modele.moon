@@ -219,6 +219,13 @@ etat_port = (p) ->
   return "destination" if p.destination
   "disponible"
 
+-- Message de la liste vide des ports MIDI : le backend existe mais son
+-- assistant socket n'est pas connecté (cas macOS sans organum-midi).
+-- nil laisse le script de la page afficher son message habituel.
+message_ports_vide = (disponible, assistant) ->
+  if disponible == true and assistant == false
+    "Assistant MIDI absent : aucun port ne sera visible. Lancez organum-midi (voir plateforme/macos/LANCEMENT.md)."
+
 {
   :abrege
   :texte_transposition
@@ -239,6 +246,7 @@ etat_port = (p) ->
   :libelle_association
   :libelle_port
   :etat_port
+  :message_ports_vide
   :PLATEFORMES
   :libelle_plateforme
   :TEMPERAMENTS

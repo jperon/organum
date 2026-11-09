@@ -182,6 +182,17 @@ aide.egal(m.etat_port({destination = true}), "destination", "etat_port : destina
 aide.egal(m.etat_port({}), "disponible", "etat_port : disponible")
 aide.egal(m.etat_port(nil), "disponible", "etat_port : nil")
 
+-- message_ports_vide
+local absent = m.message_ports_vide(true, false)
+aide.verifie(type(absent) == "string" and absent:find("Assistant MIDI absent", 1, true) ~= nil,
+  "message_ports_vide : assistant absent signalé")
+aide.egal(m.message_ports_vide(true, true), nil,
+  "message_ports_vide : assistant présent, pas de message")
+aide.egal(m.message_ports_vide(false, false), nil,
+  "message_ports_vide : MIDI indisponible, message habituel")
+aide.egal(m.message_ports_vide(nil, false), nil,
+  "message_ports_vide : état inconnu, pas de message")
+
 aide.egal(m.texte_transposition(0), "0", "transposition : zéro")
 aide.egal(m.texte_transposition(3), "+3", "transposition : positif")
 aide.egal(m.texte_transposition(-2), "\226\136\1462", "transposition : négatif (moins U+2212)")

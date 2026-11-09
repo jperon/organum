@@ -65,6 +65,7 @@ script = [[
   var liste = document.getElementById('associations');
   var dernier = document.getElementById('dernier');
   var portsListe = document.getElementById('liste-ports');
+  var messageAssistantAbsent = portsListe.getAttribute('data-message-assistant-absent') || '';
   var portsAdresse = document.getElementById('adresse-midi');
   var messageConnexions = document.getElementById('message-connexions');
   var rafraichirPorts = document.getElementById('rafraichir-ports');
@@ -231,9 +232,15 @@ script = [[
     if (!ports.length) {
       var vide = document.createElement('p');
       vide.className = 'note';
-      vide.textContent = etatPorts.disponible === false
-        ? 'MIDI indisponible sur ' + (etatPorts.plateforme_libelle || 'cette plate-forme') + '.'
-        : 'Aucun port MIDI détecté.';
+      if (etatPorts.disponible === true && etatPorts.assistant === false && messageAssistantAbsent) {
+        // Backend socket présent sans son assistant : le dire, sans alarmer.
+        vide.className = 'note degrade';
+        vide.textContent = messageAssistantAbsent;
+      } else {
+        vide.textContent = etatPorts.disponible === false
+          ? 'MIDI indisponible sur ' + (etatPorts.plateforme_libelle || 'cette plate-forme') + '.'
+          : 'Aucun port MIDI détecté.';
+      }
       portsListe.appendChild(vide);
       return;
     }
@@ -427,7 +434,7 @@ script = [[
             h.h2 id: "titre-connexions", "Connexions MIDI",
             h.button type: "button", class: "btn small", id: "rafraichir-ports", ["aria-label"]: "Rafraîchir la liste des ports MIDI", "Rafraîchir",
           h.p class: "note", id: "adresse-midi", "",
-          h.div class: "ports", id: "liste-ports", "",
+          h.div class: "ports", id: "liste-ports", "", ["data-message-assistant-absent"]: escape(modele.message_ports_vide(true, false) or ""),
           h.p class: "message", id: "message-connexions", role: "status", "",
       h.script script
 

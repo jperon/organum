@@ -103,6 +103,8 @@ aide.verifie(midi:find('data-canal-tous="Tous"', 1, true) ~= nil,
   "page MIDI : libellé canal tous")
 aide.verifie(midi:find("suivrePorts", 1, true) ~= nil,
   "page MIDI : suivi des ports dans le script")
+aide.verifie(midi:find('data-message-assistant-absent="Assistant MIDI absent', 1, true) ~= nil,
+  "page MIDI : message d'assistant absent disponible")
 aide.verifie(midi:find("← Orgue", 1, true) ~= nil, "page MIDI : retour à l'orgue")
 
 -- page_audio
