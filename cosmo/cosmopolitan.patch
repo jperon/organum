@@ -84,3 +84,18 @@ index 0ce5b42e..611d4314 100644
  
  //	move stack arguments
  	movdqu	SKEW+0x00(%rbp),%xmm0
+diff --git a/tool/net/redbean.c b/tool/net/redbean.c
+index 7530d6344..d4731dd16 100644
+--- a/tool/net/redbean.c
++++ b/tool/net/redbean.c
+@@ -1910,7 +1910,9 @@ static void ConfigureCertificate(mbedtls_x509write_cert *cw, struct Cert *ca,
+   //   3. add subject alt name (san) entry to cert for *.hostname
+   //
+   for (int i = 0; i < ips.n; ++i) {
+-    if (ips.p[i].is6 || IsLoopbackIp(ips.p[i].v4))
++    // Reverse-résoudre 0.0.0.0 n'a aucun sens : sous XNU getnameinfo()
++    // bloque ~17 s avant d'échouer, deux fois (certificats EC puis RSA).
++    if (ips.p[i].is6 || IsLoopbackIp(ips.p[i].v4) || !ips.p[i].v4)
+       continue;
+     uint32_t ip = ips.p[i].v4;
+     char rname[NI_MAXHOST];
