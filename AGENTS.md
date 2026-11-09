@@ -662,3 +662,32 @@ par l'article 13 de l'AGPL.
 - CI : `.github/workflows/rolling.yml` construit à chaque push sur `master`
   et remplace la publication `rolling`. La chaîne cosmocc est en cache, clé
   = empreinte de `scripts/dependances.sh` et du correctif.
+- **Relancer un orgue en service sous un autre utilisateur** (constaté sur un
+  orgue en production sous Void Linux, session graphique sway) : passer par
+  `runuser`, `su` ou tout chemin passant par PAM remet `RLIMIT_RTPRIO` à 0
+  quand le stack PAM employé n'inclut pas `pam_limits` (ou ne lit pas
+  `/etc/security/limits.d/` — hypothèse retenue, non instrumentée).
+  `pthread_setschedparam(SCHED_FIFO, 70)` échoue alors, `temps_reel` passe à
+  `false` et l'orgue tourne **sans priorité temps réel** ; cela ne se voit
+  **pas** dans l'API (`audio_disponible` reste vrai, `audio_erreur` vide) et
+  ne s'entend que sous charge, par des craquements. Seuls indices :
+  `temps_reel:false` dans `GET /api/orgue` et l'avertissement `SCHED_FIFO` du
+  journal. Remèdes mesurés : relancer par la **session graphique elle-même**
+  (le `exec` de la configuration sway, ou `swaymsg exec`), qui hérite de la
+  limite `@audio - rtprio 95` de `/etc/security/limits.d/` ; ou, depuis un
+  shell d'administration, en évitant PAM : `prlimit --rtprio=95:95 --
+  setpriv --reuid <utilisateur> --regid <utilisateur> --init-groups -- env
+  HOME=… XDG_RUNTIME_DIR=… WAYLAND_DISPLAY=… DISPLAY=… <binaire>`. Une
+  relance depuis un shell **sans** `XDG_RUNTIME_DIR`/`WAYLAND_DISPLAY` donne
+  un orgue **sans fenêtre native et sans audio** alors que l'API répond :
+  ne jamais conclure au succès sur la seule réponse HTTP. Pour arrêter
+  l'instance précédente, `SIGKILL` uniquement, jamais `SIGTERM` (voir
+  l'entrée « Arrêter organum tue tout son groupe de processus ») ; vérifier
+  d'abord que le `pgid` visé n'est pas celui du shell courant.
+- **Vérifier après toute relance d'un orgue en service**, sans se fier à
+  l'API seule : `temps_reel` à `true` ; sortie ALSA réellement en `RUNNING`
+  avec un `hw_ptr` qui progresse (`/proc/asound/card*/pcm*p/sub*/status`),
+  pas seulement `/api/orgue` qui répond ; présence de la **fenêtre native**
+  si une session graphique existe ; et identité des fichiers d'état
+  utilisateur (sha256 avant/après la relance), pour être sûr de ne pas avoir
+  écrit dans un autre `HOME`.
