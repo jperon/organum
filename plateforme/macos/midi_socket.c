@@ -47,6 +47,11 @@ struct midi {
     int fd;
     int etat;
     int partage; /* structure en mémoire partagée entre processus */
+    /* Processus qui a ouvert la socket : seul celui-ci lit. Les fils de
+       requête redbean héritent du descripteur et de cette structure ; un
+       recv() chez eux volerait des trames au fil audio, qui seul sait les
+       remettre au moteur. */
+    pid_t createur;
     int chemin_valide;
     char chemin[TRAMES_MIDI_SUN_PATH_MAX];
     struct timespec prochain_essai;
@@ -416,6 +421,7 @@ midi_t *midi_socket_midi_ouvrir(const char *nom_client, const char *nom_port)
 
     m->fd = -1;
     m->etat = ETAT_ATTENTE;
+    m->createur = getpid();
     m->max_frame = MIDI_SOCKET_MAX_FRAME;
     trame_decodeur_init(&m->decodeur, MIDI_SOCKET_MAX_FRAME);
 
@@ -548,6 +554,12 @@ int midi_socket_midi_lire(midi_t *m, midi_msg_t *msgs, int max)
 {
     if (m == NULL || msgs == NULL || max <= 0)
         return -1;
+    /* Un fils de requête ne lit jamais la socket : il ne saurait pas quoi
+       faire du message MIDI et le perdrait. Seul le processus créateur
+       (fil audio) consomme les trames, y compris les PING auxquels il
+       répond PONG. */
+    if (m->createur != getpid())
+        return 0;
     if (max > MIDI_SOCKET_MESSAGES)
         max = MIDI_SOCKET_MESSAGES;
 
@@ -632,7 +644,9 @@ void midi_socket_midi_fermer(midi_t *m)
 {
     if (m == NULL)
         return;
-    if (m->fd >= 0) {
+    /* Un fils ne ferme ni n'annonce la connexion du processus principal :
+       il se contente d'oublier son propre mappage. */
+    if (m->createur == getpid() && m->fd >= 0) {
         /* Adieu au mieux : le pair peut déjà être parti. */
         envoyer_trame(m, TRAMES_MIDI_TYPE_BYE, 0, NULL, 0);
         close(m->fd);

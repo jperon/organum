@@ -223,7 +223,9 @@ d'écoute ; organum ne possède que sa connexion.
    lit, n'écrit ni ne ferme la socket MIDI, et ne fait jamais `unlink()`. Seul
    le processus principal (ou le fil dédié qu'il désigne) manipule la socket.
    Un fils qui fermerait le descripteur hérité couperait la connexion du
-   processus principal.
+   processus principal. Le backend applique cette règle : `midi_socket.c`
+   mémorise le PID créateur et `midi_lire()` comme `midi_fermer()` ne font
+   rien dans tout autre processus.
 
 En résumé : l'assistant crée, possède et retire le fichier de socket ;
 organum ne fait que s'y connecter en tant que client `AF_UNIX` et se borne à

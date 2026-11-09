@@ -216,6 +216,31 @@ else
   ignore "C : gcc absent, codec MIDI macOS non testé"
 fi
 
+# --- Un seul lecteur de la socket MIDI --------------------------------------
+# Un fils de requête redbean hérite de la socket ; s'il lisait, il volerait
+# des trames au fil audio. Le test inclut midi_socket.c avec un cosmo.h vide
+# (le backend n'utilise IsXnu que par l'aiguillage) et vérifie qu'un fils ne
+# consomme rien alors que le père lit la note.
+if command -v gcc >/dev/null 2>&1; then
+  mkdir -p "$TMP/cosmo-vide"
+  : >"$TMP/cosmo-vide/cosmo.h"
+  if gcc -O2 -I "$TMP/cosmo-vide" -I "$RACINE/plateforme" \
+       "$RACINE/plateforme/tests/midi_socket_lecteur.c" \
+       -o "$TMP/midi_socket_lecteur" 2>"$TMP/gcc-lecteur.log"; then
+    if "$TMP/midi_socket_lecteur" >"$TMP/lecteur.log" 2>&1; then
+      ok "C : seul le processus créateur lit la socket MIDI"
+    else
+      cat "$TMP/lecteur.log"
+      echec "C : lecture de la socket MIDI par un fils"
+    fi
+  else
+    cat "$TMP/gcc-lecteur.log" >&2
+    echec "C : compilation midi_socket_lecteur"
+  fi
+else
+  ignore "C : gcc absent, lecteur unique MIDI non testé"
+fi
+
 # --- Tables C++ des tempéraments --------------------------------------------
 # Compilation mise en cache : scale.cpp et le test ne changent pas entre deux
 # exécutions. La première compilation (quelques secondes) est hors du budget

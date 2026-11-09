@@ -181,6 +181,12 @@ static int traiter_trames(struct lecture *l)
                 journal("SUBSCRIBE id=%u actif=%u", vue.corps[0],
                         vue.corps[1]);
             break;
+        case TRAMES_MIDI_TYPE_PONG:
+            /* Compté par test-midi-socket.sh : un PING doit produire
+               exactement un PONG. Deux lecteurs de la socket en
+               produiraient deux. */
+            journal("PONG reçu");
+            break;
         case TRAMES_MIDI_TYPE_BYE:
             journal("BYE reçu d'organum");
             return -1;

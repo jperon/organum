@@ -74,6 +74,25 @@ arreter_assistant() {
     ASSISTANT_PID=""
   fi
 }
+
+# Interroge l'API MIDI en parallèle (lecture seule et abonnements), pendant
+# que l'assistant émet des notes. Chaque fils de requête redbean hérite de la
+# socket MIDI ; il ne doit jamais en consommer une trame. On n'attend que les
+# curl lancés ici, jamais le serveur ni l'assistant.
+marteler_midi() {
+  _pids=""
+  _i=0
+  while [ "$_i" -lt 60 ]; do
+    curl -s --max-time 2 -o /dev/null "$URL/api/midi" & _pids="$_pids $!"
+    curl -s --max-time 2 -o /dev/null "$URL/api/midi/ports" & _pids="$_pids $!"
+    curl -s --max-time 2 -o /dev/null -X POST \
+      -H 'Content-Type: application/json' \
+      -d '{"client":1,"port":0,"connecte":true}' \
+      "$URL/api/midi/connexion" & _pids="$_pids $!"
+    _i=$((_i + 1))
+  done
+  for _p in $_pids; do wait "$_p" 2>/dev/null || true; done
+}
 nettoyer() {
   arreter_assistant
   arreter_serveur
@@ -302,6 +321,38 @@ if lancer_assistant 'note:1:64:100,pause:700,pc:15:3' --attendre-client 5000; th
   else
     echec "c : étape du séquenceur non changée ; vu : $corps"
   fi
+fi
+arreter_assistant
+
+# --- i. Lectures concurrentes : aucune note volée, un PONG par PING --------
+# 60 séries de trois requêtes HTTP (dont POST /api/midi/connexion) tournent
+# pendant que l'assistant abonne puis émet quatre notes sur des canaux
+# distincts. Si un fils de requête lisait la socket, il consommerait une
+# note (canal manquant) et répondrait aussi au PING (deux PONG).
+lancer_assistant \
+  'note:0:60:100,pause:300,note:1:61:100,pause:300,note:2:62:100,pause:300,note:3:63:100,pause:1800,note:0:60:0,note:1:61:0,note:2:62:0,note:3:63:0,ping,pause:200,ping,pause:200,ping,pause:1200' \
+  --attendre-client 5000
+marteler_midi &
+MARTELE_PID=$!
+if corps=$(attendre_motif "$URL/api/midi" '"canaux_actifs":[1,2,3,4]' 120); then
+  ok "i : les quatre notes survivent aux requêtes concurrentes"
+else
+  echec "i : note perdue pendant les requêtes concurrentes ; vu : $corps"
+fi
+wait "$MARTELE_PID" 2>/dev/null || true
+# Laisser arriver les trois PING de la fin de séquence, puis compter.
+i=0
+while [ "$i" -lt 100 ]; do
+  [ "$(grep -cF 'PONG reçu' "$JOURNAL_ASSISTANT" 2>/dev/null || true)" -ge 3 ] && break
+  sleep 0.02
+  i=$((i + 1))
+done
+nb_ping=$(grep -cF 'PING envoyé' "$JOURNAL_ASSISTANT" 2>/dev/null || true)
+nb_pong=$(grep -cF 'PONG reçu' "$JOURNAL_ASSISTANT" 2>/dev/null || true)
+if [ "$nb_ping" -gt 0 ] && [ "$nb_pong" -eq "$nb_ping" ]; then
+  ok "i : un seul PONG par PING ($nb_pong/$nb_ping)"
+else
+  echec "i : PONG incohérents ($nb_pong pour $nb_ping PING)"
 fi
 arreter_assistant
 
