@@ -125,21 +125,6 @@ jobs:
       # Les tests unitaires ont besoin de redbean comme interpréteur Lua 5.4 ;
       # l'arbre cosmopolitan est déjà construit à cette étape, on y prend le
       # binaire plutôt que d'installer un paquet supplémentaire.
-      # Les runners GitHub n'ont pas de carte son, mais le moteur exige
-      # /dev/snd/seq pour ouvrir ALSA en mode normal. Le module noyau snd-seq
-      # suffit : les suites utilisent la sortie muette « null ».
-      - name: Préparer le séquenceur MIDI ALSA
-        run: |
-          sudo modprobe snd-seq || true
-          if [ -e /dev/snd/seq ]; then
-            sudo chmod a+rw /dev/snd/seq
-          fi
-          ls -l /dev/snd || true
-          if [ ! -e /dev/snd/seq ]; then
-            echo "::error::séquenceur MIDI ALSA indisponible sur ce runner"
-            exit 1
-          fi
-
       - name: Préparer redbean pour les tests unitaires
         run: |
           make -C externe/cosmopolitan -j"$(nproc)" o//tool/net/redbean
@@ -149,20 +134,36 @@ jobs:
 
       # Suites réelles, sans navigateur ni Xvfb : elles lancent organum.com
       # sur une sortie muette (ORGANUM_PERIPHERIQUE=null), avec des ports et
-      # des états temporaires, et n'ouvrent jamais /dev/snd. Chaque étape doit
-      # faire échouer le job (pas de continue-on-error).
+      # des états temporaires, et n'ouvrent jamais de carte son. Chaque étape
+      # doit faire échouer le job (pas de continue-on-error).
+      #
+      # Les runners GitHub n'ont pas de séquenceur ALSA (/dev/snd/seq absent,
+      # module snd-seq non fourni par le noyau Azure). Les suites qui ne
+      # testent pas le backend MIDI forcent donc le backend socket via
+      # ORGANUM_MIDI_SOCKET : le serveur démarre sans assistant, comme sur
+      # macOS, et l'API, le moteur et le clavier restent pleinement exercés.
+      # Les backends MIDI et audio par socket ont leurs propres suites, qui
+      # posent et retirent elles-mêmes ces variables.
       - name: Tests unitaires (MoonScript, Lua, C/C++ purs)
         # Ce script est en bash (export -n, tableaux) : sous /bin/sh (dash
         # sur Ubuntu), il sortait immédiatement en code 2.
         run: bash scripts/tests-unitaires.sh
 
       - name: Mode dégradé sans backend audio ni MIDI
+        env:
+          # Le séquenceur ALSA manque sur le runner : la non-régression du
+          # mode ALSA normal est ignorée, le mode dégradé reste vérifié.
+          ORGANUM_TESTS_SANS_ALSA_MIDI: "1"
         run: sh web/scripts/test-sans-backend.sh
 
       - name: Délai de première réponse HTTP
+        env:
+          ORGANUM_MIDI_SOCKET: /tmp/organum-ci-midi.sock
         run: sh web/scripts/test-demarrage.sh
 
       - name: Clavier jouable par l'API
+        env:
+          ORGANUM_MIDI_SOCKET: /tmp/organum-ci-midi.sock
         run: sh web/scripts/test-clavier.sh
 
       - name: Backend MIDI par socket
@@ -172,12 +173,18 @@ jobs:
         run: sh web/scripts/test-audio-socket.sh
 
       - name: Authentification HTTP Digest
+        env:
+          ORGANUM_MIDI_SOCKET: /tmp/organum-ci-midi.sock
         run: sh web/scripts/test-authentification.sh
 
       - name: Contrôle d'accès par sous-réseau
+        env:
+          ORGANUM_MIDI_SOCKET: /tmp/organum-ci-midi.sock
         run: sh web/scripts/test-reseaux.sh
 
       - name: Transposition globale
+        env:
+          ORGANUM_MIDI_SOCKET: /tmp/organum-ci-midi.sock
         run: sh web/scripts/test-transposition.sh
 
       - name: Tests de la couche plate-forme (ALSA/MIDI)

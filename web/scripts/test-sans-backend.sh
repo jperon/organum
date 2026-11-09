@@ -200,24 +200,32 @@ if lancer degrade; then
 fi
 
 # --- Non-régression : comportement Linux normal ----------------------------
-if lancer normal; then
-  corps=$(curl -s --max-time 2 "$URL/api/orgue")
-  verifie "normal : audio_disponible vrai" '"audio_disponible":true' "$corps"
-  verifie "normal : midi_disponible vrai" '"midi_disponible":true' "$corps"
-  verifie "normal : mode_degrade faux" '"mode_degrade":false' "$corps"
-  ports=$(curl -s --max-time 2 "$URL/api/midi/ports")
-  verifie "normal : MIDI disponible" '"disponible":true' "$ports"
-  # Backend ALSA : aucun assistant à lancer, la page /midi ne doit pas
-  # proposer organum-midi (elle teste etatPorts.socket === true).
-  verifie "normal : backend non socket annoncé" '"socket":false' "$ports"
-  arreter
-fi
+# Sans séquenceur ALSA (runner de CI sans carte son), le backend MIDI normal
+# ne peut pas s'ouvrir : ces contrôles sont hors de portée. Le mode dégradé
+# ci-dessus reste entièrement exercé, et les autres suites de la CI forcent
+# le backend socket. En local, avec /dev/snd/seq, tout est vérifié.
+if [ -n "${ORGANUM_TESTS_SANS_ALSA_MIDI:-}" ]; then
+  echo "IGNORÉ : non-régression ALSA normale (séquenceur MIDI absent)"
+else
+  if lancer normal; then
+    corps=$(curl -s --max-time 2 "$URL/api/orgue")
+    verifie "normal : audio_disponible vrai" '"audio_disponible":true' "$corps"
+    verifie "normal : midi_disponible vrai" '"midi_disponible":true' "$corps"
+    verifie "normal : mode_degrade faux" '"mode_degrade":false' "$corps"
+    ports=$(curl -s --max-time 2 "$URL/api/midi/ports")
+    verifie "normal : MIDI disponible" '"disponible":true' "$ports"
+    # Backend ALSA : aucun assistant à lancer, la page /midi ne doit pas
+    # proposer organum-midi (elle teste etatPorts.socket === true).
+    verifie "normal : backend non socket annoncé" '"socket":false' "$ports"
+    arreter
+  fi
 
-if lancer zero; then
-  corps=$(curl -s --max-time 2 "$URL/api/orgue")
-  verifie "ORGANUM_SANS_BACKEND=0 : audio_disponible vrai" '"audio_disponible":true' "$corps"
-  verifie "ORGANUM_SANS_BACKEND=0 : mode_degrade faux" '"mode_degrade":false' "$corps"
-  arreter
+  if lancer zero; then
+    corps=$(curl -s --max-time 2 "$URL/api/orgue")
+    verifie "ORGANUM_SANS_BACKEND=0 : audio_disponible vrai" '"audio_disponible":true' "$corps"
+    verifie "ORGANUM_SANS_BACKEND=0 : mode_degrade faux" '"mode_degrade":false' "$corps"
+    arreter
+  fi
 fi
 
 if [ "$ECHECS" -ne 0 ]; then
