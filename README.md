@@ -30,18 +30,24 @@ exécutable [cosmopolitan](https://github.com/jart/cosmopolitan)/redbean.
 - **Persistance** : registration, combinaisons et réglages sont restaurés
   au démarrage.
 
-Plate-forme : **Linux x86-64**. Le code Windows (WinMM) est écrit mais non
-testé. macOS (XNU) fonctionne en **mode dégradé assumé** pour l’audio :
-l’interface web et le moteur démarrent, mais aucun backend audio n’est ouvert,
-aucun son n’est produit et aucune boucle de réessai audio n’est lancée. Le
-MIDI reste disponible sur macOS par un assistant CoreMIDI externe, qui parle
-à organum par une socket Unix (voir `plateforme/macos/PROTOCOLE-MIDI.md`) ;
-sans cet assistant, le MIDI est simplement absent. L’assistant se compile sur
-un Mac avec `sh plateforme/macos/construire_assistant.sh` (résultat
-`plateforme/macos/build/organum-midi`, mode d’emploi dans
-`plateforme/macos/LANCEMENT.md`).
-`ORGANUM_SANS_BACKEND=1` permet de reproduire le mode sans audio sous Linux
-pour les tests ; l’axe MIDI reste pilotable séparément.
+Plate-forme : **Linux x86-64** pleinement éprouvé. Le code Windows (WinMM)
+est écrit mais non testé. **macOS** (XNU) fonctionne avec deux assistants
+externes, indépendants l'un de l'autre :
+
+- le **MIDI** passe par un assistant CoreMIDI (`organum-midi`) et une socket
+  Unix ; sans lui, le MIDI est absent mais le reste fonctionne ;
+- l'**audio** passe par un assistant CoreAudio (`organum-audio`) et une
+  socket Unix avec un anneau partagé ; sans lui, ou sans périphérique de
+  sortie, l'orgue démarre quand même, sans son, et réessaie périodiquement.
+
+Les deux assistants se compilent sur un Mac avec
+`sh plateforme/macos/construire_assistant.sh` (résultats
+`plateforme/macos/build/organum-midi` et `organum-audio`, mode d'emploi dans
+`plateforme/macos/LANCEMENT.md`). L'interface distingue quatre états audio :
+plate-forme sans backend, axe désactivé, assistant absent, et aucune sortie
+audio ; aucun n'est présenté comme un plantage. `ORGANUM_SANS_BACKEND=1`
+permet de reproduire le mode sans audio sous Linux pour les tests ; l'axe
+MIDI reste pilotable séparément.
 
 ## Utilisation
 
@@ -306,6 +312,7 @@ livrer le son à temps. Ne pas la relever au-dessus de PipeWire.
 | `ORGANUM_CALIBRATION_FACTEUR` | `1` | Réservé aux tests : multiplie tous les coûts mesurés par la calibration (simule une machine plus lente) |
 | `ORGANUM_CALIBRATION_VOIX` | `250` | Réservé aux tests : nombre de voix de référence de la calibration |
 | `ORGANUM_MIDI_SOCKET` | auto | Chemin de la socket de l'assistant MIDI macOS ; non vide sous Linux, impose le backend socket (tests) |
+| `ORGANUM_AUDIO_SOCKET` | auto | Chemin de la socket de l'assistant audio macOS ; non vide sous Linux, impose le backend socket et le démarrage opportuniste (tests) |
 | `ORGANUM_DIGEST` | `etat.json.digest` | Fichier texte `utilisateur:organum:HA1` (absent ou vide : chemin par défaut) |
 | `ORGANUM_RESEAUX_FICHIER` | `etat.json.reseaux` | Fichier texte des sous-réseaux autorisés, un par ligne (absent ou vide : chemin par défaut) |
 
@@ -467,7 +474,7 @@ un lien) dans `externe/` avant de lancer le script.
 | Dossier | Contenu |
 |---|---|
 | `moteur/` | Moteur d'Aeolus (C++/JUCE), API C (`api/`), ressources embarquées |
-| `plateforme/` | Audio et MIDI : ALSA (Linux), WinMM (Windows) ; macOS a un backend MIDI par socket vers un assistant CoreMIDI, sans audio, en mode dégradé audio géré par `cosmo/lorganum.c` |
+| `plateforme/` | Audio et MIDI : ALSA (Linux), WinMM (Windows), sockets vers les assistants CoreMIDI et CoreAudio (macOS) ; quatre états audio distincts, gérés par `cosmo/lorganum.c` et `web/src/degradation.moon` |
 | `cosmo/` | Module Lua `organum`, intégration à redbean, correctif cosmopolitan |
 | `ui/` | Fenêtre sans bibliothèque (protocoles Wayland et X11), Nuklear |
 | `web/` | Interfaces web et native (MoonScript), assemblage de `organum.com` |

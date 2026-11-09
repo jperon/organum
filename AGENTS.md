@@ -46,12 +46,15 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   Sous cosmocc, `__linux__` n'est pas défini : tester avec `IsLinux()`.
   Les fichiers `cosmo/plateforme_*.c` incluent ces sources ; make ne suit pas
   ces inclusions (faire `touch` après modification).
-  `audio_supportee()` rend `IsLinux() || IsWindows()` ; `midi_supportee()`
-  rend `IsLinux() || IsWindows() || IsXnu()` (backend socket macOS) ;
+  `audio_supportee()` rend `IsLinux() || IsWindows() || IsXnu()`,
+  `midi_supportee()` rend `IsLinux() || IsWindows() || IsXnu()` (backend
+  socket macOS) ;
   `organum.plateforme()` rend `"linux"`, `"windows"`, `"macos"` ou
   `"autre"`. L'aiguillage MIDI ajoute la branche socket sous `IsXnu()` ou
   quand `ORGANUM_MIDI_SOCKET` (non vide) l'impose sous Linux pour les tests ;
-  l'audio macOS reste sans backend.
+  l'audio macOS utilise le même principe : `audio_socket_actif()` est vrai
+  sous XNU, ou sous Linux quand `ORGANUM_AUDIO_SOCKET` (non vide) l'impose
+  pour les tests.
 - Mode dégradé (macOS, ou `ORGANUM_SANS_BACKEND=1` pour les tests) :
   l'axe **audio** et l'axe **MIDI** sont désormais séparés. `organum.demarrer
   {sans_backend=true, midi=…}` coupe l'audio (`sans_backend`, plus l'absence
@@ -84,6 +87,32 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   Tests : `web/tests/degradation.lua`,
   `web/tests/midi_actif.lua`, `web/scripts/test-sans-backend.sh` et
   `web/scripts/test-midi-socket.sh` (dont MIDI socket + audio dégradé).
+- États audio affichés (étape 7 du chantier audio) : la règle pure
+  `degradation.etat_audio {supportee, sans_backend, socket, assistant,
+  disponible, erreur}` (dans `web/src/degradation.moon`) distingue quatre
+  situations, dans cet ordre : `sans_backend` (aucun backend sur la
+  plate-forme → « Audio non pris en charge sur cette plate-forme. »),
+  `desactive` (forçage `ORGANUM_SANS_BACKEND` ou axe coupé), `sans_sortie`
+  (`audio_erreur` contient « aucune sortie audio », ACK statut 2 de
+  l'assistant → « Aucune sortie audio : vérifiez Réglages Système → Son →
+  Sortie. »), puis `assistant_absent` (`audio_assistant == 0` → « Assistant
+  audio absent : lancez `organum-audio`… », non alarmant). Audio
+  opérationnel : `nil, nil`, aucun message. L'erreur est examinée **avant**
+  l'assistant, car un ACK statut 2 laisse aussi `audio_assistant` à 0.
+  `web/src/midi_actif.moon` expose de même `midi_actif.message(disponible,
+  assistant, socket)` (« MIDI désactivé… » ou « Assistant MIDI absent… »),
+  nil quand le MIDI fonctionne. `qualite_etat` publie `audio_etat`,
+  `audio_message` et `midi_message` dans `/api/orgue` ; `page.moon`
+  (bandeau, id `mode-degrade` conservé), `page_audio.moon` (ligne
+  `qualite-plateforme`) et `fenetre.moon` (une ligne tronquée par message)
+  ne font qu'afficher ces chaînes. Tests : `web/tests/degradation.lua`,
+  `web/tests/midi_actif.lua`, `web/tests/pages.lua`, et les contrôles b/c/f
+  de `web/scripts/test-audio-socket.sh` sur `audio_etat`/`audio_message`.
+  `ORGANUM_AUDIO_SOCKET` (non vide) force le backend socket sous Linux ; le
+  démarrage est alors opportuniste, comme sur macOS, ce qui permet de tester
+  l'assistant absent sans carte son. `test-sans-backend.sh` garde ses
+  attentes : le bandeau `id="mode-degrade"` et la ligne
+  `id="qualite-plateforme"` restent présents.
 - Assistant CoreMIDI macOS (`plateforme/macos/`) : le codec
   `trames_midi.h` est partagé par le backend `midi_socket.c` (client),
   l'assistant natif `assistant_coremidi.c` (serveur) et le faux assistant de
@@ -103,9 +132,10 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   USB) ; `--socket` et `--verbose` complètent. Mode d'emploi et LaunchAgent :
   `plateforme/macos/LANCEMENT.md`. Le même script produit les deux assistants
   et refuse de continuer (code 2) sans `xcode-select -p` ; la compilation a
-  été faite sur la VM macOS de test (clang 17, SDK 15.5), mais le
-  fonctionnement réel du MIDI sur un Mac reste à éprouver : aucun
-  compilateur macOS en CI.
+  été faite sur la VM macOS de test (clang 17, SDK 15.5) ; le MIDI socket a
+  été validé de bout en bout sur cette VM (faux assistant et assistant
+  CoreMIDI compilé), mais aucun compilateur macOS n'est présent en CI. Le
+  fonctionnement réel sur un Mac avec clavier physique reste à confirmer.
 - Assistant CoreAudio macOS (`plateforme/macos/`) : le codec
   `trames_audio.h` (tronc commun `trames.h`) et l'anneau SPSC
   `anneau_audio.h` sont partagés par le backend `audio_socket.c` (client),

@@ -93,6 +93,31 @@ c'est organum qui manque, l'assistant écoute et attend son client. Les deux
 axes sont indépendants : on peut avoir le MIDI sans l'audio (Mac sans carte
 son) et inversement.
 
+## Ordre de démarrage
+
+Les deux assistants sont indépendants ; l'ordre n'a pas d'importance, et
+organum peut être lancé avant, pendant ou après eux. En pratique :
+
+1. `organum-midi` et `organum-audio` (démarrage automatique par LaunchAgent,
+   ou à la main) ;
+2. `organum`.
+
+Un assistant lancé après organum est vu au réessai suivant (environ une
+seconde), sans redémarrer l'orgue. Un assistant arrêté laisse l'axe
+concerné indisponible ; l'autre continue. Pour vérifier un axe sans lancer
+organum, `--liste` est le diagnostic de référence des **deux** binaires :
+
+```bash
+plateforme/macos/build/organum-midi  --liste   # sources CoreMIDI
+plateforme/macos/build/organum-audio --liste   # sortie audio par défaut
+```
+
+Sur un Mac sans carte son, `organum-audio --liste` sort avec le code 1 ;
+l'orgue démarre quand même et publie « aucune sortie audio » dans son
+interface. Sur une machine sans pilote IAC ni clavier USB,
+`organum-midi --liste` n'affiche aucune source ; l'orgue démarre quand même,
+sans MIDI.
+
 ## Lancement automatique (LaunchAgent)
 
 Créer `~/Library/LaunchAgents/com.organum.midi.plist`, puis
@@ -159,6 +184,16 @@ Puis :
 launchctl load ~/Library/LaunchAgents/com.organum.midi.plist
 launchctl load ~/Library/LaunchAgents/com.organum.audio.plist
 launchctl list | grep organum
+```
+
+Les deux LaunchAgent peuvent être chargés à la suite, dans n'importe quel
+ordre : ils ne partagent que la convention de chemin de socket, que chaque
+assistant calcule de la même façon. Pour redémarrer un seul assistant sans
+toucher à l'orgue :
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.organum.audio
+launchctl kickstart -k gui/$(id -u)/com.organum.midi
 ```
 
 `KeepAlive` relance l'assistant s'il tombe. Ni CoreMIDI ni la sortie audio
