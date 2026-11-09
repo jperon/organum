@@ -118,6 +118,8 @@ echo "== dossier temporaire $TMP"
 if [ -x "$RACINE/web/build/organum.com" ]; then
   executer "API qualité (web/scripts/test-qualite.sh)" \
     sh "$RACINE/web/scripts/test-qualite.sh"
+  executer "délai de première réponse (web/scripts/test-demarrage.sh)" \
+    sh "$RACINE/web/scripts/test-demarrage.sh"
   executer "mode dégradé sans backend (web/scripts/test-sans-backend.sh)" \
     sh "$RACINE/web/scripts/test-sans-backend.sh"
   executer "MIDI par socket macOS (web/scripts/test-midi-socket.sh)" \
@@ -130,6 +132,7 @@ if [ -x "$RACINE/web/build/organum.com" ]; then
     sh "$RACINE/web/scripts/test-transposition.sh"
 else
   ignore "API qualité (web/build/organum.com absent ; lancer web/scripts/build.sh)"
+  ignore "délai de première réponse (web/build/organum.com absent ; lancer web/scripts/build.sh)"
   ignore "mode dégradé sans backend (web/build/organum.com absent ; lancer web/scripts/build.sh)"
   ignore "MIDI par socket macOS (web/build/organum.com absent ; lancer web/scripts/build.sh)"
   ignore "authentification Digest (web/build/organum.com absent ; lancer web/scripts/build.sh)"

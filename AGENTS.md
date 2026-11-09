@@ -388,6 +388,14 @@ par l'article 13 de l'AGPL.
 
 ## Pièges connus
 
+- redbean génère un certificat TLS auto-signé entre `Listen()` et
+  `EventLoop()`, et `ConfigureCertificate` reverse-résout chaque adresse
+  non-loopback (dont `0.0.0.0`). Sous XNU, `getnameinfo(..., NI_NAMEREQD)`
+  échoue en ~17 s, deux fois (EC puis RSA) : le port écoute alors ~34 s sans
+  que personne n'appelle `accept()`. `cosmo/organum.c` renomme donc le `main`
+  de redbean et insère `-X` (TLS désactivé) avant de l'appeler, sauf si
+  l'utilisateur fournit `-C`/`-K`. Ne pas réactiver TLS sans mesurer la
+  première réponse HTTP ; `web/scripts/test-demarrage.sh` la borne à 10 s.
 - Ne jamais arrêter PipeWire : l'audio passe par libasound `default`.
 - Sortie ALSA `null` : `audio_ecrire` rend aussitôt et la boucle audio
   tournerait à 100 % d'un cœur. `g_sortie_null`, recalculé à chaque ouverture
