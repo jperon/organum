@@ -883,3 +883,16 @@ audio_t *alsa_audio_creer_pour_test(int canaux, int periode, int fmt)
 	}
 	return audio;
 }
+
+/* ALSA ne dialogue avec aucun assistant : la sortie n'est jamais « perdue »
+   au sens du backend socket, et un fils n'a pas d'anneau hérité à oublier.
+   Ces deux points d'entrée existent pour l'aiguillage commun de audio.c. */
+int alsa_audio_perdue(audio_t *audio)
+{
+	(void)audio;
+	return 0;
+}
+
+void alsa_audio_oublier_fils(void)
+{
+}

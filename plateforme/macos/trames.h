@@ -189,14 +189,16 @@ static inline size_t trame_uint_decimal(char *sortie, size_t capacite,
   return n;
 }
 
-// Résout le chemin de la socket MIDI : ORGANUM_MIDI_SOCKET (non vide)
-// prioritaire, sinon <tmpdir>/organum-midi-<uid>.sock, sinon
-// /tmp/organum-midi-<uid>.sock. Renvoie 0 en cas de succès, -1 si le chemin
-// ne tient pas dans la socket (jamais de troncature). tmpdir et socket_env
-// sont passés en paramètre pour rester testables sans getenv.
-static inline int trame_chemin_socket(const char *socket_env, const char *tmpdir,
-                                      unsigned long uid, char *sortie,
-                                      size_t capacite) {
+// Résout le chemin d'une socket de la forme <tmpdir>/<nom><uid>.sock :
+// socket_env (non vide) prioritaire, sinon tmpdir (ou /tmp), sinon refus si
+// le chemin ne tient pas dans la socket (jamais de troncature). nom ne
+// commence pas par une barre (« organum-midi- », « organum-audio- »).
+// tmpdir et socket_env sont passés en paramètre pour rester testables sans
+// getenv.
+static inline int trame_chemin_socket_nom(const char *socket_env,
+                                          const char *tmpdir,
+                                          unsigned long uid, const char *nom,
+                                          char *sortie, size_t capacite) {
   if (socket_env != NULL && socket_env[0] != '\0') {
     const size_t taille = strlen(socket_env);
     if (taille >= TRAMES_SUN_PATH_MAX || taille >= capacite) return -1;
@@ -208,14 +210,15 @@ static inline int trame_chemin_socket(const char *socket_env, const char *tmpdir
   const size_t base_len = strlen(base);
   const int barre = (base_len > 0 && base[base_len - 1] == '/') ? 0 : 1;
 
-  static const char milieu[] = "/organum-midi-";
+  const size_t nom_len = strlen(nom);
+
   static const char fin[] = ".sock";
 
   char uid_txt[24];
   const size_t uid_len = trame_uint_decimal(uid_txt, sizeof uid_txt, uid);
   if (uid_len == 0) return -1;
 
-  const size_t total = base_len + (size_t)barre + (sizeof milieu - 1) + uid_len +
+  const size_t total = base_len + (size_t)barre + nom_len + uid_len +
                        (sizeof fin - 1);
   if (total >= TRAMES_SUN_PATH_MAX || total >= capacite) return -1;
 
@@ -223,12 +226,23 @@ static inline int trame_chemin_socket(const char *socket_env, const char *tmpdir
   memcpy(sortie + i, base, base_len);
   i += base_len;
   if (barre) sortie[i++] = '/';
-  memcpy(sortie + i, milieu + 1, sizeof milieu - 2);  // sans la barre initiale
-  i += sizeof milieu - 2;
+  memcpy(sortie + i, nom, nom_len);
+  i += nom_len;
   memcpy(sortie + i, uid_txt, uid_len);
   i += uid_len;
   memcpy(sortie + i, fin, sizeof fin - 1);
   i += sizeof fin - 1;
   sortie[i] = '\0';
   return 0;
+}
+
+// Résout le chemin de la socket MIDI : ORGANUM_MIDI_SOCKET (non vide)
+// prioritaire, sinon <tmpdir>/organum-midi-<uid>.sock, sinon
+// /tmp/organum-midi-<uid>.sock. Renvoie 0 en cas de succès, -1 si le chemin
+// ne tient pas dans la socket (jamais de troncature).
+static inline int trame_chemin_socket(const char *socket_env, const char *tmpdir,
+                                      unsigned long uid, char *sortie,
+                                      size_t capacite) {
+  return trame_chemin_socket_nom(socket_env, tmpdir, uid, "organum-midi-",
+                                 sortie, capacite);
 }

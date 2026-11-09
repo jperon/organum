@@ -142,3 +142,9 @@ void winmm_audio_fermer(audio_t *a) {
 const char *winmm_audio_chemin(audio_t *a) { (void)a; return "winmm"; }
 const char *winmm_audio_derniere_erreur(void) { return NULL; }
 const char *winmm_audio_format(audio_t *a) { (void)a; return "FLOAT_LE"; }
+
+/* WinMM ne dialogue avec aucun assistant : la sortie n'est jamais « perdue »
+   au sens du backend socket, et un fils n'a pas d'anneau hérité à oublier.
+   Ces deux points d'entrée existent pour l'aiguillage commun de audio.c. */
+int winmm_audio_perdue(audio_t *a) { (void)a; return 0; }
+void winmm_audio_oublier_fils(void) {}
