@@ -149,6 +149,37 @@ else
   echec "API /api/orgue incohérente : $S"
 fi
 
+# Non-régression de l'état audio affiché. Sous Linux, ORGANUM_PERIPHERIQUE=null
+# ouvre un vrai backend ALSA sans matériel : audio_disponible vaut vrai et
+# audio_socket vaut faux (« backend socket macOS »). La règle d'affichage
+# testait « sans_backend or not socket » et publiait donc « Audio désactivé »
+# sur tout Linux fonctionnel, avec un bandeau sur /, /audio et la fenêtre
+# native. Seul un axe réellement coupé doit produire ce message.
+if [ "$(uname -s)" != Darwin ]; then
+  S=$(curl -s --max-time 2 "$URL/api/orgue")
+  if printf '%s' "$S" | grep -qF '"audio_disponible":true'; then
+    ok "backend audio natif (ALSA ou WinMM) disponible"
+  else
+    echec "audio_disponible faux alors qu'un backend natif existe : $S"
+  fi
+  if printf '%s' "$S" | grep -qF '"audio_etat":""'; then
+    ok "audio_etat vide avec un backend natif opérationnel"
+  else
+    echec "audio_etat non vide avec un backend natif opérationnel : $S"
+  fi
+  if printf '%s' "$S" | grep -qF '"audio_message":""'; then
+    ok "audio_message vide avec un backend natif opérationnel"
+  else
+    echec "audio_message non vide avec un backend natif opérationnel : $S"
+  fi
+  PAGE=$(curl -s --max-time 2 "$URL/")
+  if printf '%s' "$PAGE" | grep -qF 'Audio désactivé'; then
+    echec "la page / annonce « Audio désactivé » alors que l'audio fonctionne"
+  else
+    ok "la page / n'annonce pas « Audio désactivé »"
+  fi
+fi
+
 if [ "$ECHECS" -eq 0 ]; then
   echo "Tous les contrôles : OK"
   exit 0

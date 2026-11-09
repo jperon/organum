@@ -121,6 +121,46 @@ code, texte = d.etat_audio {supportee = true, socket = true,
 aide.egal(code, nil, "etat_audio : audio opérationnel, aucun message")
 aide.egal(texte, nil, "etat_audio : texte nil quand l'audio fonctionne")
 
+-- Régression constatée en production : un backend ALSA ou WinMM
+-- opérationnel publie audio_socket = false (ce champ ne dit que « backend
+-- socket macOS retenu »). La règle « sans_backend or not socket » étiquetait
+-- donc tout Linux fonctionnel « désactivé », avec un bandeau sur /, /audio et
+-- la fenêtre native. Table de vérité : seul un axe réellement coupé est
+-- « désactivé ».
+code, texte = d.etat_audio {supportee = true, sans_backend = false,
+  socket = false, disponible = true, assistant = -1, erreur = "",
+  demarre = true}
+aide.egal(code, nil, "etat_audio : ALSA opérationnel (socket = false) ne dit rien")
+aide.egal(texte, nil, "etat_audio : aucun message pour un backend ALSA")
+
+code, texte = d.etat_audio {supportee = true, sans_backend = false,
+  socket = false, disponible = true, assistant = -1, erreur = "",
+  demarre = false}
+aide.egal(code, "suspendu", "etat_audio : ALSA en cours d'ouverture, pas désactivé")
+
+code, texte = d.etat_audio {supportee = true, sans_backend = false,
+  socket = false, disponible = false, assistant = -1, erreur = ""}
+aide.egal(code, "indisponible", "etat_audio : backend natif absent, non désactivé")
+aide.egal(texte, "Audio momentanément indisponible.",
+  "etat_audio : message transitoire pour un backend natif")
+
+-- Le forçage reste « désactivé », même sans backend socket.
+code, texte = d.etat_audio {supportee = true, sans_backend = true,
+  socket = false, disponible = false, assistant = -1, erreur = ""}
+aide.egal(code, "desactive", "etat_audio : ORGANUM_SANS_BACKEND seul désactive")
+aide.egal(texte, "Audio désactivé sur cette plate-forme.",
+  "etat_audio : message de désactivation sans backend socket")
+
+-- Une erreur d'ALSA (aucune sortie) prime sur l'état transitoire, sans
+-- passer par « désactivé ».
+code, texte = d.etat_audio {supportee = true, sans_backend = false,
+  socket = false, disponible = false, assistant = -1,
+  erreur = "default : aucune sortie audio disponible"}
+aide.egal(code, "sans_sortie", "etat_audio : aucune sortie audio sous ALSA")
+aide.egal(texte,
+  "Aucune sortie audio : vérifiez Réglages Système → Son → Sortie.",
+  "etat_audio : message de sortie absente sous ALSA")
+
 -- Le producteur n'a pas encore écrit (ouverture, ou recréation du moteur
 -- pendant un changement de taux) : le silence doit être annoncé, pas compté
 -- comme une famine invisible.

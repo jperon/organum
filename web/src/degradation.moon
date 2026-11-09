@@ -45,7 +45,12 @@ etat_audio = (info) ->
   erreur = tostring info.erreur or ""
   if not socket and supportee != true
     "sans_backend", "Audio non pris en charge sur cette plate-forme."
-  elseif info.sans_backend == true or not socket
+  elseif info.sans_backend == true
+    -- Uniquement le forçage explicite (ORGANUM_SANS_BACKEND=1) ou l'axe coupé
+    -- au démarrage. Surtout PAS `not socket` : `socket` ne dit que « backend
+    -- socket macOS retenu ». Un backend ALSA ou WinMM opérationnel a
+    -- audio_socket = false ; le présenter comme désactivé affichait un
+    -- bandeau « Audio désactivé » sur tout Linux fonctionnel.
     "desactive", "Audio désactivé sur cette plate-forme."
   elseif erreur\find "aucune sortie audio", 1, true
     "sans_sortie", "Aucune sortie audio : vérifiez Réglages Système → Son → Sortie."

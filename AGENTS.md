@@ -93,7 +93,10 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   `web/src/degradation.moon`) distingue notamment, dans cet ordre :
   `sans_backend` (aucun backend sur la plate-forme → « Audio non pris en
   charge sur cette plate-forme. »),
-  `desactive` (forçage `ORGANUM_SANS_BACKEND` ou axe coupé), `sans_sortie`
+  `desactive` (forçage `ORGANUM_SANS_BACKEND` ou axe coupé ; **jamais**
+  parce que le backend n'est pas le socket : `socket = false` est le cas
+  normal d'un backend ALSA/WinMM opérationnel, et le traiter comme
+  « désactivé » affichait un bandeau sur tout Linux fonctionnel), `sans_sortie`
   (`audio_erreur` contient « aucune sortie audio », ACK statut 2 de
   l'assistant → « Aucune sortie audio : vérifiez Réglages Système → Son →
   Sortie. »), `incompatible` (`audio_erreur` contient « version du protocole
@@ -115,8 +118,12 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   (bandeau, id `mode-degrade` conservé), `page_audio.moon` (ligne
   `qualite-plateforme`) et `fenetre.moon` (une ligne tronquée par message)
   ne font qu'afficher ces chaînes. Tests : `web/tests/degradation.lua`,
-  `web/tests/midi_actif.lua`, `web/tests/pages.lua`, et les contrôles b/c/f
-  de `web/scripts/test-audio-socket.sh` sur `audio_etat`/`audio_message`.
+  `web/tests/midi_actif.lua`, `web/tests/pages.lua`, les contrôles b/c/f
+  de `web/scripts/test-audio-socket.sh` sur `audio_etat`/`audio_message`,
+  et `web/scripts/test-demarrage.sh`, qui vérifie en réel, hors Darwin,
+  qu'un backend ALSA/WinMM opérationnel (`ORGANUM_PERIPHERIQUE=null`) laisse
+  `audio_etat` et `audio_message` vides et n'affiche pas « Audio désactivé »
+  sur `/`.
   `ORGANUM_AUDIO_SOCKET` (non vide) force le backend socket sous Linux ; le
   démarrage est alors opportuniste, comme sur macOS, ce qui permet de tester
   l'assistant absent sans carte son. `test-sans-backend.sh` garde ses
