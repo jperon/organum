@@ -18,7 +18,11 @@ AUDIO_SUPPORTEE = if type(organum.audio_supportee) == "function" then organum.au
 SANS_BACKEND, RAISON_SANS_BACKEND = degradation.detecter PLATEFORME, os.getenv("ORGANUM_SANS_BACKEND"), AUDIO_SUPPORTEE
 -- macOS démarre sans assistant audio : l'échec d'ouverture n'est pas fatal et
 -- la boucle de réessai périodique reste active. Absent : comportement strict.
-AUDIO_OPPORTUNISTE = PLATEFORME == "macos"
+-- Sous Linux, ORGANUM_AUDIO_SOCKET force le backend socket pour les tests :
+-- ce forçage simule macOS et doit donc rendre le démarrage opportuniste, sinon
+-- le cas « assistant absent » ne serait pas testable sans carte son.
+AUDIO_SOCKET_IMPOSE = type(organum.audio_socket_imposee) == "function" and organum.audio_socket_imposee!
+AUDIO_OPPORTUNISTE = PLATEFORME == "macos" or AUDIO_SOCKET_IMPOSE == true
 
 -- Axe MIDI, distinct de l'axe audio : le MIDI socket macOS existe même sans
 -- audio. ORGANUM_SANS_BACKEND=1 coupe le MIDI sauf si ORGANUM_MIDI_SOCKET
