@@ -80,6 +80,7 @@ lancer() {
   ORGANUM_CONFIG_MIDI="$CONFIG" \
   ORGANUM_FENETRE=non \
   ORGANUM_PERIPHERIQUE=null \
+  ORGANUM_QUALITE=3 \
   "$BIN" -l 127.0.0.1 -p "$PORT" >"$JOURNAL" 2>&1 &
   PID=$!
   i=0

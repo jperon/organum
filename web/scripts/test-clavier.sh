@@ -84,6 +84,7 @@ lancer() {
   ORGANUM_CONFIG_MIDI="$CONFIG" \
   ORGANUM_FENETRE=non \
   ORGANUM_PERIPHERIQUE=null \
+  ORGANUM_QUALITE=3 \
   "$BIN" -l 127.0.0.1 -p "$PORT" >"$JOURNAL" 2>&1 &
   PID=$!
   i=0
@@ -164,7 +165,12 @@ for cas in \
   code=$(code_post "$cas")
   verifie "200 pour $cas" "200" "$code"
 done
-# Toujours aucun plantage ni état bloqué.
+# Toujours aucun plantage ni état bloqué. Laisser les notes de borne
+# atteindre le moteur, puis les éteindre explicitement : la note 0 n'était
+# couverte par aucun relâchement, ce qui rendait la fin de test instable.
+sleep 0.2
+post '{"note":{"canal":16,"note":127,"actif":false}}'
+post '{"note":{"canal":1,"note":0,"actif":false}}'
 post '{"note":{"canal":1,"note":60,"actif":false}}'
 if attendre_canaux '"canaux_actifs":[]'; then
   ok "canaux éteints après les bornes"
@@ -196,7 +202,11 @@ for cas in \
   code=$(code_post "$cas")
   verifie "400 pour $cas" "400" "$code"
 done
-verifie "aucune note allumée par les refus" '"canaux_actifs":[]' "$(canaux_actifs)"
+if attendre_canaux '"canaux_actifs":[]'; then
+  ok "aucune note allumée par les refus"
+else
+  echec "aucune note allumée par les refus ($(canaux_actifs))"
+fi
 S=$(curl -s "$URL/api/orgue")
 verifie "serveur toujours vivant après les refus" '"source":"aeolus"' "$S"
 
