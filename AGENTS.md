@@ -101,8 +101,43 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   non bloquante sous mutex, `EAGAIN` jette et compte. `--liste` affiche les
   sources (unique id + nom) et sert de diagnostic (pilote IAC ou clavier
   USB) ; `--socket` et `--verbose` complètent. Mode d'emploi et LaunchAgent :
-  `plateforme/macos/LANCEMENT.md`. Compilation et test réels restent à faire
-  sur un Mac : aucun compilateur macOS en CI.
+  `plateforme/macos/LANCEMENT.md`. Le même script produit les deux assistants
+  et refuse de continuer (code 2) sans `xcode-select -p` ; la compilation a
+  été faite sur la VM macOS de test (clang 17, SDK 15.5), mais le
+  fonctionnement réel du MIDI sur un Mac reste à éprouver : aucun
+  compilateur macOS en CI.
+- Assistant CoreAudio macOS (`plateforme/macos/`) : le codec
+  `trames_audio.h` (tronc commun `trames.h`) et l'anneau SPSC
+  `anneau_audio.h` sont partagés par le backend `audio_socket.c` (client),
+  l'assistant natif `assistant_audio.c` (serveur) et le faux assistant de test
+  `plateforme/tests/faux_assistant_audio.c` ; la spécification est
+  `PROTOCOLE-AUDIO.md`. L'assistant est le **propriétaire de la socket et du
+  fichier anneau `<socket>.pcm`** : il le crée (`O_TRUNC`, `0600`), le
+  dimensionne à `ANNEAU_AUDIO_CAPACITE_MAX` (16384 trames, 131 200 octets),
+  le mappe en `MAP_SHARED` et retire les deux fichiers à l'arrêt propre. Il
+  sonde la socket et sort avec le code 3 si un autre assistant vit déjà. Il
+  utilise une AudioUnit `kAudioUnitType_Output` /
+  `kAudioUnitSubType_DefaultOutput` avec `AURenderCallback` (pas
+  d'`AudioQueue` : une copie et de la latence en moins) : float32 entrelacé
+  2 canaux au taux d'organum, avec repli `kAudioFormatFlagIsNonInterleaved`
+  et désentrelacement dans le rappel sur un tampon de pile borné si l'unité
+  refuse. Le rappel n'alloue pas, ne prend aucun verrou, n'appelle ni
+  `printf` ni libc bloquante, lit l'anneau, comble par du silence (underruns
+  comptés par l'anneau) et respecte `arret`. Un taux différent à chaud fait
+  `AudioOutputUnitStop` + `AudioUnitUninitialize`, reformate, `Initialize`,
+  `Start`, réinitialise l'anneau puis acquitte. Périphérique perdu en cours
+  de jeu : `arret` posé dans l'en-tête **et** `AUDIO_STOP` (raison 1), sans
+  quitter. `--liste` affiche la sortie par défaut (nom, taux nominal,
+  canaux, latence estimée ; code 1 et message français s'il n'y en a
+  aucune), `--socket` et `--verbose` complètent. La sortie est toujours le
+  **périphérique système par défaut** : le champ `peripherique` est ignoré en
+  v1. `construire_assistant.sh` produit `organum-audio` en même temps que
+  `organum-midi`. Éprouvé sur la VM macOS sans carte son (ACK statut 2
+  « aucune sortie audio disponible », `audio_assistant:0`,
+  `audio_disponible:false`, reconnexion chaque seconde, arrêt propre par PID
+  avec suppression de la socket et du `.pcm`) ; restent non vérifiables sans
+  carte son : le rendu réel des échantillons, la latence, l'absence de clic,
+  le désentrelacement et le changement de taux à chaud.
 - Horloge sous XNU (piège `CLOCK_MONOTONIC`) : sous XNU x86-64, cosmocc
   reconstitue `CLOCK_MONOTONIC` depuis le TSC avec un diviseur supposant
   3 GHz (`libc/intrin/clock_gettime-mono.c:80`) ; sur une VM à 0,88 GHz, il

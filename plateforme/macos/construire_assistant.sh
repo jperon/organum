@@ -1,9 +1,10 @@
 #!/bin/sh
-# Construit l'assistant CoreMIDI natif pour macOS.
+# Construit les assistants natifs macOS : CoreMIDI et CoreAudio.
 #
-# L'assistant est un binaire Mach-O hors de l'arbre cosmopolitan : il n'est
-# pas produit par scripts/construire.sh, qui ne dispose pas des frameworks
-# Apple. Il se compile sur un Mac avec les outils de développement Xcode.
+# Les assistants sont des binaires Mach-O hors de l'arbre cosmopolitan : ils
+# ne sont pas produits par scripts/construire.sh, qui ne dispose pas des
+# frameworks Apple. Ils se compilent sur un Mac avec les outils de
+# développement Xcode.
 #
 # Usage :
 #   sh plateforme/macos/construire_assistant.sh
@@ -11,23 +12,31 @@
 set -eu
 
 ici=$(cd "$(dirname "$0")" && pwd)
-sortie="$ici/build/organum-midi"
+sortie_midi="$ici/build/organum-midi"
+sortie_audio="$ici/build/organum-audio"
 
 if ! xcode-select -p >/dev/null 2>&1; then
-  echo "organum-midi : les outils de développement Xcode sont absents." >&2
-  echo "organum-midi : installez-les avec : xcode-select --install" >&2
-  echo "organum-midi : puis relancez ce script." >&2
+  echo "organum : les outils de développement Xcode sont absents." >&2
+  echo "organum : installez-les avec : xcode-select --install" >&2
+  echo "organum : puis relancez ce script." >&2
   exit 2
 fi
 
 mkdir -p "$ici/build"
 
-# ARCHIVES non vide : binaire universel Intel + Apple Silicon.
+# ARCHIVES non vide : binaires universels Intel + Apple Silicon.
 # shellcheck disable=SC2086
 clang -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter \
   ${ARCHIVES:+ -arch x86_64 -arch arm64} \
-  -o "$sortie" "$ici/assistant_coremidi.c" \
+  -o "$sortie_midi" "$ici/assistant_coremidi.c" \
   -framework CoreMIDI -framework CoreFoundation
 
-chmod +x "$sortie" 2>/dev/null || true
-echo "organum-midi : assistant compilé : $sortie"
+# shellcheck disable=SC2086
+clang -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter \
+  ${ARCHIVES:+ -arch x86_64 -arch arm64} \
+  -o "$sortie_audio" "$ici/assistant_audio.c" \
+  -framework CoreAudio -framework AudioToolbox -framework CoreFoundation
+
+chmod +x "$sortie_midi" "$sortie_audio" 2>/dev/null || true
+echo "organum-midi : assistant compilé : $sortie_midi"
+echo "organum-audio : assistant compilé : $sortie_audio"

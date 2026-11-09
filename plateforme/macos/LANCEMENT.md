@@ -1,9 +1,15 @@
-# Assistant CoreMIDI sur macOS — mode d'emploi
+# Assistants natifs macOS — mode d'emploi
 
-Organum parle MIDI sur macOS par une socket Unix ; c'est cet assistant, un
-petit binaire Mach-O, qui parle CoreMIDI. Sans lui, l'orgue fonctionne mais
-le MIDI reste absent. Le protocole est décrit dans
-[`PROTOCOLE-MIDI.md`](PROTOCOLE-MIDI.md).
+Organum parle au MIDI et à l'audio de macOS par des sockets Unix. Deux petits
+binaires Mach-O, hors de l'arbre cosmopolitan, font le pont avec les
+frameworks Apple :
+
+- **`organum-midi`** (CoreMIDI) : sans lui, l'orgue fonctionne mais le MIDI
+  reste absent. Protocole :
+  [`PROTOCOLE-MIDI.md`](PROTOCOLE-MIDI.md).
+- **`organum-audio`** (CoreAudio) : sans lui, l'orgue fonctionne mais le son
+  reste absent. Protocole :
+  [`PROTOCOLE-AUDIO.md`](PROTOCOLE-AUDIO.md).
 
 ## Compiler
 
@@ -14,9 +20,13 @@ xcode-select --install          # une seule fois, si nécessaire
 sh plateforme/macos/construire_assistant.sh
 ```
 
-Le script refuse de continuer, avec la marche à suivre, si `xcode-select -p`
-échoue. Il produit `plateforme/macos/build/organum-midi`. Pour un binaire
-universel (Intel et Apple Silicon) :
+Le script refuse de continuer, avec la marche à suivre et le code 2, si
+`xcode-select -p` échoue. Il produit les deux binaires :
+
+- `plateforme/macos/build/organum-midi`
+- `plateforme/macos/build/organum-audio`
+
+Pour des binaires universels (Intel et Apple Silicon) :
 
 ```bash
 ARCHIVES=1 sh plateforme/macos/construire_assistant.sh
@@ -25,7 +35,7 @@ ARCHIVES=1 sh plateforme/macos/construire_assistant.sh
 La compilation ne fait pas partie de `scripts/construire.sh` : elle demande
 les frameworks Apple, absents de la chaîne cosmocc.
 
-## Vérifier les sources MIDI
+## Vérifier le MIDI
 
 ```bash
 plateforme/macos/build/organum-midi --liste
@@ -41,29 +51,55 @@ MIDI**, menu **Fenêtre → Afficher le studio MIDI**, double-cliquer sur
 apparaît ensuite dans `--liste`. Un clavier MIDI USB branché fait aussi
 l'affaire.
 
+## Vérifier l'audio
+
+```bash
+plateforme/macos/build/organum-audio --liste
+```
+
+La commande affiche le périphérique de sortie **par défaut**, son taux
+nominal, son nombre de canaux et une latence estimée, puis sort avec le code
+0. Quand aucun périphérique de sortie n'existe — cas d'une machine virtuelle
+sans carte son — elle le dit clairement en français et sort avec le code 1.
+C'est le premier réflexe de diagnostic : sans sortie, organum restera en
+audio dégradé, sans planter.
+
+L'assistant utilise **toujours le périphérique système par défaut**. Le champ
+`peripherique` des réglages d'organum est ignoré en v1 : pour changer de
+sortie, passer par **Réglages Système → Son → Sortie**.
+
 ## Lancer
 
 ```bash
-plateforme/macos/build/organum-midi --verbose
+plateforme/macos/build/organum-midi  --verbose
+plateforme/macos/build/organum-audio --verbose
 ```
 
-Sans option, le chemin de la socket est `$TMPDIR/organum-midi-<uid>.sock`
-(ou `/tmp/organum-midi-<uid>.sock`), le même que celui calculé par organum.
-`--socket CHEMIN` le force ; `--verbose` journalise sur la sortie d'erreur,
-tous les messages étant préfixés `organum-midi :`. Si organum est lancé avec
-`ORGANUM_MIDI_SOCKET`, l'assistant doit recevoir la même variable (ou le
-même `--socket`).
+Sans option, les chemins sont `$TMPDIR/organum-<midi|audio>-<uid>.sock` (ou
+`/tmp/…`), les mêmes que ceux calculés par organum. `--socket CHEMIN` les
+force ; `--verbose` journalise sur la sortie d'erreur, tous les messages
+étant préfixés `organum-midi :` ou `organum-audio :`. Si organum est lancé
+avec `ORGANUM_MIDI_SOCKET` / `ORGANUM_AUDIO_SOCKET`, l'assistant doit
+recevoir la même variable (ou le même `--socket`).
 
-Organum et l'assistant peuvent démarrer dans n'importe quel ordre : si la
-socket manque, organum reste en MIDI dégradé et réessaie ; si c'est organum
-qui manque, l'assistant écoute et attend son client. L'assistant ne doit
-tourner qu'une fois : un second exemplaire sort avec le code 3 et laisse la
+`organum-audio` possède la socket **et** le fichier `<socket>.pcm` (l'anneau
+partagé, `0600`) : il les crée au démarrage et les retire à l'arrêt propre.
+Comme pour le MIDI, un second exemplaire sort avec le code 3 et laisse la
 socket du premier intacte.
+
+Organum et chaque assistant peuvent démarrer dans n'importe quel ordre : si
+la socket manque, organum reste dégradé sur l'axe concerné et réessaie ; si
+c'est organum qui manque, l'assistant écoute et attend son client. Les deux
+axes sont indépendants : on peut avoir le MIDI sans l'audio (Mac sans carte
+son) et inversement.
 
 ## Lancement automatique (LaunchAgent)
 
-Créer `~/Library/LaunchAgents/com.organum.midi.plist` avec des chemins
-absolus (remplacer `/Users/jacques` par le compte réel) :
+Créer `~/Library/LaunchAgents/com.organum.midi.plist`, puis
+`~/Library/LaunchAgents/com.organum.audio.plist`, avec des chemins absolus
+(remplacer `/Users/jacques` par le compte réel).
+
+MIDI :
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -90,15 +126,44 @@ absolus (remplacer `/Users/jacques` par le compte réel) :
 </plist>
 ```
 
+Audio (même forme, label et binaire différents) :
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.organum.audio</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/jacques/organum/plateforme/macos/build/organum-audio</string>
+    <string>--verbose</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardErrorPath</key>
+  <string>/tmp/organum-audio.log</string>
+  <key>StandardOutPath</key>
+  <string>/tmp/organum-audio.log</string>
+</dict>
+</plist>
+```
+
 Puis :
 
 ```bash
 launchctl load ~/Library/LaunchAgents/com.organum.midi.plist
+launchctl load ~/Library/LaunchAgents/com.organum.audio.plist
 launchctl list | grep organum
 ```
 
-`KeepAlive` relance l'assistant s'il tombe. CoreMIDI n'est pas soumis à TCC :
-aucune autorisation n'est à donner dans « Confidentialité et sécurité », ni
-pour l'entrée MIDI ni pour l'automatisation. Éviter en particulier les
-scripts qui pilotent « System Events » (automatisation AppleScript), lesquels
-demandent une autorisation interactive — inutile ici.
+`KeepAlive` relance l'assistant s'il tombe. Ni CoreMIDI ni la sortie audio
+par défaut ne sont soumises à TCC : aucune autorisation n'est à donner dans
+« Confidentialité et sécurité », ni pour l'entrée MIDI, ni pour le
+microphone (aucune entrée n'est ouverte), ni pour l'automatisation. Éviter en
+particulier les scripts qui pilotent « System Events » (automatisation
+AppleScript), lesquels demandent une autorisation interactive — inutile ici.
