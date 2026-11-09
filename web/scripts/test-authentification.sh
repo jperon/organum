@@ -174,9 +174,10 @@ poster_auth() {
   client POST /api/authentification -H 'Content-Type: application/json' -d "$1"
 }
 
-# en-tete_auth <nonce> <mot de passe> <chemin> : construit un Authorization
+# en_tete_auth <nonce> <mot de passe> <chemin> : construit un Authorization
 # Digest valide pour un nonce donné (même périmé), avec nc/cnonce fixes.
-en-tete_auth() {
+# (Pas de tiret dans le nom : dash refuse les noms de fonction non POSIX.)
+en_tete_auth() {
   nonce=$1; mot=$2; chemin=$3
   python3 - "$nonce" "$mot" "$chemin" <<'PY'
 import hashlib, sys
@@ -272,7 +273,7 @@ NONCE=$(client GET /api/orgue -D - -o /dev/null | tr -d '\r' \
   | sed -n 's/.*nonce="\([^"]*\)".*/\1/p' | head -n 1)
 if [ -n "$NONCE" ]; then
   sleep 2
-  ENTETE_PERIME=$(en-tete_auth "$NONCE" secret02 /api/orgue)
+  ENTETE_PERIME=$(en_tete_auth "$NONCE" secret02 /api/orgue)
   REPONSE=$(curl -s $OPT_IFACE -D - -o /dev/null -H "$ENTETE_PERIME" "$URL/api/orgue" | tr -d '\r')
   case "$REPONSE" in
     *" 401 "*) ok "nonce périmé : 401" ;;
