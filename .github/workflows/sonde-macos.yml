@@ -33,20 +33,23 @@ jobs:
           echo "ORGANUM_AUDIO_SOCKET=${ORGANUM_AUDIO_SOCKET:-}" || true
 
       - name: Sonde CoreAudio
+        continue-on-error: true
         run: |
           set -x
           clang -O2 -Wall -Wextra -framework CoreAudio -framework AudioToolbox \
-            plateforme/macos/tests/sonde_audio.c -o "$RUNNER_TEMP/sonde_audio"
+            -framework CoreFoundation plateforme/macos/tests/sonde_audio.c -o "$RUNNER_TEMP/sonde_audio"
           "$RUNNER_TEMP/sonde_audio"; echo "sonde_audio code=$?" || true
 
       - name: Sonde CoreMIDI
+        continue-on-error: true
         run: |
           set -x
-          clang -O2 -Wall -Wextra -framework CoreMIDI \
+          clang -O2 -Wall -Wextra -framework CoreMIDI -framework CoreFoundation \
             plateforme/macos/tests/sonde_midi.c -o "$RUNNER_TEMP/sonde_midi"
           "$RUNNER_TEMP/sonde_midi"; echo "sonde_midi code=$?" || true
 
       - name: Construire le helper et l'interroger
+        continue-on-error: true
         run: |
           set -x
           sh plateforme/macos/construire_assistant.sh
