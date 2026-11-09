@@ -138,8 +138,14 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   surveille les deux sockets d'écoute et les deux clients ; le processus ne
   sort que sur `SIGINT`/`SIGTERM` (ou si les deux domaines échouent au
   démarrage). `sh plateforme/macos/construire_assistant.sh` produit
-  `plateforme/macos/build/organum-helper` (ignoré par git), avec
-  `ARCHIVES=1` pour un binaire universel, et refuse de continuer (code 2)
+  `plateforme/macos/build/organum-helper` (ignoré par git) : **universel**
+  x86_64 + arm64 par défaut quand le SDK fournit les deux architectures,
+  sinon repli explicite sur l'architecture de l'hôte ; `ARCHIVES=0` force
+  l'hôte seul. Le script **signe toujours ad-hoc** (`codesign --force --sign
+  -`) puis vérifie avec `codesign --verify --strict` et `codesign -dv` :
+  macOS arm64 refuse d'exécuter un Mach-O non signé, même ad-hoc. Il publie
+  `lipo -info` et `codesign -dv` et sort en erreur (code 3) si la signature
+  ou une architecture annoncée manque. Il refuse de continuer (code 2)
   sans `xcode-select -p`. Options : `--socket-midi`, `--socket-audio`,
   `--verbose`, `--liste` (sortie audio par défaut **et** sources CoreMIDI,
   code 0 ou 1 si un axe manque), `--aide`. L'assistant sonde chaque socket
@@ -179,14 +185,43 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   `organum-audio-<uid>.sock` : `choisir_chemin` recevait `"midi"`/`"audio"`
   au lieu des préfixes complets, ce qui créait `midi<uid>.sock` et rendait
   l'assistant invisible. Tests purs : `web/tests/assistant.lua`. Mode
-  d'emploi et dépannage : `plateforme/macos/LANCEMENT.md`. Compilé sur la VM
-  macOS de test (clang 17,
-  SDK 15.5) ; MIDI et audio simultanés validés sur cette VM (VMPK abonné,
-  `audio_assistant:1`, `latence_ms` ≈ 56, `trames_jouees` en progression,
-  crête non nulle dans l'anneau avec un jeu allumé), ainsi que les échecs
-  indépendants par clients bruts, le nettoyage sur SIGTERM et la reprise
-  après SIGKILL. Aucun compilateur macOS en CI ; le fonctionnement réel sur
-  un Mac avec clavier physique reste à confirmer.
+  d'emploi et dépannage : `plateforme/macos/LANCEMENT.md`. Après extraction,
+  `init.moon` **vérifie l'intégrité** (contenu extrait identique à l'archive,
+  donc non tronqué) puis **exécute l'extrait avec `--aide`** : un code non
+  nul donne l'état `inutilisable` (signature absente sous arm64,
+  architecture refusée, quarantaine, binaire corrompu), avec un message
+  clair ; le heartbeat ne réessaie pas indéfiniment. C'est plus robuste
+  qu'une simple taille attendue, car cela couvre aussi le refus d'exécution
+  par le noyau. L'`xattr` de quarantaine n'est pas posé par l'écriture
+  depuis le zip (vérifié sur la VM macOS) ; s'il l'était, le test `--aide`
+  le signalerait. Compilé sur la VM macOS de test (clang 17,
+  SDK 15.5), universel x86_64 + arm64, signature ad-hoc vérifiée, MIDI et
+  audio simultanés validés sur cette VM (VMPK abonné, `audio_assistant:1`,
+  `latence_ms` ≈ 56, `trames_jouees` en progression, crête non nulle dans
+  l'anneau avec un jeu allumé), ainsi que les échecs indépendants par
+  clients bruts, le nettoyage sur SIGTERM et la reprise après SIGKILL.
+  Le demi-arm64 du helper n'est pas exercé sur cette VM x86_64 : arm64
+  n'est validé que par la compilation et `lipo`/`codesign`. Le fonctionnement
+  réel sur un Mac Apple Silicon avec clavier physique reste à confirmer.
+- **CI et binaire universel** : le job `assistant-macos` de
+  `.github/workflows/rolling.yml` (runner `macos-latest` hébergé) ne fait que
+  compiler et signer le helper (ni cosmocc ni moteur) et le publie comme
+  artefact `organum-helper` ; le job Linux le télécharge dans
+  `plateforme/macos/build/` avant `scripts/construire.sh`, donc l'`organum.com`
+  de la CI embarque le helper. Si l'artefact manque (job macOS en échec), le
+  job Linux continue avec un avertissement et produit un `organum.com` sans
+  helper. **Un `organum.com` construit localement sur Linux n'a pas de
+  helper** (build.sh avertit), sauf si l'on place soi-même
+  `plateforme/macos/build/organum-helper` avant `web/scripts/build.sh`.
+  Le workflow n'a pas été exécuté lors de son ajout : seule sa syntaxe YAML
+  a été validée.
+- **architectures macOS** : le helper est universel, mais `organum.com`
+  lui-même reste un APE **x86-64** ; sur Apple Silicon il tourne donc via
+  **Rosetta 2**. Un APE natif arm64 demanderait de reconstruire cosmocc en
+  aarch64 puis d'utiliser `apelink -M ape/ape-m1.c`, avec `cc`/Xcode requis
+  au premier lancement et la perte du support Intel dans le même fichier.
+  C'est une note d'architecture, pas une implémentation (voir
+  `plateforme/macos/LANCEMENT.md`).
 - Horloge sous XNU (piège `CLOCK_MONOTONIC`) : sous XNU x86-64, cosmocc
   reconstitue `CLOCK_MONOTONIC` depuis le TSC avec un diviseur supposant
   3 GHz (`libc/intrin/clock_gettime-mono.c:80`) ; sur une VM à 0,88 GHz, il

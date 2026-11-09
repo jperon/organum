@@ -31,16 +31,77 @@ Le script refuse de continuer, avec la marche à suivre et le code 2, si
 
 - `plateforme/macos/build/organum-helper`
 
-Pour un binaire universel (Intel et Apple Silicon) :
+Par défaut, le binaire est **universel** (Intel et Apple Silicon) quand le
+SDK fournit les deux architectures ; sinon le script se replie sur
+l'architecture de l'hôte avec un message explicite. Pour forcer l'hôte seul :
 
 ```bash
-ARCHIVES=1 sh plateforme/macos/construire_assistant.sh
+ARCHIVES=0 sh plateforme/macos/construire_assistant.sh
 ```
+
+Après la compilation, le script **signe toujours ad-hoc** :
+
+```bash
+codesign --force --sign - plateforme/macos/build/organum-helper
+```
+
+Ce n'est pas décoratif : macOS **arm64 refuse d'exécuter un Mach-O non
+signé**, même ad-hoc. Le script vérifie ensuite la signature avec
+`codesign --verify --strict` et `codesign -dv`, publie `lipo -info` et
+`codesign -dv`, et sort en code 3 si la signature ou une architecture
+annoncée manque. Un binaire signé par un compte de développeur n'est pas
+nécessaire : la signature ad-hoc suffit à l'exécution locale.
 
 La compilation ne fait pas partie de `scripts/construire.sh` : elle demande
 les frameworks Apple, absents de la chaîne cosmocc. Construire l'assistant
 **avant** `web/scripts/build.sh` (ou `scripts/construire.sh`) pour qu'il soit
 embarqué dans `organum.com` ; c'est ce que fait la recette macOS.
+
+### Construction automatisée (GitHub Actions)
+
+Le workflow `.github/workflows/rolling.yml` construit le helper sur un runner
+`macos-latest` (clang + codesign + lipo seulement, ni cosmocc ni moteur), le
+signe, vérifie `lipo -info` et `codesign --verify`, puis le publie comme
+artefact **`organum-helper`**. Le job Linux le récupère dans
+`plateforme/macos/build/` avant `scripts/construire.sh` : l'`organum.com` de
+la CI contient donc le helper universel signé. Si l'artefact est absent, le
+job Linux continue avec un avertissement et produit un `organum.com` sans
+helper.
+
+**Conséquence pour une construction locale sous Linux** : un `organum.com`
+construit ainsi n'a **pas** de helper (sauf si l'on copie soi-même
+`plateforme/macos/build/organum-helper` avant `web/scripts/build.sh`).
+L'archive reste utilisable sous Linux ; sous macOS, elle affiche l'état
+`non_embarque` et fonctionne sans audio ni MIDI natifs tant qu'on ne
+reconstruit pas avec le helper.
+
+### Architecture : helper universel, organum.com x86-64
+
+Le helper est universel, mais `organum.com` lui-même reste un **APE x86-64**.
+Sur Apple Silicon, il tourne donc via **Rosetta 2** (installé à la demande par
+macOS). C'est suffisant pour le fonctionnement actuel, mais ce n'est pas un
+binaire natif arm64.
+
+Pour un APE natif arm64, il faudrait reconstruire la chaîne cosmocc en
+aarch64, puis lier avec `apelink -M ape/ape-m1.c` ; cela impose `cc`/Xcode au
+premier lancement (l'APE se déplie et se lie sur la machine cible) et fait
+perdre le support Intel dans le même fichier exécutable. Cette étape n'est
+**pas** implémentée : la note documente la piste, pas une recette validée.
+
+### Après extraction : intégrité et signature
+
+Au démarrage, organum extrait le helper dans `$TMPDIR/.organum/organum-helper`
+(droits `0700`, fichier temporaire puis renommage), puis vérifie que le
+contenu extrait est **identique à l'archive** (taille et octets : un extrait
+tronqué est refusé) et exécute l'extrait avec `--aide`. Si ce lancement
+échoue, l'état publié est `inutilisable` — signature absente sous arm64,
+architecture refusée, quarantaine ou binaire corrompu — avec un message
+clair, et le heartbeat ne réessaie pas indéfiniment. Le `chmod 0700` après
+extraction ne modifie que les droits, pas le contenu signé : la signature
+reste valide (vérifié avec `codesign -v` sur le fichier extrait). L'écriture
+depuis le zip ne pose pas d'attribut `com.apple.quarantine` ; si un jour elle
+en posait un, le test `--aide` le signalerait, et il faudrait alors retirer
+l'attribut (`xattr -d com.apple.quarantine`) après extraction.
 
 **Recompiler l'assistant en même temps qu'organum** à chaque mise à jour : la
 version du protocole audio et celle de l'anneau partagé changent ensemble

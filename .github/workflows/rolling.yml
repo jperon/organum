@@ -15,11 +15,61 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Le helper macOS est un Mach-O hors chaîne cosmocc : il se construit sur
+  # un runner macOS avec clang + codesign + lipo seulement (ni cosmocc ni le
+  # moteur). Il est ensuite récupéré par la construction Linux pour être
+  # embarqué dans organum.com. La signature ad-hoc est obligatoire : macOS
+  # arm64 refuse d'exécuter un Mach-O non signé.
+  assistant-macos:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Construire et signer le helper universel
+        run: sh plateforme/macos/construire_assistant.sh
+
+      - name: Vérifier architectures et signature
+        run: |
+          test -x plateforme/macos/build/organum-helper
+          lipo -info plateforme/macos/build/organum-helper
+          codesign --verify --strict plateforme/macos/build/organum-helper
+          codesign -dv plateforme/macos/build/organum-helper
+
+      - name: Publier le helper
+        uses: actions/upload-artifact@v4
+        with:
+          name: organum-helper
+          path: plateforme/macos/build/organum-helper
+          if-no-files-found: error
+          retention-days: 7
+
   construire:
     runs-on: ubuntu-24.04
     timeout-minutes: 360
+    # Le job Linux attend le helper macOS, mais doit continuer même si celui-ci
+    # a échoué : organum.com reste alors constructible, sans assistant natif.
+    needs: assistant-macos
+    if: ${{ !cancelled() }}
     steps:
       - uses: actions/checkout@v4
+
+      # Absent (job macOS en échec, ou premier essai) n'est pas fatal ;
+      # build.sh avertit alors et produit organum.com sans helper.
+      - name: Récupérer l'assistant macOS
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: organum-helper
+          path: plateforme/macos/build
+
+      - name: Vérifier l'assistant macOS
+        run: |
+          if [ -s plateforme/macos/build/organum-helper ]; then
+            echo "assistant macOS récupéré ($(wc -c < plateforme/macos/build/organum-helper) octets)"
+          else
+            echo "::warning::assistant macOS absent ; organum.com sera construit sans helper natif macOS"
+          fi
 
       - name: Outils
         run: |
@@ -47,6 +97,9 @@ jobs:
         run: |
           test -s web/build/organum.com
           unzip -l web/build/organum.com | grep -q '\.init\.lua'
+          if [ -s plateforme/macos/build/organum-helper ]; then
+            unzip -l web/build/organum.com | grep -q '\.organum/organum-helper'
+          fi
 
       - name: Publication rolling
         env:
