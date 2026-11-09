@@ -137,7 +137,9 @@ jobs:
       # des états temporaires, et n'ouvrent jamais /dev/snd. Chaque étape doit
       # faire échouer le job (pas de continue-on-error).
       - name: Tests unitaires (MoonScript, Lua, C/C++ purs)
-        run: sh scripts/tests-unitaires.sh
+        # Ce script est en bash (export -n, tableaux) : sous /bin/sh (dash
+        # sur Ubuntu), il sortait immédiatement en code 2.
+        run: bash scripts/tests-unitaires.sh
 
       - name: Mode dégradé sans backend audio ni MIDI
         run: sh web/scripts/test-sans-backend.sh
