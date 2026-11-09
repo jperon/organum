@@ -733,7 +733,13 @@ if organum.demarrer
   -- chemin vient du backend, jamais d'une règle recopiée ici.
   if MIDI_ACTIF and type(organum.midi_assistant) == "function" and organum.midi_assistant! == 0
     chemin = if type(organum.midi_chemin) == "function" then organum.midi_chemin!
-    Log kLogWarn, "organum : assistant MIDI absent (socket #{chemin or "inconnue"}) ; lancez plateforme/macos/build/organum-midi"
+    -- Une socket peut exister sans que la connexion soit encore établie, ou
+    -- survivre à un assistant tué : rester neutre plutôt que d'annoncer
+    -- « absent » ou « périmée » à tort.
+    if chemin and unix.stat chemin
+      Log kLogWarn, "organum : assistant MIDI pas encore connecté (socket présente) : #{chemin} ; s'il est arrêté ou si la socket est périmée, relancez plateforme/macos/build/organum-midi"
+    else
+      Log kLogWarn, "organum : assistant MIDI absent (socket #{chemin or "inconnue"}) ; lancez plateforme/macos/build/organum-midi"
   EFFECTIF.taux = etat_effectif.taux
   EFFECTIF.periode = etat_effectif.periode
   EFFECTIF.peripherique = periph_effectif

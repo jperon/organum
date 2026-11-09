@@ -83,6 +83,11 @@ static struct {
 
   time_t derniere_verif;
   volatile sig_atomic_t arret;
+  /* PID du dernier client organum (LOCAL_PEERPID), lu par le gestionnaire
+     de signal. Redbean, à l'arrêt d'organum, envoie SIGTERM à tout son groupe
+     de processus : cet assistant ne doit pas mourir parce qu'il a été lancé
+     dans le même groupe, tout en restant arrêtable par un SIGTERM direct. */
+  volatile sig_atomic_t pid_organum;
   _Atomic int sources_changees;
   _Atomic int client_ko;
   _Atomic int sysex_ouvert;
@@ -532,6 +537,15 @@ static void accepter_client(void)
     return;
   }
 
+#if defined(SOL_LOCAL) && defined(LOCAL_PEERPID)
+  {
+    pid_t pair = 0;
+    socklen_t taille = (socklen_t)sizeof pair;
+    if (getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID, &pair, &taille) == 0)
+      g.pid_organum = (sig_atomic_t)pair;
+  }
+#endif
+
   if (g.etat != ETAT_AUCUN) {
     uint8_t reponse[TRAMES_MIDI_POIGNEE_TAILLE];
     poignee_encoder(reponse, TRAMES_MIDI_STATUT_CLIENT, MAX_FRAME);
@@ -647,7 +661,9 @@ static int traiter_entree(void)
     case TRAMES_MIDI_TYPE_BYE:
       journal("BYE reçu d'organum");
       fermer_client_adieu(0);
-      return -1;
+      /* Fin de session normale : la socket d'écoute et les sources CoreMIDI
+         restent en place, le prochain organum sera accepté. */
+      return 0;
     default:
       break; /* type inconnu : trame lue puis ignorée */
     }
@@ -673,7 +689,9 @@ static int lire_client(void)
   if (r == 0) {
     journal("fin de flux");
     fermer_client();
-    return -1;
+    /* Le client est parti : on revient à l'écoute sans toucher aux sources
+       CoreMIDI ni à la socket. */
+    return 0;
   }
   if (r < 0) {
     if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
@@ -809,9 +827,17 @@ static void arreter_assistant(void)
   g.proprietaire = 0;
 }
 
-static void sur_signal(int sig)
+static void sur_signal(int sig, siginfo_t *info, void *contexte)
 {
-  (void)sig;
+  (void)contexte;
+  /* Redbean tue son groupe de processus à l'arrêt d'organum. Si le SIGTERM
+     vient précisément du client organum (kill(0, SIGTERM)), il ne vise pas
+     cet assistant en tant que service : on l'ignore et on reste à l'écoute.
+     Un SIGTERM direct (kill du PID, launchd, shell) a un autre émetteur et
+     arrête normalement l'assistant. */
+  if (sig == SIGTERM && info != NULL && g.pid_organum > 0 &&
+      info->si_pid == (pid_t)g.pid_organum)
+    return;
   g.arret = 1;
 }
 
@@ -867,8 +893,13 @@ int main(int argc, char **argv)
   if (liste)
     return lister_sources();
 
-  signal(SIGINT, sur_signal);
-  signal(SIGTERM, sur_signal);
+  struct sigaction sa;
+  memset(&sa, 0, sizeof sa);
+  sa.sa_sigaction = sur_signal;
+  sa.sa_flags = SA_SIGINFO;
+  sigemptyset(&sa.sa_mask);
+  sigaction(SIGINT, &sa, NULL);
+  sigaction(SIGTERM, &sa, NULL);
   signal(SIGPIPE, SIG_IGN);
 
   g.ecoute = -1;

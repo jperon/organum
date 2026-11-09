@@ -19,6 +19,9 @@
 #   h. MIDI socket sans audio (mode dégradé) ;
 #   i. lectures concurrentes : aucune note volée, un PONG par PING ;
 #   j. recul de reconnexion mesuré en temps mural (≤ 2 s après relance).
+#   k. redémarrage d'organum sans relancer l'assistant : la socket et les
+#      sources restent en place, un second assistant est toujours refusé
+#      (code 3), et une note est reçue après la reconnexion.
 #
 # Sortie : une ligne OK/ÉCHEC par contrôle ; code non nul au premier échec.
 set -u
@@ -393,6 +396,67 @@ else
   echec "i : PONG incohérents ($nb_pong pour $nb_ping PING)"
 fi
 arreter_assistant
+
+# --- k. Redémarrage d'organum sans relancer l'assistant --------------------
+# Le client s'en va (BYE ou fin de flux) : l'assistant doit revenir à
+# l'écoute, garder sa socket et ses sources CoreMIDI, et accepter le nouvel
+# organum. Un second assistant lancé entre-temps doit toujours être refusé
+# avec le code 3, sans retirer la socket du premier.
+arreter_serveur
+rm -f "$SOCKET"
+if lancer_assistant 'note:0:60:100,pause:2500,note:0:60:0' \
+    --attendre-client 20000; then
+  assistant_initial=$ASSISTANT_PID
+  if lancer_serveur; then
+    attendre_motif "$URL/api/midi/ports" '"assistant":true' 100 >/dev/null || true
+    if corps=$(attendre_motif "$URL/api/midi" '"canaux_actifs":[1' 100); then
+      ok "k : note reçue avant le redémarrage d'organum"
+    else
+      echec "k : note non reçue avant le redémarrage ; vu : $corps"
+    fi
+    arreter_serveur
+    sleep 0.3
+    if kill -0 "$assistant_initial" 2>/dev/null; then
+      ok "k : l'assistant survit à la déconnexion du client"
+    else
+      echec "k : l'assistant s'est arrêté avec le client"
+    fi
+    if [ -S "$SOCKET" ]; then
+      ok "k : la socket de l'assistant reste en place"
+    else
+      echec "k : la socket a disparu après la déconnexion"
+    fi
+    "$ASSISTANT" --socket "$SOCKET" --sequence '' --attendre-client 100 \
+      >"$TMP/second-assistant.log" 2>&1
+    code_second=$?
+    if [ "$code_second" -eq 3 ]; then
+      ok "k : un second assistant est toujours refusé (code 3)"
+    else
+      echec "k : second assistant code $code_second (attendu 3)"
+    fi
+    if [ -S "$SOCKET" ] && kill -0 "$assistant_initial" 2>/dev/null; then
+      ok "k : le second lancement n'a pas retiré la socket du premier"
+    else
+      echec "k : socket ou assistant initial perdu après le second lancement"
+    fi
+
+    if lancer_serveur; then
+      if corps=$(attendre_motif "$URL/api/midi" '"canaux_actifs":[1' 120); then
+        ok "k : note reçue après reconnexion, sans relancer l'assistant"
+      else
+        echec "k : note non reçue après reconnexion ; vu : $corps"
+      fi
+      if [ "$ASSISTANT_PID" = "$assistant_initial" ]; then
+        ok "k : PID de l'assistant inchangé"
+      else
+        echec "k : l'assistant a été relancé ($assistant_initial → $ASSISTANT_PID)"
+      fi
+    fi
+  fi
+fi
+arreter_assistant
+arreter_serveur
+rm -f "$SOCKET"
 
 # --- g. Version refusée ----------------------------------------------------
 arreter_serveur

@@ -204,10 +204,22 @@ d'écoute ; organum ne possède que sa connexion.
    reste en MIDI dégradé et réessaie plus tard. Quand l'assistant démarre,
    sa sonde `connect()` échoue, il fait `unlink()` puis `bind()` et écoute ;
    organum se connecte alors normalement.
-2. **Organum s'arrête.** Il envoie `BYE` si possible puis ferme sa
-   connexion, sans jamais toucher au fichier de socket. L'assistant voit
-   `read()` renvoyer `0`, ferme la connexion acceptée, garde sa socket
-   d'écoute et attend un nouveau client.
+2. **Organum s'arrête ou redémarre.** Il envoie `BYE` si possible puis
+   ferme sa connexion, sans jamais toucher au fichier de socket. L'assistant
+   voit `BYE` ou `read()` renvoyer `0`, ferme la connexion acceptée, garde sa
+   socket d'écoute et **toutes ses connexions aux sources CoreMIDI**, puis
+   attend un nouveau client. Aucun redémarrage de l'assistant n'est
+   nécessaire : le prochain organum échange simplement une nouvelle poignée
+   et retrouve les sources déjà énumérées.
+
+   Cas particulier de redbean : à l'arrêt d'organum (`SIGTERM`), redbean
+   envoie `SIGTERM` à **tout son groupe de processus** (`kill(0, SIGTERM)`).
+   Si l'assistant a été lancé dans ce même groupe, il recevrait ce signal
+   alors qu'il n'est pas visé. Il lit donc le PID de son client par
+   `LOCAL_PEERPID` et ignore un `SIGTERM` dont l'émetteur est précisément ce
+   client organum ; un `SIGTERM` direct (PID de l'assistant, launchd, shell)
+   a un autre émetteur et l'arrête normalement. La socket n'est retirée que
+   sur cet arrêt direct.
 3. **L'assistant s'arrête.** Il envoie `BYE` si possible, ferme la connexion
    acceptée et sa socket d'écoute, puis retire le fichier (`unlink()`).
    Organum lit la fin de flux, ferme sa connexion, repasse en MIDI dégradé et
