@@ -231,23 +231,33 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   n'est branché, mais les deux chemins CoreAudio et CoreMIDI sont donc
   exerçables en CI.
   Contrôles du script : `audio_disponible`, `audio_assistant = 1`,
-  `latence_ms > 0`, `audio_demarre`, cadence sur 3 s à ≤ 2 % de `taux`,
-  `xruns`/`xruns_recents` à 0, puis MIDI de bout en bout (source virtuelle
-  CoreMIDI `emetteur_midi.c` → assistant → socket → orgue :
-  `canaux_actifs` non vide, puis revenu à vide au relâchement). Mesure
-  réelle du 2026-11-09 (run `42653100117`, 10 s pour le script) :
-  « latence audio publiée (55.416 ms, taux 48000 Hz) », « cadence sur 3 s :
-  151040 trames pour 149263 attendues (119‱ d'écart, ≤ 2 %) », « note
-  CoreMIDI reçue, canaux_actifs non vide ([1]) », « relâchement vu,
-  canaux_actifs revenu à vide ». Le scénario dégradé volontaire reste
-  nécessaire : il prouve le repli, alors que le second prouve le chemin
-  nominal. **Piège de l'émetteur MIDI** : `MIDIPacketListAdd` attend un
-  horodatage en **ticks Mach** ; zéro signifie « maintenant ». Un
-  horodatage en nanosecondes (`CLOCK_MONOTONIC`) place la note très loin
-  dans le futur et elle n'arrive jamais (constaté : aucune activité dans
-  `/api/midi`). **Piège de la mesure de cadence** : prendre `trames_jouees`
-  dans un JSON périmé (dernière requête d'attente) surestime la cadence de
-  ~2,5 % ; le script relit `/api/orgue` juste avant la mesure.
+  `latence_ms > 0`, `audio_demarre`, cadence (trois fenêtres de 5 s après
+  1 s de stabilisation, médiane ≤ 2 % de `taux`), `xruns`/`xruns_recents`
+  à 0, puis MIDI de bout en bout (source virtuelle CoreMIDI
+  `emetteur_midi.c` → assistant → socket → orgue : `canaux_actifs` non
+  vide, puis revenu à vide au relâchement). Mesure réelle du 2026-11-09
+  (run `42653100117`, 10 s pour le script) : « latence audio publiée
+  (55.416 ms, taux 48000 Hz) », « cadence sur 3 s : 151040 trames pour
+  149263 attendues (119‱ d'écart, ≤ 2 %) », « note CoreMIDI reçue,
+  canaux_actifs non vide ([1]) », « relâchement vu, canaux_actifs revenu
+  à vide ». Le scénario dégradé volontaire reste nécessaire : il prouve le
+  repli, alors que le second prouve le chemin nominal. **Piège de
+  l'émetteur MIDI** : `MIDIPacketListAdd` attend un horodatage en **ticks
+  Mach** ; zéro signifie « maintenant ». Un horodatage en nanosecondes
+  (`CLOCK_MONOTONIC`) place la note très loin dans le futur et elle
+  n'arrive jamais (constaté : aucune activité dans `/api/midi`). **Piège
+  de la mesure de cadence** : prendre `trames_jouees` dans un JSON périmé
+  (dernière requête d'attente) surestime la cadence de ~2,5 % ; les deux
+  lectures se font désormais avec un horodatage pris avant la requête, à
+  la même distance de l'échantillon. Mesurer dès la première trame, sur
+  3 s, confondait aussi le transitoire de remplissage de l'anneau et un
+  pic de charge de ~70 ms avec un défaut de cadence (2,36 % observé sur un
+  runner partagé, contre 2 % de tolérance) : d'où la stabilisation, les
+  trois fenêtres et la médiane, qui gardent le seuil serré de 2 % tout en
+  attrapant un facteur 1,5 ou une horloge fausse (50 % à 85 % d'écart sur
+  toutes les fenêtres). Les règles pures (`plateforme/macos/tests/cadence.sh`)
+  sont éprouvées sans macOS par `plateforme/macos/tests/tester_cadence.sh`,
+  lancé par `scripts/tests-longs.sh`.
   **Limites** : pas de carte son physique (donc pas de mesure de latence
   audible ni de périphérique USB), pas de test du LaunchAgent ni de
   quarantaine (l'assistant est lancé par organum), et les suites Linux

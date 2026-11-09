@@ -13,8 +13,10 @@
 # l'assistant) :
 #   a. l'assistant embarqué démarre, CoreAudio s'ouvre :
 #      audio_disponible, audio_assistant = 1, latence_ms > 0, audio_demarre ;
-#   b. cadence sur 3 s : |trames_jouees − 3 × taux| ≤ 2 %, xruns = 0
-#      (preuve que le rappel CoreAudio consomme l'anneau au bon rythme) ;
+#   b. cadence : trois fenêtres de 5 s après 1 s de stabilisation, médiane
+#      ≤ 2 % de taux, xruns = 0 (preuve que le rappel CoreAudio consomme
+#      l'anneau au bon rythme, sans confondre un pic de charge isolé avec un
+#      défaut structurel) ;
 #   c. MIDI de bout en bout : une source virtuelle CoreMIDI joue une note,
 #      /api/midi publie canaux_actifs non vide, puis revient à vide quand
 #      l'émetteur relâche la note ;
@@ -65,9 +67,17 @@ champ() {
 }
 
 # maintenant_ns : horloge monotone en nanosecondes (perl est fourni par macOS).
+# CLOCK_MONOTONIC évite qu'un saut NTP fausse une durée ; si le perl de
+# l'hôte ne l'expose pas, on retombe sur l'horloge murale.
 maintenant_ns() {
-  perl -MTime::HiRes=time -e 'printf "%.0f\n", time * 1000000000'
+  perl -MTime::HiRes=clock_gettime,CLOCK_MONOTONIC -e \
+    'printf "%.0f\n", clock_gettime(CLOCK_MONOTONIC) * 1000000000' 2>/dev/null ||
+    perl -MTime::HiRes=time -e 'printf "%.0f\n", time * 1000000000'
 }
+
+# Règles pures de la mesure, testées localement par tester_cadence.sh.
+. "$ICI/cadence.sh"
+CADENCE_TOLERANCE_BP=200
 
 # arreter_serveur : SIGKILL, jamais SIGTERM : redbean enverrait SIGTERM à
 # tout son groupe, y compris l'agent du runner (voir AGENTS.md).
@@ -203,7 +213,12 @@ else
   taux=48000
 fi
 
-# --- b. Cadence sur 3 s ---------------------------------------------------
+# --- b. Cadence : trois fenêtres de 5 s, médiane -------------------------
+# Le drain doit avoir commencé, puis on laisse 1 s de stabilisation : au
+# démarrage l'anneau se remplit et les premiers rappels CoreAudio peuvent
+# être irréguliers. Mesurer dès la première trame, sur 3 s, confondait ce
+# transitoire (et un pic de charge de ~70 ms) avec un défaut de cadence :
+# 2,36 % observé sur un runner partagé, contre 2 % de tolérance.
 i=0
 while [ "$i" -lt 80 ]; do
   [ "$(champ "$ORQUE" trames_jouees)" -gt 0 ] 2>/dev/null && break
@@ -211,31 +226,48 @@ while [ "$i" -lt 80 ]; do
   i=$((i + 1))
   sleep 0.1
 done
-# Instantané frais juste avant la mesure : sans cela, la valeur « avant »
-# vient de la dernière requête d'attente et peut avoir jusqu'à 100 ms de
-# retard, ce qui fausse la cadence vers le haut (mesuré : 2,48 %).
-curl -fsS --max-time 2 "$URL/api/orgue" > "$ORQUE" 2>/dev/null || true
-debut=$(maintenant_ns)
-avant=$(champ "$ORQUE" trames_jouees)
-[ -n "$avant" ] || avant=0
-sleep 3
-curl -fsS --max-time 2 "$URL/api/orgue" > "$ORQUE" 2>/dev/null || true
-fin=$(maintenant_ns)
-apres=$(champ "$ORQUE" trames_jouees)
-[ -n "$apres" ] || apres=0
-jouees=$((apres - avant))
-attendu=$(awk -v e="$((fin - debut))" -v t="$taux" \
-  'BEGIN { printf "%.0f", e / 1000000000 * t }')
-if [ "$attendu" -gt 0 ]; then
-  pct=$(awk -v a="$jouees" -v b="$attendu" \
-    'BEGIN { d = a - b; if (d < 0) d = -d; printf "%.0f", d * 10000 / b }')
-  if [ "$pct" -le 200 ]; then
-    ok "b : cadence sur 3 s : $jouees trames pour $attendu attendues (${pct}‱ d'écart, ≤ 2 %)"
-  else
-    echec "b : cadence hors tolérance : $jouees trames pour $attendu attendues (${pct}‱ d'écart > 2 %)"
+sleep 1
+
+# Trois fenêtres de 5 s, médiane : une préemption isolée peut fausser une
+# fenêtre, pas les trois. Un défaut structurel (facteur 1,5, horloge fausse)
+# fausse en revanche toutes les fenêtres et reste détecté très au-delà de 2 %.
+mesures=
+m=0
+while [ "$m" -lt 3 ]; do
+  # Horodatage AVANT chaque requête : les deux lectures de trames_jouees
+  # sont alors faites à la même distance de leur horodatage, et la latence
+  # locale de la requête s'annule. (Un instantané frais avant la mesure,
+  # mais horodaté après, laissait un biais résiduel de quelques ms.)
+  debut=$(maintenant_ns)
+  curl -fsS --max-time 2 "$URL/api/orgue" > "$ORQUE" 2>/dev/null || true
+  avant=$(champ "$ORQUE" trames_jouees)
+  [ -n "$avant" ] || avant=0
+  sleep 5
+  fin=$(maintenant_ns)
+  curl -fsS --max-time 2 "$URL/api/orgue" > "$ORQUE" 2>/dev/null || true
+  apres=$(champ "$ORQUE" trames_jouees)
+  [ -n "$apres" ] || apres=0
+  jouees=$((apres - avant))
+  attendu=$(awk -v e="$((fin - debut))" -v t="$taux" \
+    'BEGIN { printf "%.0f", e / 1000000000 * t }')
+  pct=$(cadence_ecart_bp "$jouees" "$attendu")
+  if [ "$pct" -lt 0 ]; then
+    echec "b : mesure de cadence impossible (durée nulle, fenêtre $((m + 1)))"
+    break
   fi
-else
-  echec "b : mesure de cadence impossible (durée nulle)"
+  echo "b : fenêtre $((m + 1))/3 sur 5 s : $jouees trames pour $attendu attendues (${pct}‱ d'écart)"
+  mesures="$mesures $pct"
+  m=$((m + 1))
+done
+if [ "$m" -eq 3 ]; then
+  # shellcheck disable=SC2086
+  set -- $mesures
+  mediane=$(cadence_mediane "$1" "$2" "$3")
+  if [ "$mediane" -le "$CADENCE_TOLERANCE_BP" ]; then
+    ok "b : cadence médiane : ${mediane}‱ d'écart sur 3 fenêtres de 5 s (≤ 2 %)"
+  else
+    echec "b : cadence hors tolérance : médiane ${mediane}‱ > 2 % sur 3 fenêtres de 5 s"
+  fi
 fi
 verifie '"xruns":0' "$ORQUE" "b : aucun xrun (underrun/overrun) pendant la lecture"
 verifie '"xruns_recents":0' "$ORQUE" "b : aucun xrun récent"

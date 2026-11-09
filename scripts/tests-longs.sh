@@ -147,6 +147,11 @@ else
 fi
 
 # --- Couche plate-forme sans carte -----------------------------------------
+# Règles de mesure de cadence de la validation macOS : pures, donc
+# éprouvables ici sans macOS (pic de charge toléré, défaut structurel refusé).
+executer "règles de cadence audio (plateforme/macos/tests/tester_cadence.sh)" \
+  sh "$RACINE/plateforme/macos/tests/tester_cadence.sh"
+
 # scripts/tester.sh construit et exécute les tests ALSA/MIDI sans matériel
 # (chemins, injection, boucle d'écriture, ports MIDI, diagnostic libasound).
 if [ -f "$RACINE/externe/cosmopolitan/Makefile" ]; then
