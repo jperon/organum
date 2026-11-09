@@ -208,7 +208,11 @@ static int g_dernier[3] = {-1, -1, -1};
 // Horloge du fil audio : échantillons écoulés et échéance d'activité par
 // canal. La mesure de charge appelle clock_gettime autour du rendu : sous
 // Linux cosmopolitan résout __vdso_clock_gettime (libc/intrin/
-// clock_gettime.c), donc pas d'appel système dans la boucle.
+// clock_gettime.c), donc pas d'appel système dans la boucle. Elle garde
+// volontairement CLOCK_MONOTONIC : elle ne compare que deux lectures
+// rapprochées (t0/t1), donc un diviseur TSC faux sous XNU n'affecte pas le
+// pourcentage, et un saut NTP ne peut pas le fausser. En revanche les durées
+// longues (fenêtre d'activité, réessais) passent par horloge_mur().
 static unsigned long long g_echantillons;
 static unsigned long long g_echeances[16];
 
@@ -827,9 +831,21 @@ static int recreer_moteur(int taux) {
   return ok;
 }
 
+// Horloge murale pour les durées « humaines » (fenêtre d'activité des
+// canaux, espacement des réessais audio). Sous XNU x86-64, CLOCK_MONOTONIC de
+// cosmocc est reconstitué depuis le TSC avec un diviseur supposant 3 GHz
+// (libc/intrin/clock_gettime-mono.c:80) : sur une VM dont le TSC tourne à
+// 0,88 GHz, il avance à 0,29 × le temps réel. CLOCK_REALTIME est correct sur
+// les deux plates-formes ; sous Linux, CLOCK_MONOTONIC reste préféré car il
+// ignore les sauts NTP. Un delta négatif (saut d'horloge vers l'arrière) est
+// ignoré par les appelants, jamais converti en énorme durée.
+static void horloge_mur(struct timespec *t) {
+  clock_gettime(IsXnu() ? CLOCK_REALTIME : CLOCK_MONOTONIC, t);
+}
+
 static long maintenant_ms(void) {
   struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
+  horloge_mur(&ts);
   return (long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
@@ -944,7 +960,9 @@ static int appliquer_demande(struct demande_audio *dem, float **bg,
 // la main aussitôt : attente absolue jusqu'à l'échéance du tampon suivant.
 // Appelée seulement si g_sortie_null ; sur une vraie carte, le seul coût est
 // ce test d'entier. L'échéance est recalée après un retard ou un changement
-// de période ou de taux.
+// de période ou de taux. CLOCK_MONOTONIC reste utilisé ici car il doit être
+// le même que celui de clock_nanosleep ; la sortie « null » ne concerne pas
+// le backend audio macOS (absent).
 static void attendre_tampon_null(void) {
   static struct timespec echeance;
   static int echeance_valide, derniere_periode, dernier_taux;
@@ -1110,8 +1128,15 @@ static void *boucle_audio(void *arg) {
         // écoulé, mesuré et non supposé (le nanosleep peut être interrompu ou
         // dépasser 20 ms). La première mesure après une période de rendu sert
         // seulement de point de départ.
+        //
+        // Attention : ne pas prendre CLOCK_MONOTONIC ici. Sous XNU x86-64,
+        // cosmocc le reconstitue depuis le TSC avec un diviseur supposant
+        // 3 GHz (libc/intrin/clock_gettime-mono.c:80), donc il avance à
+        // ~0,29 × le temps réel sur une VM à 0,88 GHz : la fenêtre d'activité
+        // de 250 ms durait 849 ms. horloge_mur() choisit CLOCK_REALTIME sous
+        // XNU et garde CLOCK_MONOTONIC sous Linux (vDSO, insensible à NTP).
         struct timespec horloge;
-        clock_gettime(CLOCK_MONOTONIC, &horloge);
+        horloge_mur(&horloge);
         if (horloge_valide) {
           long long ecoule_ns = (horloge.tv_sec - horloge_avant.tv_sec) *
                                     1000000000LL +
