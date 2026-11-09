@@ -9,6 +9,13 @@ partagé `plateforme/macos/anneau_audio.h`, et le client côté organum
 `plateforme/tests/faux_assistant_audio.c` est une implémentation POSIX
 complète du côté serveur, utilisée sous Linux.
 
+Depuis la fusion, le serveur réel est **`organum-helper`**, un seul
+processus qui sert aussi la socket MIDI (`PROTOCOLE-MIDI.md`). Les deux
+domaines restent indépendants : l'échec, l'arrêt ou la perte du domaine MIDI
+ne touche ni l'anneau, ni l'`AudioUnit`, ni la socket audio, et
+réciproquement. La boucle principale est un `poll()` unique sur les deux
+sockets d'écoute et les deux clients.
+
 L'assistant est seul à parler CoreAudio : il possède un périphérique de
 sortie, configure une AudioUnit et joue les échantillons que organum dépose
 dans un anneau en mémoire partagée. Organum ne fait aucune conversion : le
@@ -357,8 +364,15 @@ Ordre d'arrêt de l'assistant, sur `SIGINT`/`SIGTERM` :
    `AudioComponentInstanceDispose` (plus aucun rappel ne peut tourner) ;
 2. `BYE` au mieux puis fermeture de la connexion acceptée ;
 3. `munmap` de l'anneau ;
-4. `unlink` du `.pcm` puis de la socket ;
-5. sortie avec le code **0**.
+4. `unlink` du `.pcm` puis de la socket audio ;
+5. côté MIDI, `BYE` puis fermeture du client, déconnexion des sources,
+   `MIDIPortDispose`, `MIDIClientDispose`, fermeture de la socket d'écoute
+   et `unlink` de la socket MIDI ;
+6. sortie avec le code **0**.
+
+L'échec d'un domaine n'emprunte jamais cet ordre complet : si CoreMIDI
+échoue à l'initialisation, seule la partie MIDI est abandonnée ; si l'audio
+échoue, seule la partie audio l'est, et le processus reste en vie.
 
 Scénarios :
 
@@ -383,7 +397,8 @@ Scénarios :
    positionne `arret`, envoie `AUDIO_STOP` (raison 1), arrête l'AudioUnit et
    **reste en vie**. Organum ferme et réessaie ; la prochaine
    `AUDIO_CONFIG` réussit si le périphérique est revenu, sinon l'assistant
-   répond statut `2`.
+   répond statut `2`. Les connexions CoreMIDI et la socket MIDI ne sont pas
+   touchées.
 6. **Fils de requête redbean.** Chaque fils hérite du descripteur de socket
    et du mappage. Il doit les oublier (`audio_socket_audio_oublier_fils`) :
    ni lecture, ni écriture, ni `unlink`. Seul le processus principal écrit

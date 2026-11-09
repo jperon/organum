@@ -214,16 +214,20 @@ d'écoute ; organum ne possède que sa connexion.
 
    Cas particulier de redbean : à l'arrêt d'organum (`SIGTERM`), redbean
    envoie `SIGTERM` à **tout son groupe de processus** (`kill(0, SIGTERM)`).
-   Si l'assistant a été lancé dans ce même groupe, il recevrait ce signal
-   alors qu'il n'est pas visé. Il lit donc le PID de son client par
-   `LOCAL_PEERPID` et ignore un `SIGTERM` dont l'émetteur est précisément ce
-   client organum ; un `SIGTERM` direct (PID de l'assistant, launchd, shell)
-   a un autre émetteur et l'arrête normalement. La socket n'est retirée que
-   sur cet arrêt direct.
-3. **L'assistant s'arrête.** Il envoie `BYE` si possible, ferme la connexion
-   acceptée et sa socket d'écoute, puis retire le fichier (`unlink()`).
-   Organum lit la fin de flux, ferme sa connexion, repasse en MIDI dégradé et
-   réessaie périodiquement ; il ne recrée pas la socket.
+   `organum-helper`, qui fusionne les domaines MIDI et audio, est destiné à
+   être lancé par organum : il est donc **volontairement** soumis à ce
+   signal et meurt avec son parent. L'ancien assistant MIDI, lui, lisait le
+   PID de son client par `LOCAL_PEERPID` pour ignorer un `SIGTERM` émis par
+   organum ; ce mécanisme est **retiré**. Un service permanent indépendant
+   d'organum doit être lancé par launchd, dans son propre groupe de
+   processus. Un `SIGTERM` ou `SIGINT` direct arrête normalement
+   l'assistant, qui retire alors ses deux sockets et son `.pcm`.
+3. **L'assistant s'arrête.** Il envoie `BYE` sur l'axe concerné, ferme la
+   connexion acceptée et sa socket d'écoute, puis retire le fichier
+   (`unlink()`). Organum lit la fin de flux, ferme sa connexion, repasse en
+   MIDI dégradé et réessaie périodiquement ; il ne recrée pas la socket.
+   L'arrêt du domaine MIDI (ou son échec) ne touche ni la socket audio, ni
+   son `.pcm`, ni la session audio en cours.
 4. **Une écriture est en cours au moment de la fermeture.** Le pair qui ferme
    le premier provoque `EPIPE` chez l'autre (SIGPIPE ignoré). L'écrivain
    abandonne l'écriture partielle, ferme à son tour et ne tente pas de

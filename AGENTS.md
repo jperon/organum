@@ -117,61 +117,49 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   l'assistant absent sans carte son. `test-sans-backend.sh` garde ses
   attentes : le bandeau `id="mode-degrade"` et la ligne
   `id="qualite-plateforme"` restent présents.
-- Assistant CoreMIDI macOS (`plateforme/macos/`) : le codec
-  `trames_midi.h` est partagé par le backend `midi_socket.c` (client),
-  l'assistant natif `assistant_coremidi.c` (serveur) et le faux assistant de
-  test `plateforme/tests/faux_assistant.c` ; la spécification est
-  `PROTOCOLE-MIDI.md`. L'assistant est un binaire Mach-O **hors** de la
-  chaîne cosmocc : `sh plateforme/macos/construire_assistant.sh` produit
-  `plateforme/macos/build/organum-midi` (déjà ignoré par git), avec
-  `ARCHIVES=1` pour un binaire universel. Il possède la socket (sonde
-  `connect`, `unlink` de la socket périmée, code 3 si un autre assistant
-  vit), énumère les sources, connecte chacune à un port CoreMIDI et publie
-  une `DEVICE_LIST` à chaque changement ; les `SUBSCRIBE` d'organum activent
-  le filtrage, tenu par identifiant comme chez organum (aucune trame avant
-  abonnement, et un identifiant réutilisé retrouve le même état). Le rappel de
-  lecture CoreMIDI n'alloue ni ne bloque : trames encodées en pile, écriture
-  non bloquante sous mutex, `EAGAIN` jette et compte. `--liste` affiche les
-  sources (unique id + nom) et sert de diagnostic (pilote IAC ou clavier
-  USB) ; `--socket` et `--verbose` complètent. Mode d'emploi et LaunchAgent :
-  `plateforme/macos/LANCEMENT.md`. Le même script produit les deux assistants
-  et refuse de continuer (code 2) sans `xcode-select -p` ; la compilation a
-  été faite sur la VM macOS de test (clang 17, SDK 15.5) ; le MIDI socket a
-  été validé de bout en bout sur cette VM (faux assistant et assistant
-  CoreMIDI compilé), mais aucun compilateur macOS n'est présent en CI. Le
-  fonctionnement réel sur un Mac avec clavier physique reste à confirmer.
-- Assistant CoreAudio macOS (`plateforme/macos/`) : le codec
-  `trames_audio.h` (tronc commun `trames.h`) et l'anneau SPSC
-  `anneau_audio.h` sont partagés par le backend `audio_socket.c` (client),
-  l'assistant natif `assistant_audio.c` (serveur) et le faux assistant de test
-  `plateforme/tests/faux_assistant_audio.c` ; la spécification est
-  `PROTOCOLE-AUDIO.md`. L'assistant est le **propriétaire de la socket et du
-  fichier anneau `<socket>.pcm`** : il le crée (`O_TRUNC`, `0600`), le
-  dimensionne à `ANNEAU_AUDIO_CAPACITE_MAX` (16384 trames, 131 200 octets),
-  le mappe en `MAP_SHARED` et retire les deux fichiers à l'arrêt propre. Il
-  sonde la socket et sort avec le code 3 si un autre assistant vit déjà. Il
-  utilise une AudioUnit `kAudioUnitType_Output` /
-  `kAudioUnitSubType_DefaultOutput` avec `AURenderCallback` (pas
-  d'`AudioQueue` : une copie et de la latence en moins) : float32 entrelacé
-  2 canaux au taux d'organum, avec repli `kAudioFormatFlagIsNonInterleaved`
-  et désentrelacement dans le rappel sur un tampon de pile borné si l'unité
-  refuse. Le rappel n'alloue pas, ne prend aucun verrou, n'appelle ni
-  `printf` ni libc bloquante, lit l'anneau, comble par du silence (underruns
-  comptés par l'anneau) et respecte `arret`. Un taux différent à chaud fait
-  `AudioOutputUnitStop` + `AudioUnitUninitialize`, reformate, `Initialize`,
-  `Start`, réinitialise l'anneau puis acquitte. Périphérique perdu en cours
-  de jeu : `arret` posé dans l'en-tête **et** `AUDIO_STOP` (raison 1), sans
-  quitter. `--liste` affiche la sortie par défaut (nom, taux nominal,
-  canaux, latence estimée ; code 1 et message français s'il n'y en a
-  aucune), `--socket` et `--verbose` complètent. La sortie est toujours le
-  **périphérique système par défaut** : le champ `peripherique` est ignoré en
-  v1. `construire_assistant.sh` produit `organum-audio` en même temps que
-  `organum-midi`. Éprouvé sur la VM macOS sans carte son (ACK statut 2
-  « aucune sortie audio disponible », `audio_assistant:0`,
-  `audio_disponible:false`, reconnexion chaque seconde, arrêt propre par PID
-  avec suppression de la socket et du `.pcm`) ; restent non vérifiables sans
-  carte son : le rendu réel des échantillons, la latence, l'absence de clic,
-  le désentrelacement et le changement de taux à chaud.
+- Assistant natif macOS fusionné (`plateforme/macos/`) : `assistant_helper.c`
+  est un **seul** binaire Mach-O `organum-helper`, hors de la chaîne cosmocc,
+  qui sert les deux protocoles : socket MIDI `organum-midi-<uid>.sock`
+  (`trames_midi.h`, `PROTOCOLE-MIDI.md`) et socket audio
+  `organum-audio-<uid>.sock` avec son `.pcm` (`trames_audio.h`,
+  `anneau_audio.h`, `PROTOCOLE-AUDIO.md`). Les chemins et protocoles sont
+  inchangés ; les backends `midi_socket.c` et `audio_socket.c` ne sont pas
+  touchés. Les deux domaines ont chacun leur socket d'écoute, leur client,
+  leur état et leur décodeur, et **échouent indépendamment** : CoreMIDI
+  indisponible n'empêche pas l'audio, un `AudioUnit` en échec (statut
+  d'ACK, ou aucune sortie) ne tue ni le MIDI ni le processus, une
+déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
+  audio ne touche pas les connexions CoreMIDI. Une seule boucle `poll()`
+  surveille les deux sockets d'écoute et les deux clients ; le processus ne
+  sort que sur `SIGINT`/`SIGTERM` (ou si les deux domaines échouent au
+  démarrage). `sh plateforme/macos/construire_assistant.sh` produit
+  `plateforme/macos/build/organum-helper` (ignoré par git), avec
+  `ARCHIVES=1` pour un binaire universel, et refuse de continuer (code 2)
+  sans `xcode-select -p`. Options : `--socket-midi`, `--socket-audio`,
+  `--verbose`, `--liste` (sortie audio par défaut **et** sources CoreMIDI,
+  code 0 ou 1 si un axe manque), `--aide`. L'assistant sonde chaque socket
+  (`connect`, `unlink` si périmée, code 3 si un autre assistant vit), possède
+  la socket audio et le `.pcm` (`O_TRUNC`, `0600`,
+  `ANNEAU_AUDIO_CAPACITE_MAX`), énumère les sources CoreMIDI et publie une
+  `DEVICE_LIST` à chaque changement ; les `SUBSCRIBE` d'organum activent le
+  filtrage par identifiant. Les rappels CoreMIDI et de rendu CoreAudio
+  n'allouent ni ne bloquent. L'`AudioUnit` est
+  `kAudioUnitType_Output`/`kAudioUnitSubType_DefaultOutput` avec
+  `AURenderCallback`, float32 entrelacé 2 canaux au taux d'organum, avec
+  repli non entrelacé désentrelacé dans le rappel ; taux changé à chaud par
+  arrêt/reformatage/relance ; périphérique perdu : `arret` et `AUDIO_STOP`
+  (raison 1), sans quitter. Le helper est **destiné à être lancé par
+  organum** : il n'a plus la protection `LOCAL_PEERPID` de l'ancien
+  assistant MIDI et meurt donc avec le groupe de processus de son parent
+  (SIGTERM de redbean) ; un service permanent passe par un LaunchAgent, dans
+  son propre groupe. Mode d'emploi et LaunchAgent unique :
+  `plateforme/macos/LANCEMENT.md`. Compilé sur la VM macOS de test (clang 17,
+  SDK 15.5) ; MIDI et audio simultanés validés sur cette VM (VMPK abonné,
+  `audio_assistant:1`, `latence_ms` ≈ 56, `trames_jouees` en progression,
+  crête non nulle dans l'anneau avec un jeu allumé), ainsi que les échecs
+  indépendants par clients bruts, le nettoyage sur SIGTERM et la reprise
+  après SIGKILL. Aucun compilateur macOS en CI ; le fonctionnement réel sur
+  un Mac avec clavier physique reste à confirmer.
 - Horloge sous XNU (piège `CLOCK_MONOTONIC`) : sous XNU x86-64, cosmocc
   reconstitue `CLOCK_MONOTONIC` depuis le TSC avec un diviseur supposant
   3 GHz (`libc/intrin/clock_gettime-mono.c:80`) ; sur une VM à 0,88 GHz, il
