@@ -211,7 +211,7 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   `scripts/construire.sh`, donc l'`organum.com` de la CI embarque le helper
   et le loader. Si un artefact manque (job macOS en échec), le job Linux
   continue avec un avertissement : sans helper, ou avec le repli
-  `ape-m1.c`. Le job `validation-arm64` (runner Apple Silicon `macos-14`,
+  `ape-m1.c`. Le job `validation-arm64` (runner Apple Silicon `macos-latest`,
   sans reconstruction) télécharge l'artefact `organum-com`, vérifie
   `uname -m` = arm64 et `sysctl -n sysctl.proc_translated` = 0, lance le
   binaire avec un faux `cc` qui échoue en tête de `PATH` (et vérifie qu'il
@@ -221,6 +221,14 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   l'on place ces fichiers dans `plateforme/macos/build/` avant
   `web/scripts/build.sh`. Le workflow n'a pas été exécuté : seule sa
   syntaxe YAML et la construction locale ont été validées.
+  **Étiquette de runner macOS** : ne pas coder `macos-14`. GitHub a retiré
+  cette image (`actions/runner-images` : `macos-14*` s'arrête au 31/08/2026)
+  et répond « The configuration 'macos-14-arm64-us-default' is not
+  supported » : aucun runner n'est accordé, le job se termine en ~1 s sans
+  aucune étape, ce qui ressemble à une erreur de code alors que seul le label
+  est invalide. Les deux jobs macOS utilisent donc `macos-latest` (résout en
+  `macos-26-arm64`) et **vérifient l'architecture dans le job** (`uname -m`,
+  `sysctl -n sysctl.proc_translated`) au lieu de se fier à l'étiquette.
 - **architectures macOS** : `scripts/construire.sh` produit désormais par
   défaut un APE **universel x86-64 + arm64** : moteur x86-64 et aarch64
   (`moteur/Makefile` avec `ARCH=aarch64`, objets `o-aarch64/`, archive
@@ -558,6 +566,25 @@ par l'article 13 de l'AGPL.
   paie que le test d'entier.
 - Ne pas copier par-dessus un `organum.com` en cours d'exécution :
   `build.sh` écrit un fichier temporaire puis renomme.
+- **Arrêter organum tue tout son groupe de processus** : sur `SIGTERM`,
+  redbean appelle `HandleShutdown()` (`externe/cosmopolitan/tool/net/redbean.c`,
+  ~l. 7228), qui fait `KillGroup()` → `kill(0, SIGTERM)`, donc **SIGTERM à
+  tout le groupe**. Conséquences mesurées : dans un shell sans contrôle de
+  tâches (script, CI, `nohup`), `kill $pid` sur organum tue le shell appelant
+  (code 143) ; en CI, le SIGTERM atteint l'**agent du runner GitHub**, qui
+  annule le job juste après des contrôles pourtant réussis (« The runner has
+  received a shutdown signal ») ; sur macOS, cela explique aussi que
+  l'assistant audio/MIDI mourait à chaque redémarrage d'organum (fait
+  attribué à tort à autre chose). Remèdes : depuis un script ou une CI,
+  arrêter organum par **`kill -KILL`** (SIGKILL n'est pas capté) — idiome de
+  `web/scripts/test-qualite.sh`, `test-sans-backend.sh`, `test-demarrage.sh`,
+  `test-authentification.sh`, `test-reseaux.sh`, `test-transposition.sh`,
+  `test-clavier.sh`, `test-midi-socket.sh`, `test-audio-socket.sh`,
+  `scripts/tests-e2e.sh` et du job `validation-arm64` —, ou lancer organum
+  dans son propre groupe (`set -m`, `setsid`) si l'on tient à `SIGTERM`. Tout
+  nouveau script de test qui arrête un serveur doit respecter cette règle.
+  `SIGTERM` reste légitime vers un **assistant** (`faux_assistant`,
+  `organum-helper`) ou vers Xvfb : ils ne propagent pas au groupe.
 - `pkill -f organum` / `pgrep -f` peuvent viser le shell qui les lance.
 - JSON de redbean : une table Lua vide est encodée `{}` ; côté client,
   normaliser en tableau.

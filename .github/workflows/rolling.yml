@@ -21,6 +21,11 @@ jobs:
   # embarqué dans organum.com. La signature ad-hoc est obligatoire : macOS
   # arm64 refuse d'exécuter un Mach-O non signé.
   assistant-macos:
+    # macos-latest et non une étiquette d'image précise : GitHub a retiré
+    # « macos-14 » (actions/runner-images : macos-14* s'arrête au 31/08/2026)
+    # et refuse alors le job en ~1 s sans lancer aucune étape
+    # (« The configuration 'macos-14-arm64-us-default' is not supported »).
+    # L'architecture est vérifiée dans le job (uname -m), pas par l'étiquette.
     runs-on: macos-latest
     timeout-minutes: 15
     steps:
