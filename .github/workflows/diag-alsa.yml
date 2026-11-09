@@ -1,0 +1,19 @@
+name: diag-alsa
+on:
+  workflow_dispatch:
+jobs:
+  diag:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Sonder le séquenceur ALSA
+        run: |
+          set -x
+          id
+          uname -a
+          ls -l /dev/snd || true
+          lsmod | grep -i snd || true
+          sudo modprobe snd-seq || true
+          sudo modprobe snd-dummy || true
+          ls -l /dev/snd || true
+          lsmod | grep -i snd || true
+          cat /proc/asound/seq/clients 2>/dev/null || true
