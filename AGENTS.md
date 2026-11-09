@@ -74,7 +74,12 @@ Aeolus (C++/JUCE) + interface web MoonScript zippée dans l'exécutable.
   le socket. `organum.midi_assistant()` rend 1 (assistant connecté), 0
   (absent, avertissement unique au démarrage) ou -1 (sans objet : ALSA/WinMM
   ou MIDI non ouvert) ; `organum.midi_chemin()` donne le chemin de la socket
-  sans recopier sa règle en MoonScript. L'échec audio reste fatal sur Linux
+  sans recopier sa règle en MoonScript. `midi_actif.socket_actif`
+  (`web/src/midi_actif.moon`) dit si l'aiguillage a réellement retenu le
+  backend socket (macOS, ou forçage Linux ; jamais Windows) ; `GET
+  /api/midi/ports` publie ce choix en `socket` à côté d'`assistant`, et
+  `/midi` n'affiche son message « assistant absent » que si `socket` est
+  vrai, au lieu d'inviter à lancer `organum-midi` sous ALSA. L'échec audio reste fatal sur Linux
   quand un backend existe ; le mode dégradé n'appelle jamais `unix.exit`.
   Tests : `web/tests/degradation.lua`,
   `web/tests/midi_actif.lua`, `web/scripts/test-sans-backend.sh` et

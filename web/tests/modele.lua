@@ -183,14 +183,18 @@ aide.egal(m.etat_port({}), "disponible", "etat_port : disponible")
 aide.egal(m.etat_port(nil), "disponible", "etat_port : nil")
 
 -- message_ports_vide
-local absent = m.message_ports_vide(true, false)
+local absent = m.message_ports_vide(true, false, true)
 aide.verifie(type(absent) == "string" and absent:find("Assistant MIDI absent", 1, true) ~= nil,
-  "message_ports_vide : assistant absent signalé")
-aide.egal(m.message_ports_vide(true, true), nil,
+  "message_ports_vide : assistant absent signalé (backend socket)")
+aide.egal(m.message_ports_vide(true, true, true), nil,
   "message_ports_vide : assistant présent, pas de message")
-aide.egal(m.message_ports_vide(false, false), nil,
+aide.egal(m.message_ports_vide(true, false, false), nil,
+  "message_ports_vide : ALSA/WinMM sans assistant, message habituel")
+aide.egal(m.message_ports_vide(true, false, nil), nil,
+  "message_ports_vide : socket inconnu, pas de message assistant")
+aide.egal(m.message_ports_vide(false, false, true), nil,
   "message_ports_vide : MIDI indisponible, message habituel")
-aide.egal(m.message_ports_vide(nil, false), nil,
+aide.egal(m.message_ports_vide(nil, false, true), nil,
   "message_ports_vide : état inconnu, pas de message")
 
 aide.egal(m.texte_transposition(0), "0", "transposition : zéro")

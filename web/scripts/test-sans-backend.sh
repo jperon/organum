@@ -207,6 +207,9 @@ if lancer normal; then
   verifie "normal : mode_degrade faux" '"mode_degrade":false' "$corps"
   ports=$(curl -s --max-time 2 "$URL/api/midi/ports")
   verifie "normal : MIDI disponible" '"disponible":true' "$ports"
+  # Backend ALSA : aucun assistant à lancer, la page /midi ne doit pas
+  # proposer organum-midi (elle teste etatPorts.socket === true).
+  verifie "normal : backend non socket annoncé" '"socket":false' "$ports"
   arreter
 fi
 

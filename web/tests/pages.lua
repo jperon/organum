@@ -87,7 +87,7 @@ aide.verifie(piege:find('&amp;&lt;&gt;&quot;', 1, true) ~= nil,
   "page : nom de jeu échappé")
 
 -- page_midi
-local midi = page_midi()
+local midi = page_midi(true)
 aide.verifie(midi:sub(1, 15) == "<!DOCTYPE html>", "page MIDI : doctype")
 for _, id in ipairs({"grille", "associations", "liste-ports", "adresse-midi",
                      "message-connexions", "rafraichir-ports", "ajouter",
@@ -105,7 +105,15 @@ aide.verifie(midi:find("suivrePorts", 1, true) ~= nil,
   "page MIDI : suivi des ports dans le script")
 aide.verifie(midi:find('data-message-assistant-absent="Assistant MIDI absent', 1, true) ~= nil,
   "page MIDI : message d'assistant absent disponible")
+aide.verifie(midi:find('etatPorts.socket === true', 1, true) ~= nil,
+  "page MIDI : message d'assistant absent conditionné au backend socket")
 aide.verifie(midi:find("← Orgue", 1, true) ~= nil, "page MIDI : retour à l'orgue")
+local midi_alsa = page_midi(false)
+aide.verifie(midi_alsa:sub(1, 15) == "<!DOCTYPE html>", "page MIDI : doctype hors socket")
+aide.verifie(midi_alsa:find("organum-midi", 1, true) == nil,
+  "page MIDI : aucun organum-midi à lancer hors backend socket")
+aide.verifie(midi_alsa:find('id="liste-ports"', 1, true) ~= nil,
+  "page MIDI : liste des ports présente hors backend socket")
 
 -- page_audio
 local audio = page_audio()

@@ -229,6 +229,10 @@ if lancer_serveur; then
   ports=$(curl -s --max-time 2 "$URL/api/midi/ports")
   verifie "e : sans assistant, aucun port" '"ports":[]' "$ports"
   verifie "e : MIDI reste disponible" '"disponible":true' "$ports"
+  verifie "e : backend socket annoncé" '"socket":true' "$ports"
+  # Précondition du message « assistant absent » de /midi : socket actif et
+  # assistant non connecté (la page teste etatPorts.socket === true).
+  verifie "e : assistant signalé absent" '"assistant":false' "$ports"
   sleep 1
   refuse "e : aucun message fatal au journal" 'panique' "$(cat "$JOURNAL")"
   refuse "e : pas de plantage au journal" 'Segmentation' "$(cat "$JOURNAL")"
@@ -260,6 +264,7 @@ if lancer_assistant 'note:0:60:100,pause:2000,note:0:60:0' --attendre-client 500
   else
     echec "d : ports connectés = $nb (attendu 2) ; vu : $ports"
   fi
+  verifie "d : assistant connecté annoncé" '"assistant":true' "$ports"
 
   # La note OFF met canaux_actifs à zéro après les 250 ms d'activité.
   if corps=$(attendre_motif "$URL/api/midi" '"canaux_actifs":[]' 120); then
@@ -354,6 +359,7 @@ if lancer_serveur degrade; then
   verifie "h : mode_degrade reste vrai (axe audio)" '"mode_degrade":true' "$corps"
   ports=$(curl -s --max-time 2 "$URL/api/midi/ports")
   verifie "h : ports MIDI disponibles" '"disponible":true' "$ports"
+  verifie "h : backend socket annoncé" '"socket":true' "$ports"
 
   if lancer_assistant 'note:0:60:100,pause:300,note:0:60:0,pause:2000' \
       --attendre-client 5000; then

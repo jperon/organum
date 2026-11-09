@@ -20,6 +20,9 @@ SANS_BACKEND, RAISON_SANS_BACKEND = degradation.detecter PLATEFORME, os.getenv "
 midi_supportee = type(organum.midi_supportee) == "function" and organum.midi_supportee!
 midi_socket = type(organum.midi_socket_imposee) == "function" and organum.midi_socket_imposee!
 MIDI_ACTIF = midi_actif.actif midi_supportee, os.getenv("ORGANUM_SANS_BACKEND"), midi_socket
+-- Backend socket réellement retenu (macOS, ou forçage Linux) : lui seul a un
+-- assistant à lancer. Publié par /api/midi/ports pour la page /midi.
+MIDI_SOCKET = midi_actif.socket_actif PLATEFORME, midi_socket
 
 -- Écoute : redbean, sans adresse explicite (-l), ne programme que 0.0.0.0
 -- (tool/net/redbean.c, Listen) ; on ajoute « :: » pour répondre aussi en
@@ -1365,6 +1368,7 @@ etat_midi_ports = ->
       Log kLogWarn, "organum : ports MIDI indisponibles : #{ports}"
     return {adresse: adresse, disponible: MIDI_ACTIF,
       assistant: assistant_midi!,
+      socket: MIDI_SOCKET,
       plateforme_libelle: modele.libelle_plateforme PLATEFORME,
       ports: modele.liste_json {}}
   liste = for p in *ports
@@ -1373,6 +1377,7 @@ etat_midi_ports = ->
     p
   {adresse: adresse, disponible: MIDI_ACTIF,
     assistant: assistant_midi!,
+    socket: MIDI_SOCKET,
     plateforme_libelle: modele.libelle_plateforme PLATEFORME,
     ports: modele.liste_json liste}
 
@@ -1506,7 +1511,7 @@ _G.OnHttpRequest = ->
   elseif path == "/midi"
     SetStatus 200
     SetHeader "Content-Type", "text/html; charset=utf-8"
-    Write page_midi!
+    Write page_midi MIDI_SOCKET
   elseif path == "/audio"
     SetStatus 200
     SetHeader "Content-Type", "text/html; charset=utf-8"

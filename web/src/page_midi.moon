@@ -232,7 +232,7 @@ script = [[
     if (!ports.length) {
       var vide = document.createElement('p');
       vide.className = 'note';
-      if (etatPorts.disponible === true && etatPorts.assistant === false && messageAssistantAbsent) {
+      if (etatPorts.disponible === true && etatPorts.socket === true && etatPorts.assistant === false && messageAssistantAbsent) {
         // Backend socket présent sans son assistant : le dire, sans alarmer.
         vide.className = 'note degrade';
         vide.textContent = messageAssistantAbsent;
@@ -411,7 +411,12 @@ script = [[
 })();
 ]]
 
-->
+(socket) ->
+  -- Le texte d'avertissement n'est embarqué que si le backend socket est
+  -- celui qui est utilisé : sous ALSA/WinMM, aucun organum-midi à lancer.
+  attributs_ports = {}
+  if socket == true
+    attributs_ports["data-message-assistant-absent"] = escape(modele.message_ports_vide(true, false, true) or "")
   page = h.html lang: "fr",
     h.head {},
       h.meta charset: "utf-8",
@@ -434,7 +439,7 @@ script = [[
             h.h2 id: "titre-connexions", "Connexions MIDI",
             h.button type: "button", class: "btn small", id: "rafraichir-ports", ["aria-label"]: "Rafraîchir la liste des ports MIDI", "Rafraîchir",
           h.p class: "note", id: "adresse-midi", "",
-          h.div class: "ports", id: "liste-ports", "", ["data-message-assistant-absent"]: escape(modele.message_ports_vide(true, false) or ""),
+          h.div class: "ports", id: "liste-ports", "", attributs_ports,
           h.p class: "message", id: "message-connexions", role: "status", "",
       h.script script
 

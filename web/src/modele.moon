@@ -219,11 +219,12 @@ etat_port = (p) ->
   return "destination" if p.destination
   "disponible"
 
--- Message de la liste vide des ports MIDI : le backend existe mais son
--- assistant socket n'est pas connecté (cas macOS sans organum-midi).
--- nil laisse le script de la page afficher son message habituel.
-message_ports_vide = (disponible, assistant) ->
-  if disponible == true and assistant == false
+-- Message de la liste vide des ports MIDI : le backend socket est celui
+-- qui est utilisé, mais son assistant n'est pas connecté (cas macOS sans
+-- organum-midi). Hors backend socket (ALSA, WinMM), il n'y a pas d'assistant
+-- à lancer : nil laisse le script afficher son message habituel.
+message_ports_vide = (disponible, assistant, socket) ->
+  if disponible == true and assistant == false and socket == true
     "Assistant MIDI absent : aucun port ne sera visible. Lancez organum-midi (voir plateforme/macos/LANCEMENT.md)."
 
 {
