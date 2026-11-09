@@ -1,18 +1,23 @@
--- Règles pures du mode dégradé audio : une plate-forme sans backend audio
--- (macOS aujourd'hui) garde l'interface web mais ne produit aucun son.
--- L'axe MIDI est décidé séparément (midi_actif.moon) : macOS a désormais un
--- backend MIDI par socket, et `sans_backend` ne désigne donc ici que l'axe
--- audio. ORGANUM_SANS_BACKEND=1 force ce mode pour les tests ; toute autre
--- valeur est ignorée, donc sans effet sur Linux normal.
+-- Règles pures du mode dégradé audio : l'axe audio n'est dégradé que si
+-- aucun backend audio n'existe réellement pour la plate-forme, ou si
+-- ORGANUM_SANS_BACKEND=1 le force pour les tests. La décision ne se fonde
+-- plus sur le seul nom de plate-forme : macOS a désormais le backend socket
+-- (assistant CoreAudio), et c'est organum.audio_supportee() qui fait foi.
+-- `supportee` vaut nil quand le module natif ne publie pas encore la
+-- fonction : on retombe alors sur l'ancienne règle par nom de plate-forme.
+-- L'axe MIDI est décidé séparément (midi_actif.moon).
 
-sans_backend = (plateforme) ->
-  plateforme != "linux" and plateforme != "windows"
+sans_backend = (plateforme, supportee) ->
+  if supportee == nil
+    plateforme != "linux" and plateforme != "windows"
+  else
+    supportee != true
 
-detecter = (plateforme, force) ->
+detecter = (plateforme, force, supportee) ->
   if force == "1"
     true, "forcé par ORGANUM_SANS_BACKEND"
-  elseif sans_backend plateforme
-    true, "aucun backend audio/MIDI pour « #{plateforme} »"
+  elseif sans_backend plateforme, supportee
+    true, "aucun backend audio pour « #{plateforme} »"
   else
     false, nil
 

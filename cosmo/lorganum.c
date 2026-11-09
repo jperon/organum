@@ -341,9 +341,8 @@ static int collecter_zone(char *ligne, struct zone_pcm *zones, int nzones) {
   return nzones + 1;
 }
 
-static void oublier_audio_fils(void) {
-  if (!IsLinux()) return;
-
+// ALSA : descripteurs et mappages PCM hérités (Linux seulement).
+static void oublier_audio_fils_alsa(void) {
   // Deux temps : collecter d'abord toutes les zones (la lecture de
   // /proc/self/maps ne doit pas être perturbée par des munmap), fermer le
   // fichier, puis libérer.
@@ -390,6 +389,13 @@ static void oublier_audio_fils(void) {
               zones[i].chemin, zones[i].debut, zones[i].fin, e, strerror(e));
     }
   }
+}
+
+static void oublier_audio_fils(void) {
+  if (IsLinux()) oublier_audio_fils_alsa();
+  // Backend socket : l'anneau et le descripteur hérités, sans aucun appel
+  // à l'assistant. Sans objet pour ALSA/WinMM.
+  audio_oublier_fils();
 }
 
 // Libère tout ce que l_demarrer a alloué, pour qu'un second appel puisse
@@ -469,6 +475,13 @@ static void publier(void) {
   if (strcmp(g_audio_erreur, e->audio_erreur) != 0) {
     strlcpy(e->audio_erreur, g_audio_erreur, sizeof(e->audio_erreur));
     change = 1;
+  }
+  {
+    // L'ouverture opportuniste peut réussir après coup (assistant lancé plus
+    // tard) : publier l'axe audio quand il change, sans toucher aux autres.
+    const int dispo =
+        !g_sans_backend && (!audio_socket_actif() || g_audio != NULL);
+    if (dispo != e->audio_disponible) e->audio_disponible = dispo, change = 1;
   }
   {
     int qualite[4] = {
@@ -755,7 +768,8 @@ static int ouvrir_audio_cfg(const struct demande_audio *d) {
   if (d->taux <= 0 || d->periode <= 0) return 0;
   g_audio = audio_ouvrir(d->peripherique[0] ? d->peripherique : NULL, d->taux, 2,
                          d->periode, 3);
-  g_sortie_null = g_audio && sortie_est_null(d->peripherique);
+  g_sortie_null = g_audio && !audio_socket_actif() &&
+                  sortie_est_null(d->peripherique);
   return g_audio != NULL;
 }
 
@@ -1167,7 +1181,12 @@ static void *boucle_audio(void *arg) {
       entrelace[2 * i] = g[i];
       entrelace[2 * i + 1] = d[i];
     }
-    if (audio_ecrire(g_audio, entrelace, g_periode) < 0) ++g_erreurs_ecriture;
+    if (audio_ecrire(g_audio, entrelace, g_periode) < 0) {
+      ++g_erreurs_ecriture;
+      // L'assistant audio a disparu : fermer pour que la branche de réessai
+      // périodique rouvre la sortie quand il revient.
+      if (audio_perdue(g_audio)) fermer_audio_cumuler();
+    }
     if (g_sortie_null) attendre_tampon_null();
     g_echantillons += g_periode;
     // Le rendu reprend : la prochaine panne repartira d'une nouvelle mesure
@@ -1311,12 +1330,15 @@ static int l_calibrer(lua_State *L) {
 
 // organum.demarrer{taux=48000, periode=512, peripherique="default",
 //                  limiteur=true, sans_backend=false, midi=true,
+//                  audio_opportuniste=false,
 //                  jeux={{division, jeu}, …},
 //                  qualite={bruit_attaque=…, …}, tete_reverb=true}
 //                  → true | nil, erreur
 // sans_backend ne concerne que l'axe audio ; l'option midi (facultative) est
 // l'axe MIDI. Sans elle, le MIDI suit l'ancien comportement (coupé par
-// sans_backend).
+// sans_backend). audio_opportuniste (facultative) rend l'échec d'ouverture
+// audio non fatal : l'orgue démarre en dégradé et la boucle de réessai
+// périodique reste active, ce qui permet à macOS de démarrer sans assistant.
 static int l_demarrer(lua_State *L) {
   if (g_etat) return luaL_error(L, "organum déjà démarré");
   g_maitre = getpid();
@@ -1324,6 +1346,8 @@ static int l_demarrer(lua_State *L) {
   int sans_backend = 0;
   // -1 : option absente, comportement historique (le MIDI suit sans_backend).
   int midi_demande = -1;
+  // Faux par défaut : un échec d'ouverture audio reste fatal.
+  int audio_opportuniste = 0;
   const char *peripherique = NULL;
   g_periode = 512;
   g_taux = 48000;
@@ -1340,7 +1364,9 @@ static int l_demarrer(lua_State *L) {
     sans_backend = lua_toboolean(L, -1);
     lua_getfield(L, 1, "midi");
     if (!lua_isnil(L, -1)) midi_demande = lua_toboolean(L, -1);
-    lua_pop(L, 6);
+    lua_getfield(L, 1, "audio_opportuniste");
+    if (!lua_isnil(L, -1)) audio_opportuniste = lua_toboolean(L, -1);
+    lua_pop(L, 7);
   }
 
   // Deux axes distincts. sans_backend (option Lua) et l'absence de backend
@@ -1454,18 +1480,26 @@ static int l_demarrer(lua_State *L) {
   // bloquer cette ouverture ; le chemin hw:C,D, lui, ouvre en O_NONBLOCK.
   if (!g_sans_backend) {
     if (!(g_audio = audio_ouvrir(peripherique, taux, 2, g_periode, nb_periodes))) {
-      const char *detail = audio_derniere_erreur();
-      char message[1200];
-      if (detail && detail[0])
-        snprintf(message, sizeof(message), "sortie audio indisponible : %s", detail);
-      else
-        snprintf(message, sizeof(message), "sortie audio indisponible");
-      liberer_demarrage();
-      lua_pushnil(L);
-      lua_pushstring(L, message);
-      return 2;
+      if (audio_opportuniste) {
+        // Démarrage en dégradé : la boucle audio réessaiera l'ouverture
+        // toutes les ~1 s, sans rendre l'échec fatal (macOS sans assistant).
+        g_audio = NULL;
+        g_sortie_null = 0;
+      } else {
+        const char *detail = audio_derniere_erreur();
+        char message[1200];
+        if (detail && detail[0])
+          snprintf(message, sizeof(message), "sortie audio indisponible : %s", detail);
+        else
+          snprintf(message, sizeof(message), "sortie audio indisponible");
+        liberer_demarrage();
+        lua_pushnil(L);
+        lua_pushstring(L, message);
+        return 2;
+      }
+    } else {
+      g_sortie_null = !audio_socket_actif() && sortie_est_null(peripherique);
     }
-    g_sortie_null = sortie_est_null(peripherique);
   } else {
     // Axe audio dégradé : pas de sortie, pas de boucle de réessai audio.
     g_audio = NULL;
@@ -1509,7 +1543,7 @@ static int l_demarrer(lua_State *L) {
   e->transposition = 0;
   strlcpy(e->peripherique, g_peripherique, sizeof(e->peripherique));
   e->netapes = aeolus_nb_etapes(g_moteur);
-  e->audio_disponible = !g_sans_backend;
+  e->audio_disponible = !g_sans_backend && (!audio_socket_actif() || g_audio != NULL);
   e->midi_disponible = !g_sans_midi;
   if (g_midi)
     midi_adresse(g_midi, &e->midi_client, &e->midi_port);
@@ -1678,7 +1712,9 @@ static void envoyer(lua_State *L, struct commande c) {
 //                            polyphonie_max, tete_reverb (effectif),
 //                            tete_reverb_impose, peripherique (effectif,
 //                            "" = défaut), limiteur (effectif),
-//                            audio_erreur (dernier échec de reconfiguration)},
+//                            audio_erreur (dernier échec de reconfiguration),
+//                            audio_socket, audio_assistant (1/0/-1),
+//                            audio_chemin, trames_jouees)},
 //                   divisions={{nom, gain, jeux={{nom, actif}, …}}, …}}
 // canaux_actifs est éphémère (activité des 250 dernières ms) et hors de seq.
 static int l_etat(lua_State *L) {
@@ -1705,6 +1741,17 @@ static int l_etat(lua_State *L) {
       atomic_load_explicit(&g_partage->traitees_temperament, memory_order_acquire);
   int temperament_cible =
       atomic_load_explicit(&g_partage->temperament_cible, memory_order_acquire);
+  // Axe audio socket : état de l'assistant et compteurs partagés, lisibles
+  // depuis un fil de requête même après l'oubli de l'anneau hérité.
+  const int socket_audio = audio_socket_actif();
+  int assistant_audio = -1;
+  char chemin_audio[256] = "";
+  if (socket_audio) {
+    assistant_audio = g_audio ? audio_connecte(g_audio) : 0;
+    if (g_audio)
+      audio_chemin_assistant(g_audio, chemin_audio, sizeof(chemin_audio));
+  }
+  const uint64_t trames_jouees = audio_trames_jouees(g_audio);
 
   lua_createtable(L, 0, 7);
   lua_pushinteger(L, seq), lua_setfield(L, -2, "seq");
@@ -1766,6 +1813,14 @@ static int l_etat(lua_State *L) {
   lua_setfield(L, -2, "charge_evaluee");
   lua_pushinteger(L, copie.charge_niveau);
   lua_setfield(L, -2, "charge_niveau");
+  lua_pushboolean(L, socket_audio);
+  lua_setfield(L, -2, "audio_socket");
+  lua_pushinteger(L, assistant_audio);
+  lua_setfield(L, -2, "audio_assistant");
+  lua_pushstring(L, chemin_audio);
+  lua_setfield(L, -2, "audio_chemin");
+  lua_pushinteger(L, (lua_Integer)trames_jouees);
+  lua_setfield(L, -2, "trames_jouees");
   lua_setfield(L, -2, "qualite");
   lua_createtable(L, copie.nassociations, 0);
   for (int i = 0; i < copie.nassociations; ++i) {
@@ -2031,6 +2086,42 @@ static int l_charge_niveau_diag(lua_State *L) {
   return 1;
 }
 
+// organum.audio_supportee() → vrai si un backend audio existe sur cette
+// plate-forme (ALSA, WinMM, ou socket macOS).
+static int l_audio_supportee(lua_State *L) {
+  lua_pushboolean(L, audio_supportee());
+  return 1;
+}
+
+// organum.audio_socket_imposee() → vrai si ORGANUM_AUDIO_SOCKET (non vide)
+// impose le backend socket. Même règle que l'aiguillage C.
+static int l_audio_socket_imposee(lua_State *L) {
+  lua_pushboolean(L, audio_socket_imposee());
+  return 1;
+}
+
+// organum.audio_assistant() → 1 assistant connecté, 0 absent, -1 sans objet
+// (backend ALSA/WinMM).
+static int l_audio_assistant(lua_State *L) {
+  if (!audio_socket_actif()) {
+    lua_pushinteger(L, -1);
+    return 1;
+  }
+  lua_pushinteger(L, g_audio ? audio_connecte(g_audio) : 0);
+  return 1;
+}
+
+// organum.audio_chemin() → chemin de la socket de l'assistant audio, ou nil
+// hors backend socket. Le trajet est résolu par le backend, jamais dupliqué
+// ici.
+static int l_audio_chemin(lua_State *L) {
+  char chemin[256];
+  if (!g_audio || audio_chemin_assistant(g_audio, chemin, sizeof(chemin)) != 0)
+    return 0;
+  lua_pushstring(L, chemin);
+  return 1;
+}
+
 // organum.midi_supportee() → vrai si un backend MIDI existe sur cette
 // plate-forme (ALSA, WinMM, ou socket macOS). Distinct de l'axe audio.
 static int l_midi_supportee(lua_State *L) {
@@ -2097,6 +2188,10 @@ static const luaL_Reg kFonctions[] = {
     {"charge_niveau", l_charge_niveau_diag},
     {"limiteur", l_limiteur}, {"tete_reverb", l_tete_reverb},
     {"transposition", l_transposition},
+    {"audio_supportee", l_audio_supportee},
+    {"audio_socket_imposee", l_audio_socket_imposee},
+    {"audio_assistant", l_audio_assistant},
+    {"audio_chemin", l_audio_chemin},
     {"midi_supportee", l_midi_supportee},
     {"midi_socket_imposee", l_midi_socket_imposee},
     {"midi_assistant", l_midi_assistant},

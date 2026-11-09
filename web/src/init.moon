@@ -12,7 +12,13 @@ midi_actif = require "midi_actif"
 
 -- Plate-forme et mode dégradé : décidés une fois au démarrage.
 PLATEFORME = if type(organum.plateforme) == "function" then organum.plateforme! else "autre"
-SANS_BACKEND, RAISON_SANS_BACKEND = degradation.detecter PLATEFORME, os.getenv "ORGANUM_SANS_BACKEND"
+-- C'est le backend natif qui fait foi, plus le seul nom de plate-forme :
+-- macOS a désormais un backend audio socket (assistant CoreAudio).
+AUDIO_SUPPORTEE = if type(organum.audio_supportee) == "function" then organum.audio_supportee! else nil
+SANS_BACKEND, RAISON_SANS_BACKEND = degradation.detecter PLATEFORME, os.getenv("ORGANUM_SANS_BACKEND"), AUDIO_SUPPORTEE
+-- macOS démarre sans assistant audio : l'échec d'ouverture n'est pas fatal et
+-- la boucle de réessai périodique reste active. Absent : comportement strict.
+AUDIO_OPPORTUNISTE = PLATEFORME == "macos"
 
 -- Axe MIDI, distinct de l'axe audio : le MIDI socket macOS existe même sans
 -- audio. ORGANUM_SANS_BACKEND=1 coupe le MIDI sauf si ORGANUM_MIDI_SOCKET
@@ -675,6 +681,7 @@ if organum.demarrer
     organum.demarrer {
       :taux, :periode, :peripherique, :limiteur
       sans_backend: SANS_BACKEND
+      audio_opportuniste: AUDIO_OPPORTUNISTE
       midi: MIDI_ACTIF
       temperament: temperament_demarrage
       etat: etat_moteur
@@ -1019,6 +1026,10 @@ qualite_etat = ->
     charge_niveau: e.qualite.charge_niveau or 0
     xruns: e.xruns or 0
     xruns_recents: e.qualite.xruns_recents or 0
+    audio_socket: e.qualite.audio_socket == true
+    audio_assistant: e.qualite.audio_assistant or -1
+    audio_chemin: e.qualite.audio_chemin or ""
+    trames_jouees: e.qualite.trames_jouees or 0
     niveau: q.niveau
     auto: q.auto
     audio_disponible: e.audio_disponible == true
