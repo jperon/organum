@@ -124,6 +124,8 @@ if [ -x "$RACINE/web/build/organum.com" ]; then
     sh "$RACINE/web/scripts/test-sans-backend.sh"
   executer "MIDI par socket macOS (web/scripts/test-midi-socket.sh)" \
     sh "$RACINE/web/scripts/test-midi-socket.sh"
+  executer "audio par socket macOS (web/scripts/test-audio-socket.sh)" \
+    sh "$RACINE/web/scripts/test-audio-socket.sh"
   executer "authentification Digest (web/scripts/test-authentification.sh)" \
     sh "$RACINE/web/scripts/test-authentification.sh"
   executer "contrôle d'accès par sous-réseau (web/scripts/test-reseaux.sh)" \
@@ -135,6 +137,7 @@ else
   ignore "délai de première réponse (web/build/organum.com absent ; lancer web/scripts/build.sh)"
   ignore "mode dégradé sans backend (web/build/organum.com absent ; lancer web/scripts/build.sh)"
   ignore "MIDI par socket macOS (web/build/organum.com absent ; lancer web/scripts/build.sh)"
+  ignore "audio par socket macOS (web/build/organum.com absent ; lancer web/scripts/build.sh)"
   ignore "authentification Digest (web/build/organum.com absent ; lancer web/scripts/build.sh)"
   ignore "contrôle d'accès par sous-réseau (web/build/organum.com absent ; lancer web/scripts/build.sh)"
   ignore "transposition (web/build/organum.com absent ; lancer web/scripts/build.sh)"
