@@ -34,4 +34,50 @@ aide.egal(motif, "aucun backend audio pour « macos »", "raison du mode dégrad
 local actif = d.detecter("macos", nil, true)
 aide.egal(actif, false, "macos avec backend socket n'est plus dégradé")
 
+-- etat_audio : quatre situations distinctes, plus le forçage du mode dégradé.
+local code, texte = d.etat_audio {supportee = false, socket = false,
+  disponible = false, assistant = -1, erreur = ""}
+aide.egal(code, "sans_backend", "etat_audio : aucun backend sur la plate-forme")
+aide.egal(texte, "Audio non pris en charge sur cette plate-forme.",
+  "etat_audio : message de plate-forme non prise en charge")
+
+code, texte = d.etat_audio {supportee = true, sans_backend = true,
+  socket = true, disponible = false, assistant = 0,
+  erreur = "assistant audio absent (socket /tmp/a) : connexion refusée"}
+aide.egal(code, "desactive", "etat_audio : ORGANUM_SANS_BACKEND désactive l'axe")
+aide.egal(texte, "Audio désactivé sur cette plate-forme.",
+  "etat_audio : message de désactivation")
+
+code, texte = d.etat_audio {supportee = true, socket = true,
+  disponible = false, assistant = 0,
+  erreur = "périphérique par défaut : assistant audio absent (socket /tmp/a) : connexion refusée"}
+aide.egal(code, "assistant_absent", "etat_audio : assistant audio absent")
+aide.egal(texte,
+  "Assistant audio absent : lancez organum-audio (voir plateforme/macos/LANCEMENT.md).",
+  "etat_audio : message d'assistant absent")
+
+-- L'ACK statut 2 donne aussi audio_assistant = 0 : le message d'erreur doit
+-- primer, sinon une machine sans sortie serait présentée comme sans assistant.
+code, texte = d.etat_audio {supportee = true, socket = true,
+  disponible = false, assistant = 0,
+  erreur = "périphérique par défaut : aucune sortie audio disponible"}
+aide.egal(code, "sans_sortie", "etat_audio : aucune sortie audio")
+aide.egal(texte,
+  "Aucune sortie audio : vérifiez Réglages Système → Son → Sortie.",
+  "etat_audio : message de sortie absente")
+
+code, texte = d.etat_audio {supportee = true, socket = true,
+  disponible = true, assistant = 1, erreur = ""}
+aide.egal(code, nil, "etat_audio : audio opérationnel, aucun message")
+aide.egal(texte, nil, "etat_audio : texte nil quand l'audio fonctionne")
+
+code, texte = d.etat_audio {supportee = true, socket = true,
+  disponible = false, assistant = -1, erreur = ""}
+aide.egal(code, "indisponible", "etat_audio : état transitoire sans erreur")
+aide.egal(texte, "Audio momentanément indisponible.",
+  "etat_audio : message transitoire")
+
+code = d.etat_audio(nil)
+aide.egal(code, "sans_backend", "etat_audio : nil traité comme plate-forme sans backend")
+
 aide.termine()

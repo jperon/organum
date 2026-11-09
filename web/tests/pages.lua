@@ -86,6 +86,30 @@ aide.verifie(piege:find('A&amp;&lt;&gt;&quot;', 1, true) ~= nil,
 aide.verifie(piege:find('&amp;&lt;&gt;&quot;', 1, true) ~= nil,
   "page : nom de jeu échappé")
 
+-- Bandeau d'état : chaque axe a son message, et un axe qui fonctionne se
+-- tait. L'ancien texte « Audio et MIDI indisponibles » ne doit plus revenir.
+local page_audio_seule = page(divisions, 32, 0, {
+  audio_message = "Assistant audio absent : lancez organum-audio (voir plateforme/macos/LANCEMENT.md).",
+  midi_message = "",
+})
+aide.verifie(page_audio_seule:find('id="mode-degrade"', 1, true) ~= nil,
+  "page : bandeau présent pour l'axe audio seul")
+aide.verifie(page_audio_seule:find("Assistant audio absent", 1, true) ~= nil,
+  "page : message d'assistant audio absent")
+aide.verifie(page_audio_seule:find("Audio et MIDI indisponibles", 1, true) == nil,
+  "page : plus de message global audio et MIDI")
+local page_midi_seul = page(divisions, 32, 0, {
+  audio_message = "",
+  midi_message = "Assistant MIDI absent : lancez organum-midi (voir plateforme/macos/LANCEMENT.md).",
+})
+aide.verifie(page_midi_seul:find("Assistant MIDI absent", 1, true) ~= nil,
+  "page : message d'assistant MIDI séparé")
+aide.verifie(page_midi_seul:find("Assistant audio absent", 1, true) == nil,
+  "page : pas de message audio quand l'audio fonctionne")
+local page_saine = page(divisions, 32, 0, {audio_message = "", midi_message = ""})
+aide.verifie(page_saine:find('id="mode-degrade"', 1, true) == nil,
+  "page : aucun bandeau quand les deux axes fonctionnent")
+
 -- page_midi
 local midi = page_midi(true)
 aide.verifie(midi:sub(1, 15) == "<!DOCTYPE html>", "page MIDI : doctype")
@@ -150,6 +174,28 @@ aide.verifie(audio:find("qualite-calibration", 1, true) ~= nil,
   "page audio : calibration")
 aide.verifie(audio:find("Réverbération zéro latence", 1, true) ~= nil,
   "page audio : tête de réverbération")
+aide.verifie(audio:find("q.audio_message", 1, true) ~= nil,
+  "page audio : message d'état calculé côté serveur")
+aide.verifie(audio:find("Audio et MIDI indisponibles", 1, true) == nil,
+  "page audio : plus de message global audio et MIDI")
+local audio_absent = page_audio("Assistant audio absent : lancez organum-audio (voir plateforme/macos/LANCEMENT.md).")
+aide.verifie(audio_absent:find("Assistant audio absent", 1, true) ~= nil,
+  "page audio : message d'état rendu côté serveur")
+-- L'ordre des attributs vient de pairs() : ne pas supposer « id » puis
+-- « hidden ». On isole la balise <p> qui porte l'identifiant.
+local function balise_plateforme(page)
+  local pos = page:find('id="qualite-plateforme"', 1, true)
+  if not pos then return "" end
+  local debut = page:sub(1, pos):find("<p[^>]*$")
+  local fin = page:find(">", pos, true)
+  if not debut or not fin then return "" end
+  return page:sub(debut, fin)
+end
+aide.verifie(balise_plateforme(audio_absent):find("hidden", 1, true) == nil,
+  "page audio : ligne plate-forme visible quand un message existe")
+local audio_ok = page_audio("")
+aide.verifie(balise_plateforme(audio_ok):find("hidden", 1, true) ~= nil,
+  "page audio : ligne plate-forme masquée quand l'audio fonctionne")
 
 -- client.moon : code JavaScript rendu tel quel, avec ses repères.
 local client = require "client"

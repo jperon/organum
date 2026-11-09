@@ -15,4 +15,17 @@ actif = (supportee, force, socket) ->
 socket_actif = (plateforme, imposee) ->
   plateforme == "macos" or (imposee == true and plateforme != "windows")
 
-{ :actif, :socket_actif }
+-- Message d'état de l'axe MIDI, distinct du message de liste vide de
+-- modele.message_ports_vide (qui ne parle que des ports). Un backend absent
+-- ou coupé est annoncé ; un backend socket sans assistant l'est aussi, car
+-- aucun port ne peut alors apparaître. Sinon nil : le MIDI fonctionne, ou
+-- utilise ALSA/WinMM sans assistant à lancer.
+message = (disponible, assistant, socket) ->
+  if disponible != true
+    "MIDI désactivé sur cette plate-forme."
+  elseif socket == true and assistant == false
+    "Assistant MIDI absent : lancez organum-midi (voir plateforme/macos/LANCEMENT.md)."
+  else
+    nil
+
+{ :actif, :socket_actif, :message }

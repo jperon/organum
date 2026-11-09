@@ -284,6 +284,9 @@ if lancer_serveur; then
   done
   refuse "b : audio_erreur renseignée" '"audio_erreur":""' "$corps"
   verifie "b : message d'absence d'assistant" 'assistant audio absent' "$corps"
+  verifie "b : état publié pour l'interface" '"audio_etat":"assistant_absent"' "$corps"
+  verifie "b : message prêt pour le panneau Audio" \
+    '"audio_message":"Assistant audio absent' "$corps"
   verifie "b : toujours en mode plate-forme (pas dégradé)" \
     '"mode_degrade":false' "$corps"
 
@@ -321,6 +324,8 @@ if lancer_assistant --attendre-client 15000; then
     fi
     verifie "c : audio_assistant = 1" '"audio_assistant":1' "$corps"
     verifie "c : backend socket publié" '"audio_socket":true' "$corps"
+    verifie "c : aucun message d'état quand l'audio fonctionne" \
+      '"audio_etat":""' "$corps"
 
     # Le drain démarre à la première trame ; attendre qu'il ait commencé.
     i=0
@@ -542,6 +547,10 @@ if lancer_assistant --attendre-client 15000; then
         'aucune sortie audio disponible' "$corps"
       verifie "f : axe audio indisponible" '"audio_disponible":false' "$corps"
       verifie "f : assistant non connecté" '"audio_assistant":0' "$corps"
+      verifie "f : état « aucune sortie » distingué de l'assistant absent" \
+        '"audio_etat":"sans_sortie"' "$corps"
+      verifie "f : message prêt pour le panneau Audio" \
+        '"audio_message":"Aucune sortie audio' "$corps"
       sleep 2.5
       nb=$(grep -cF 'client connecté' "$JOURNAL_ASSISTANT" 2>/dev/null || true)
       if [ "$nb" -ge 2 ]; then

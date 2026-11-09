@@ -21,4 +21,34 @@ detecter = (plateforme, force, supportee) ->
   else
     false, nil
 
-{ :sans_backend, :detecter }
+-- État de l'axe audio à l'exécution, pour l'interface web et la fenêtre
+-- native. Quatre situations distinctes, qui n'ont pas le même sens :
+--   * aucun backend audio sur cette plate-forme (le son n'est pas prévu) ;
+--   * axe audio désactivé (ORGANUM_SANS_BACKEND, ou backend absent alors que
+--     la plate-forme en a normalement un) ;
+--   * assistant socket absent, ou pas encore connecté (non alarmant) ;
+--   * assistant présent mais sans périphérique de sortie (ACK statut 2).
+-- `audio_erreur` est examinée avant `audio_assistant` : un assistant qui
+-- répond « aucune sortie audio » n'est pas un assistant absent. Renvoie
+-- nil, nil quand l'audio fonctionne : aucun message ne doit s'afficher.
+etat_audio = (info) ->
+  info = info or {}
+  supportee = info.supportee
+  socket = info.socket == true
+  disponible = info.disponible == true
+  assistant = tonumber info.assistant
+  erreur = tostring info.erreur or ""
+  if not socket and supportee != true
+    "sans_backend", "Audio non pris en charge sur cette plate-forme."
+  elseif info.sans_backend == true or not socket
+    "desactive", "Audio désactivé sur cette plate-forme."
+  elseif erreur\find "aucune sortie audio", 1, true
+    "sans_sortie", "Aucune sortie audio : vérifiez Réglages Système → Son → Sortie."
+  elseif disponible
+    nil, nil
+  elseif assistant == 0
+    "assistant_absent", "Assistant audio absent : lancez organum-audio (voir plateforme/macos/LANCEMENT.md)."
+  else
+    "indisponible", "Audio momentanément indisponible."
+
+{ :sans_backend, :detecter, :etat_audio }

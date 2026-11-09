@@ -31,4 +31,19 @@ aide.egal(m.socket_actif("autre", false), false,
 aide.egal(m.socket_actif("linux", nil), false,
   "socket_actif : forçage inconnu")
 
+-- message : état de l'axe MIDI pour le bandeau de la page d'orgue.
+aide.egal(m.message(true, true, true), nil,
+  "message : assistant socket connecté, rien à dire")
+aide.egal(m.message(true, false, false), nil,
+  "message : ALSA/WinMM sans assistant, rien à dire")
+aide.egal(m.message(false, false, false),
+  "MIDI désactivé sur cette plate-forme.",
+  "message : MIDI coupé")
+aide.egal(m.message(true, false, true),
+  "Assistant MIDI absent : lancez organum-midi (voir plateforme/macos/LANCEMENT.md).",
+  "message : assistant socket absent")
+aide.egal(m.message(nil, false, true),
+  "MIDI désactivé sur cette plate-forme.",
+  "message : état indisponible annoncé")
+
 aide.termine()

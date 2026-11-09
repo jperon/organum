@@ -78,12 +78,19 @@ division_html = (di, div, divisions, transposition = 0, colonne_transposition = 
 
 (divisions, steps = 32, transposition = 0, infos = {}) ->
   colonne_transposition = modele.colonne_transposition divisions
-  bandeau_degrade = ""
-  if infos and infos.sans_backend
-    bandeau_degrade = h.p class: "note degrade", id: "mode-degrade",
-      "Mode dégradé : audio et MIDI indisponibles sur " ..
-      "#{modele.libelle_plateforme infos.plateforme}. " ..
-      "L’interface reste utilisable, mais aucun son ne sera produit."
+  -- Bandeau d'état : chaque axe (audio, MIDI) a son propre message, calculé
+  -- par une règle pure et publié par le serveur. Un axe qui fonctionne se
+  -- tait ; l'absence de l'assistant audio ou MIDI n'est pas une faute.
+  messages = {}
+  if infos
+    if infos.audio_message and infos.audio_message != ""
+      table.insert messages, infos.audio_message
+    if infos.midi_message and infos.midi_message != ""
+      table.insert messages, infos.midi_message
+  bandeau_degrade = if #messages > 0
+    h.p class: "note degrade", id: "mode-degrade", table.concat messages, " "
+  else
+    ""
   page = h.html lang: "fr",
     h.head {},
       h.meta charset: "utf-8",

@@ -900,11 +900,18 @@ MAX_ASSOCIATIONS = 16
           ui\ligne ligne, 1
           ui\texte tronquer texte_calibration(calib), l - 2 * MARGE - ESPACE
 
-        if q.audio_disponible == false or q.midi_disponible == false
+        -- Messages d'état des deux axes, calculés par les règles pures du
+        -- serveur (degradation.etat_audio, midi_actif.message). Un axe qui
+        -- fonctionne ne produit aucune ligne ; chaque message tient sur une
+        -- ligne tronquée, sans débordement de la fenêtre.
+        messages_etat = {}
+        if type(q.audio_message) == "string" and q.audio_message != ""
+          table.insert messages_etat, q.audio_message
+        if type(q.midi_message) == "string" and q.midi_message != ""
+          table.insert messages_etat, q.midi_message
+        for message in *messages_etat
           ui\ligne ligne, 1
-          texte_degrade = "Audio et MIDI indisponibles sur " ..
-            "#{q.plateforme_libelle or modele.libelle_plateforme q.plateforme}"
-          ui\texte tronquer(texte_degrade, l - 2 * MARGE - ESPACE)
+          ui\texte tronquer(message, l - 2 * MARGE - ESPACE)
 
         ui\ligne ligne, 1
         -- Puce d'adaptation : le niveau est calculé en C ; modele fournit le

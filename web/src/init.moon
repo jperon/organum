@@ -34,6 +34,16 @@ MIDI_ACTIF = midi_actif.actif midi_supportee, os.getenv("ORGANUM_SANS_BACKEND"),
 -- assistant à lancer. Publié par /api/midi/ports pour la page /midi.
 MIDI_SOCKET = midi_actif.socket_actif PLATEFORME, midi_socket
 
+-- Message de l'axe MIDI pour le bandeau de la page d'orgue. Même règle pure
+-- que la page /midi, mais état de l'assistant lu ici : le bandeau n'a pas
+-- besoin d'attendre /api/midi/ports.
+message_midi_courant = ->
+  assistant = false
+  if type(organum.midi_assistant) == "function"
+    ok, valeur = pcall organum.midi_assistant
+    assistant = ok and valeur == 1
+  midi_actif.message MIDI_ACTIF, assistant, MIDI_SOCKET
+
 -- Écoute : redbean, sans adresse explicite (-l), ne programme que 0.0.0.0
 -- (tool/net/redbean.c, Listen) ; on ajoute « :: » pour répondre aussi en
 -- IPv6. Un -l explicite reste seul appliqué : les arguments réels du
@@ -997,6 +1007,14 @@ lancer_fenetre = ->
 qualite_etat = ->
   e = organum.etat!
   q = qualite_locale_actuelle!
+  audio_etat, audio_message = degradation.etat_audio {
+    supportee: AUDIO_SUPPORTEE
+    sans_backend: SANS_BACKEND
+    socket: e.qualite.audio_socket
+    assistant: e.qualite.audio_assistant
+    disponible: e.audio_disponible
+    erreur: e.qualite.audio_erreur
+  }
   etat_qualite = {
     temperament: e.temperament
     temperament_erreur: e.qualite.temperament_erreur or ""
@@ -1041,6 +1059,9 @@ qualite_etat = ->
     plateforme: PLATEFORME
     plateforme_libelle: modele.libelle_plateforme PLATEFORME
     mode_degrade: SANS_BACKEND
+    audio_etat: audio_etat or ""
+    audio_message: audio_message or ""
+    midi_message: message_midi_courant! or ""
   }
   etat_qualite.calibration = calibration_demarrage if calibration_demarrage
   etat_qualite
@@ -1484,7 +1505,14 @@ page = require "page"
 
 divisions_page = ->
   e = etat_orgue!
-  e.divisions, e.steps, e.transposition or 0, {sans_backend: SANS_BACKEND, plateforme: PLATEFORME}
+  infos = {
+    sans_backend: SANS_BACKEND
+    plateforme: PLATEFORME
+    audio_etat: e.qualite.audio_etat
+    audio_message: e.qualite.audio_message
+    midi_message: e.qualite.midi_message
+  }
+  e.divisions, e.steps, e.transposition or 0, infos
 
 -- Chaque fils de requête hérite des descripteurs PCM du processus principal.
 -- Les lâcher avant de servir : sinon le périphérique reste occupé après une
@@ -1537,7 +1565,7 @@ _G.OnHttpRequest = ->
   elseif path == "/audio"
     SetStatus 200
     SetHeader "Content-Type", "text/html; charset=utf-8"
-    Write page_audio!
+    Write page_audio(qualite_etat!.audio_message)
   elseif path == "/qualite"
     -- Anciens signets : le panneau « Qualité » est devenu « Audio ».
     SetStatus 302
