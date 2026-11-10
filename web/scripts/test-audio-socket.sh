@@ -14,7 +14,7 @@
 #   b. sans assistant, le serveur démarre (démarrage opportuniste), l'axe
 #      audio est indisponible, audio_erreur est renseignée et le CPU au repos
 #      reste faible ;
-#   c. cadence : trois fenêtres de 4 s après stabilisation, MÉDIANE de
+#   c. cadence : cinq fenêtres de 4 s après stabilisation, MÉDIANE de
 #      l'écart ≤ 2 %, xruns comptés en delta (un pic isolé dans une seule
 #      fenêtre est toléré, un régime continu reste une erreur), underruns et
 #      overruns de l'anneau à 0, capacité négociée ≈ 4 périodes et non le
@@ -57,7 +57,7 @@ unset ORGANUM_SANS_BACKEND ORGANUM_MIDI_SOCKET ORGANUM_AUDIO_SOCKET \
 RACINE="$(cd "$(dirname "$0")/.." && pwd)"
 DEPOT="$(cd "$RACINE/.." && pwd)"
 # Règles pures et boucle de mesure communes : horloge monotone, médiane de
-# trois fenêtres, xruns en delta. Rien n'est recopié ici.
+# fenêtres, xruns en delta. Rien n'est recopié ici.
 . "$DEPOT/plateforme/tests/cadence.sh"
 BIN="$RACINE/build/organum.com"
 SOURCE_ASSISTANT="$DEPOT/plateforme/tests/faux_assistant_audio.c"
@@ -266,15 +266,20 @@ lire_trames_cadence() {
 }
 lire_xruns_cadence() { extrait xruns; }
 
-# mesurer_cadence <taux> [secondes=4] : trois fenêtres valides, MÉDIANE ≤ 2 %.
+# mesurer_cadence <taux> [secondes=4] : cinq fenêtres valides, MÉDIANE ≤ 2 %.
 #
 # Une fenêtre est rejetée si le faux assistant a recalé son horloge simulée
 # (pertes_recalage augmente) : il n'est pas temps réel et, sous charge, il
 # abandonne du temps de lecture qui n'est ni une trame perdue du produit ni
 # une dérive de cadence. On ne compense pas cet abandon par une tolérance
 # élargie — on remplace la fenêtre, et un défaut structurel (facteur 1,5,
-# horloge fausse : 50 à 85 % d'écart) reste détecté sur les trois fenêtres.
-# Le seuil est celui de valider_audio_midi.sh : 2 % sur la médiane.
+# horloge fausse : 50 à 85 % d'écart) reste détecté.
+# Le seuil reste celui de valider_audio_midi.sh, 2 % sur la médiane. Cinq
+# fenêtres au lieu de trois parce que, sous charge (mesuré à charge 8 sur
+# 6 cœurs), une fenêtre de 4 s peut dépasser 2 % de façon sporadique (2,57 %)
+# sans recalage ni xrun : avec trois fenêtres, deux fenêtres touchées font
+# échouer la médiane ; avec cinq, il en faudrait trois. Un vrai défaut les
+# touche toutes.
 mesurer_cadence() {
   _taux=$1
   _duree=${2:-4}
@@ -288,7 +293,7 @@ mesurer_cadence() {
     i=$((i + 1))
   done
   sleep 0.5
-  cadence_mesurer 3 "$_duree" "$_taux" \
+  cadence_mesurer 5 "$_duree" "$_taux" \
     lire_trames_cadence lire_xruns_cadence pertes_recalage 10
 }
 
@@ -523,7 +528,7 @@ if lancer_assistant --consommer-avant-ack 1 --consommer-apres-config 1 \
     refuse "c : la fenêtre n'est plus celle du fichier (16384)" \
       '"capacite":16384' "$corps"
 
-    # Cadence : même méthode que valider_audio_midi.sh — trois fenêtres,
+    # Cadence : même méthode que valider_audio_midi.sh — cinq fenêtres,
     # médiane ≤ 2 %, xruns en delta par fenêtre.
     if mesurer_cadence 48000 4; then
       ok "c : cadence : ${CADENCE_DETAIL}"
@@ -592,7 +597,7 @@ if lancer_assistant --consommer-avant-ack 1 --consommer-apres-config 1 \
     verifie "e : aucun overrun après reconfiguration" 'overruns=0' "$ligne"
 
     # Le son doit réellement reprendre au nouveau taux, pas seulement le
-    # champ taux changer : même mesure qu'en c, trois fenêtres et médiane.
+    # champ taux changer : même mesure qu'en c, cinq fenêtres et médiane.
     # Les xruns sont ceux de la mesure (delta), pas un compteur absolu : un
     # pic isolé de la reconfiguration ne doit pas faire échouer la cadence.
     if mesurer_cadence 44100 4; then
@@ -630,7 +635,7 @@ if lancer_assistant --consommer-avant-ack 1 --consommer-apres-config 1 \
     # charge puis se recale en abandonnant l'arriéré (déficit constaté de
     # 33 % sur 4,5 s, dans les deux sens). La preuve de non-perte est
     # xruns = 0 (le producteur n'a jamais refusé un tampon), et la cadence
-    # nominale est vérifiée APRÈS la charge, par médiane de trois fenêtres.
+    # nominale est vérifiée APRÈS la charge, par médiane de cinq fenêtres.
     mesure_trames; avant=$MESURE_TRAMES; debut=$MESURE_NS
     marteler &
     MARTELE_PID=$!
