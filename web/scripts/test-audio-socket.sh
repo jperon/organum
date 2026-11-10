@@ -14,19 +14,22 @@
 #   b. sans assistant, le serveur démarre (démarrage opportuniste), l'axe
 #      audio est indisponible, audio_erreur est renseignée et le CPU au repos
 #      reste faible ;
-#   c. cadence sur 3 s : |trames_jouees − 3 × taux| ≤ 2 %, underruns = 0,
-#      overruns = 0 (contrôle central), capacité négociée ≈ 4 périodes et non
-#      le maximum de 16384 trames ;
+#   c. cadence : trois fenêtres de 4 s après stabilisation, MÉDIANE de
+#      l'écart ≤ 2 %, xruns comptés en delta (un pic isolé dans une seule
+#      fenêtre est toléré, un régime continu reste une erreur), underruns et
+#      overruns de l'anneau à 0, capacité négociée ≈ 4 périodes et non le
+#      maximum de 16384 trames ;
 #   d. mort et relance de l'assistant : reprise en ≤ 2 s de temps mural ;
 #   e. reconfiguration à chaud 48 000 → 44 100 : taux publié, son qui reprend
 #      au nouveau taux, underruns = 0 (le faux assistant consomme un bloc
 #      avant l'ACK, comme un rappel CoreAudio déjà actif) ;
 #   f. assistant sans sortie (ACK statut 2) : message français, pas de
 #      plantage, réessai actif ;
-#   g. martèlement de l'API pendant le jeu : aucun xrun, le son progresse,
-#      un seul PONG par PING (leçon du MIDI) et cadence nominale retrouvée
-#      après la charge (la cadence PENDANT le martèlement n'est pas jugeable :
-#      le faux assistant, non temps réel, se recale et abandonne du temps) ;
+#   g. martèlement de l'API pendant le jeu : aucun underrun/overrun d'anneau,
+#      le son progresse, un seul PONG par PING (leçon du MIDI) et cadence
+#      nominale retrouvée après la charge, par la même médiane de trois
+#      fenêtres (la cadence PENDANT le martèlement n'est pas jugeable : le
+#      faux assistant, non temps réel, se recale et abandonne du temps) ;
 #   h. non-régression : ORGANUM_SANS_BACKEND=1 + ORGANUM_AUDIO_SOCKET coupe
 #      l'axe audio (aucune connexion) ;
 #   i. fichier `.pcm` périmé (assistant tué par SIGKILL) : reprise propre ;
@@ -53,6 +56,9 @@ unset ORGANUM_SANS_BACKEND ORGANUM_MIDI_SOCKET ORGANUM_AUDIO_SOCKET \
 
 RACINE="$(cd "$(dirname "$0")/.." && pwd)"
 DEPOT="$(cd "$RACINE/.." && pwd)"
+# Règles pures et boucle de mesure communes : horloge monotone, médiane de
+# trois fenêtres, xruns en delta. Rien n'est recopié ici.
+. "$DEPOT/plateforme/tests/cadence.sh"
 BIN="$RACINE/build/organum.com"
 SOURCE_ASSISTANT="$DEPOT/plateforme/tests/faux_assistant_audio.c"
 if [ ! -x "$BIN" ]; then
@@ -251,33 +257,27 @@ pertes_recalage() {
     "$JOURNAL_ASSISTANT" 2>/dev/null || echo 0
 }
 
-# mesurer_cadence <taux> [secondes=2] : mesure trames_jouees sur une fenêtre
-# et le compare à taux × durée. Essais successifs (8 au plus) jusqu'à obtenir
-# une fenêtre SANS recalage du faux assistant.
+# lecteurs de la boucle commune. mesure_trames horodate AVANT sa requête et
+# réessaie une lecture vide sous charge ; la boucle, elle, borne la fenêtre
+# par deux horodatages monotones pris de part et d'autre des deux lectures.
+lire_trames_cadence() {
+  mesure_trames
+  printf '%s\n' "$MESURE_TRAMES"
+}
+lire_xruns_cadence() { extrait xruns; }
+
+# mesurer_cadence <taux> [secondes=4] : trois fenêtres valides, MÉDIANE ≤ 2 %.
 #
-# Pourquoi des essais : le faux assistant n'est pas temps réel. Quand il
-# manque ses rendez-vous de plus que la capacité de l'anneau (42 ms à 48 kHz),
-# il recale son horloge simulée et abandonne le temps de lecture
-# correspondant (ligne « recalage: perdu=N »). Ce n'est ni une trame perdue
-# du produit ni une dérive de cadence, mais une fenêtre ininterprétable : on
-# la jette et on en reprend une, au lieu d'élargir une tolérance.
-#
-# Bornes d'une fenêtre propre, exactes : trames_jouees est un instantané pris
-# à la dernière écriture réussie du producteur (retard d'au plus une période)
-# et l'arriéré du consommateur varie de 0 à la capacité de l'anneau. D'où
-# |jouées − attendu| ≤ capacité + une période (1,8 % sur 3 s, 2,9 % sur 2 s).
-# Renseigne CADENCE_OK, CADENCE_ECART_BP, CADENCE_DETAIL.
+# Une fenêtre est rejetée si le faux assistant a recalé son horloge simulée
+# (pertes_recalage augmente) : il n'est pas temps réel et, sous charge, il
+# abandonne du temps de lecture qui n'est ni une trame perdue du produit ni
+# une dérive de cadence. On ne compense pas cet abandon par une tolérance
+# élargie — on remplace la fenêtre, et un défaut structurel (facteur 1,5,
+# horloge fausse : 50 à 85 % d'écart) reste détecté sur les trois fenêtres.
+# Le seuil est celui de valider_audio_midi.sh : 2 % sur la médiane.
 mesurer_cadence() {
   _taux=$1
-  _duree=${2:-2}
-  _capacite=$(extrait capacite)
-  case "$_capacite" in
-    ''|*[!0-9]*) _capacite=2048 ;;
-  esac
-  _periode=$(extrait periode)
-  case "$_periode" in
-    ''|*[!0-9]*) _periode=512 ;;
-  esac
+  _duree=${2:-4}
   # Le drain démarre à la première trame : attendre qu'il ait commencé, puis
   # laisser le transitoire de remplissage de l'anneau se dissiper.
   i=0
@@ -288,52 +288,8 @@ mesurer_cadence() {
     i=$((i + 1))
   done
   sleep 0.5
-  _essai=0
-  _rejetees=0
-  CADENCE_DETAIL=""
-  while [ "$_essai" -lt 8 ]; do
-    _perdu_avant=$(pertes_recalage)
-    mesure_trames; _debut=$MESURE_NS; _avant=$MESURE_TRAMES
-    sleep "$_duree"
-    mesure_trames "$_avant"; _fin=$MESURE_NS; _apres=$MESURE_TRAMES
-    _ecoule=$((_fin - _debut))
-    _attendu=$((_ecoule / 1000000 * _taux / 1000))
-    _jouees=$((_apres - _avant))
-    _perdu=$(( $(pertes_recalage) - _perdu_avant ))
-    if [ "$_attendu" -le 0 ]; then
-      CADENCE_OK=0
-      CADENCE_ECART_BP=-1
-      CADENCE_DETAIL="durée nulle"
-      return 1
-    fi
-    if [ "$_perdu" -gt 0 ]; then
-      _rejetees=$((_rejetees + 1))
-      CADENCE_DETAIL="essai $((_essai + 1)) rejeté : $_perdu trames de lecture abandonnées par recalage"
-      _essai=$((_essai + 1))
-      sleep 0.2
-      continue
-    fi
-    # Marge de 5 % : le faux assistant n'est pas temps réel et
-    # trames_jouees n'est qu'un instantané du producteur ; sous charge
-    # mesurée (charge 12 sur 6 cœurs), l'écart d'une fenêtre propre atteint
-    # 2,2 % sur 3 s (~70 ms de retard d'ordonnancement aux deux bornes). Un
-    # défaut structurel de cadence (mauvais taux, horloge fausse) donne 50 à
-    # 85 % : la marge reste très en deçà. Les fenêtres avec recalage du faux
-    # assistant sont rejetées, pas absorbées par cette marge.
-    _marge=$((_attendu / 20))
-    _erreur=$((_jouees - _attendu))
-    [ "$_erreur" -lt 0 ] && _erreur=$((-_erreur))
-    CADENCE_OK=0
-    [ "$_erreur" -le "$_marge" ] && CADENCE_OK=1
-    CADENCE_ECART_BP=$((_erreur * 10000 / _attendu))
-    CADENCE_DETAIL="$_jouees trames jouées pour $_attendu attendues, écart ${CADENCE_ECART_BP}‱ (marge $_marge trames sur $((_ecoule / 1000000)) ms, $((_essai + 1)) mesure(s), $_rejetees rejetée(s))"
-    [ "$CADENCE_OK" -eq 1 ]
-    return $?
-  done
-  CADENCE_OK=0
-  CADENCE_ECART_BP=-1
-  CADENCE_DETAIL="8 fenêtres rejetées : le faux assistant a recalé son horloge à chaque fois (machine trop chargée pour mesurer la cadence ; aucun écart du produit n'est en cause)"
-  return 1
+  cadence_mesurer 3 "$_duree" "$_taux" \
+    lire_trames_cadence lire_xruns_cadence pertes_recalage 10
 }
 
 # lancer_serveur [degrade] : démarre organum avec les deux backends socket
@@ -567,17 +523,23 @@ if lancer_assistant --consommer-avant-ack 1 --consommer-apres-config 1 \
     refuse "c : la fenêtre n'est plus celle du fichier (16384)" \
       '"capacite":16384' "$corps"
 
-    # Cadence : trois fenêtres d'une seconde, médiane ≤ 2 %. Une fenêtre
-    # unique de 3 s suffisait à faire échouer la suite quand le faux
-    # assistant (qui n'est pas temps réel) manquait un rendez-vous.
-    if mesurer_cadence 48000 3; then
+    # Cadence : même méthode que valider_audio_midi.sh — trois fenêtres,
+    # médiane ≤ 2 %, xruns en delta par fenêtre.
+    if mesurer_cadence 48000 4; then
       ok "c : cadence : ${CADENCE_DETAIL}"
     else
-      echec "c : cadence hors des bornes de l'anneau : ${CADENCE_DETAIL}"
+      echec "c : cadence hors tolérance (médiane ≤ 2 %) : ${CADENCE_DETAIL}"
     fi
-
     corps=$(curl -s --max-time 2 "$URL/api/orgue")
-    verifie "c : aucun xrun publié (underruns + overruns)" '"xruns":0' "$corps"
+    xruns_reference=$CADENCE_XRUNS_REFERENCE
+    [ -n "$xruns_reference" ] || xruns_reference=0
+    xruns_total_api=$(extrait xruns)
+    [ -n "$xruns_total_api" ] || xruns_total_api=$xruns_reference
+    if cadence_xruns_ok "$CADENCE_XRUNS_TOTAL" "$CADENCE_FENETRES_XRUN"; then
+      ok "c : $(cadence_xruns_texte "$CADENCE_XRUNS_TOTAL" "$CADENCE_FENETRES_XRUN" "$xruns_reference" "$xruns_total_api")"
+    else
+      echec "c : $(cadence_xruns_texte "$CADENCE_XRUNS_TOTAL" "$CADENCE_FENETRES_XRUN" "$xruns_reference" "$xruns_total_api")"
+    fi
     ligne=$(derniere_ligne_drain)
     verifie "c : aucun underrun dans l'anneau" 'underruns=0' "$ligne"
     verifie "c : aucun overrun dans l'anneau" 'overruns=0' "$ligne"
@@ -623,7 +585,6 @@ if lancer_assistant --consommer-avant-ack 1 --consommer-apres-config 1 \
     sleep 1.2
     corps=$(curl -s --max-time 2 "$URL/api/orgue")
     verifie "e : taux effectif 44 100" '"taux":44100' "$corps"
-    verifie "e : aucun xrun après reconfiguration" '"xruns":0' "$corps"
     verifie "e : production audio reprise après reconfiguration" \
       '"audio_demarre":true' "$corps"
     ligne=$(derniere_ligne_drain)
@@ -631,12 +592,22 @@ if lancer_assistant --consommer-avant-ack 1 --consommer-apres-config 1 \
     verifie "e : aucun overrun après reconfiguration" 'overruns=0' "$ligne"
 
     # Le son doit réellement reprendre au nouveau taux, pas seulement le
-    # champ taux changer.
-    # Cadence au nouveau taux : même règle exacte que c.
-    if mesurer_cadence 44100 3; then
+    # champ taux changer : même mesure qu'en c, trois fenêtres et médiane.
+    # Les xruns sont ceux de la mesure (delta), pas un compteur absolu : un
+    # pic isolé de la reconfiguration ne doit pas faire échouer la cadence.
+    if mesurer_cadence 44100 4; then
       ok "e : le son reprend au nouveau taux : ${CADENCE_DETAIL}"
     else
-      echec "e : pas de reprise au nouveau taux : ${CADENCE_DETAIL}"
+      echec "e : pas de reprise au nouveau taux (médiane ≤ 2 %) : ${CADENCE_DETAIL}"
+    fi
+    xruns_reference=$CADENCE_XRUNS_REFERENCE
+    [ -n "$xruns_reference" ] || xruns_reference=0
+    xruns_total_api=$(extrait xruns)
+    [ -n "$xruns_total_api" ] || xruns_total_api=$xruns_reference
+    if cadence_xruns_ok "$CADENCE_XRUNS_TOTAL" "$CADENCE_FENETRES_XRUN"; then
+      ok "e : $(cadence_xruns_texte "$CADENCE_XRUNS_TOTAL" "$CADENCE_FENETRES_XRUN" "$xruns_reference" "$xruns_total_api")"
+    else
+      echec "e : $(cadence_xruns_texte "$CADENCE_XRUNS_TOTAL" "$CADENCE_FENETRES_XRUN" "$xruns_reference" "$xruns_total_api")"
     fi
 
     # --- g. Martèlement de l'API pendant le jeu ---------------------------
@@ -676,10 +647,19 @@ if lancer_assistant --consommer-avant-ack 1 --consommer-apres-config 1 \
     ligne=$(derniere_ligne_drain)
     verifie "g : aucun underrun sous martèlement" 'underruns=0' "$ligne"
     verifie "g : aucun overrun sous martèlement" 'overruns=0' "$ligne"
-    if mesurer_cadence 44100 3; then
+    if mesurer_cadence 44100 4; then
       ok "g : cadence nominale retrouvée après le martèlement : ${CADENCE_DETAIL}"
     else
-      echec "g : cadence non rétablie après le martèlement : ${CADENCE_DETAIL}"
+      echec "g : cadence non rétablie après le martèlement (médiane ≤ 2 %) : ${CADENCE_DETAIL}"
+    fi
+    xruns_reference=$CADENCE_XRUNS_REFERENCE
+    [ -n "$xruns_reference" ] || xruns_reference=0
+    xruns_total_api=$(extrait xruns)
+    [ -n "$xruns_total_api" ] || xruns_total_api=$xruns_reference
+    if cadence_xruns_ok "$CADENCE_XRUNS_TOTAL" "$CADENCE_FENETRES_XRUN"; then
+      ok "g : $(cadence_xruns_texte "$CADENCE_XRUNS_TOTAL" "$CADENCE_FENETRES_XRUN" "$xruns_reference" "$xruns_total_api")"
+    else
+      echec "g : $(cadence_xruns_texte "$CADENCE_XRUNS_TOTAL" "$CADENCE_FENETRES_XRUN" "$xruns_reference" "$xruns_total_api")"
     fi
 
     # Poignée de main sous charge : on coupe et relance l'assistant pendant

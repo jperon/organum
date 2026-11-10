@@ -66,18 +66,22 @@ champ() {
     tr -d ' "' || true
 }
 
-# maintenant_ns : horloge monotone en nanosecondes (perl est fourni par macOS).
-# CLOCK_MONOTONIC évite qu'un saut NTP fausse une durée ; si le perl de
-# l'hôte ne l'expose pas, on retombe sur l'horloge murale.
-maintenant_ns() {
-  perl -MTime::HiRes=clock_gettime,CLOCK_MONOTONIC -e \
-    'printf "%.0f\n", clock_gettime(CLOCK_MONOTONIC) * 1000000000' 2>/dev/null ||
-    perl -MTime::HiRes=time -e 'printf "%.0f\n", time * 1000000000'
-}
+# Règles pures et boucle de mesure partagées avec le test socket Linux,
+# testées localement par tester_cadence.sh. L'horloge qu'elles utilisent est
+# monotone (CLOCK_MONOTONIC), pour qu'un saut NTP ne fausse pas une durée.
+. "$ICI/../tests/cadence.sh"
 
-# Règles pures de la mesure, testées localement par tester_cadence.sh.
-. "$ICI/cadence.sh"
-CADENCE_TOLERANCE_BP=200
+# --- b. Getters de la mesure ------------------------------------------------
+# Chaque getter lit une valeur fraîche de l'API ; la boucle commune horodate
+# avant le premier et après le second, ce qui annule la latence des requêtes.
+valider_trames() {
+  curl -fsS --max-time 2 "$URL/api/orgue" > "$ORQUE" 2>/dev/null || true
+  champ "$ORQUE" trames_jouees
+}
+valider_xruns() {
+  curl -fsS --max-time 2 "$URL/api/orgue" > "$ORQUE" 2>/dev/null || true
+  champ "$ORQUE" xruns
+}
 
 # arreter_serveur : SIGKILL, jamais SIGTERM : redbean enverrait SIGTERM à
 # tout son groupe, y compris l'agent du runner (voir AGENTS.md).
@@ -269,55 +273,12 @@ fi
 # Trois fenêtres de 5 s, médiane : une préemption isolée peut fausser une
 # fenêtre, pas les trois. Un défaut structurel (facteur 1,5, horloge fausse)
 # fausse en revanche toutes les fenêtres et reste détecté très au-delà de 2 %.
-mesures=
-m=0
-fenetres_avec_xrun=0
-xruns_fenetre=$xruns_avant
-xruns_total=0
-while [ "$m" -lt 3 ]; do
-  # Horodatage AVANT chaque requête : les deux lectures de trames_jouees
-  # sont alors faites à la même distance de leur horodatage, et la latence
-  # locale de la requête s'annule. (Un instantané frais avant la mesure,
-  # mais horodaté après, laissait un biais résiduel de quelques ms.)
-  debut=$(maintenant_ns)
-  curl -fsS --max-time 2 "$URL/api/orgue" > "$ORQUE" 2>/dev/null || true
-  avant=$(champ "$ORQUE" trames_jouees)
-  [ -n "$avant" ] || avant=0
-  sleep 5
-  fin=$(maintenant_ns)
-  curl -fsS --max-time 2 "$URL/api/orgue" > "$ORQUE" 2>/dev/null || true
-  apres=$(champ "$ORQUE" trames_jouees)
-  [ -n "$apres" ] || apres=0
-  jouees=$((apres - avant))
-  attendu=$(awk -v e="$((fin - debut))" -v t="$taux" \
-    'BEGIN { printf "%.0f", e / 1000000000 * t }')
-  pct=$(cadence_ecart_bp "$jouees" "$attendu")
-  if [ "$pct" -lt 0 ]; then
-    echec "b : mesure de cadence impossible (durée nulle, fenêtre $((m + 1)))"
-    break
-  fi
-  xruns_fin=$(champ "$ORQUE" xruns)
-  [ -n "$xruns_fin" ] || xruns_fin=$xruns_fenetre
-  delta_xruns=$((xruns_fin - xruns_fenetre))
-  [ "$delta_xruns" -lt 0 ] && delta_xruns=0
-  xruns_total=$((xruns_total + delta_xruns))
-  if [ "$delta_xruns" -gt 0 ]; then
-    fenetres_avec_xrun=$((fenetres_avec_xrun + 1))
-  fi
-  echo "b : fenêtre $((m + 1))/3 sur 5 s : $jouees trames pour $attendu attendues (${pct}‱ d'écart), $delta_xruns xrun(s)"
-  mesures="$mesures $pct"
-  xruns_fenetre=$xruns_fin
-  m=$((m + 1))
-done
-if [ "$m" -eq 3 ]; then
-  # shellcheck disable=SC2086
-  set -- $mesures
-  mediane=$(cadence_mediane "$1" "$2" "$3")
-  if [ "$mediane" -le "$CADENCE_TOLERANCE_BP" ]; then
-    ok "b : cadence médiane : ${mediane}‱ d'écart sur 3 fenêtres de 5 s (≤ 2 %)"
-  else
-    echec "b : cadence hors tolérance : médiane ${mediane}‱ > 2 % sur 3 fenêtres de 5 s"
-  fi
+# cadence_mesurer (plateforme/tests/cadence.sh) porte la boucle : horloge
+# monotone, horodatage avant chaque requête, médiane, xruns en delta.
+if cadence_mesurer 3 5 "$taux" valider_trames valider_xruns - 6; then
+  ok "b : cadence médiane : ${CADENCE_MEDIANE}‱ d'écart sur 3 fenêtres de 5 s (≤ 2 % ; mesures ${CADENCE_BP_MESURES})"
+else
+  echec "b : cadence hors tolérance ou mesure incomplète : ${CADENCE_DETAIL}"
 fi
 xruns_apres=$(champ "$ORQUE" xruns)
 xruns_recents_apres=$(champ "$ORQUE" xruns_recents)
@@ -326,18 +287,13 @@ if [ -z "$xruns_apres" ] || [ -z "$xruns_recents_apres" ]; then
 fi
 [ -n "$xruns_apres" ] || xruns_apres=0
 [ -n "$xruns_recents_apres" ] || xruns_recents_apres=0
-if [ "$xruns_total" -eq 0 ] 2>/dev/null; then
-  ok "b : aucun nouvel xrun (underrun/overrun) pendant la mesure ($xruns_apres, référence $xruns_avant)"
-elif [ "$fenetres_avec_xrun" -le 1 ] 2>/dev/null; then
-  # Une seule fenêtre touchée : pic isolé d'ordonnancement sur un runner
-  # partagé, pas un régime d'underruns. La cadence médiane et les autres
-  # fenêtres restent jugées normalement.
-  ok "b : $xruns_total xrun(s) dans 1 fenêtre sur 3, pic isolé (référence $xruns_avant)"
+if cadence_xruns_ok "$CADENCE_XRUNS_TOTAL" "$CADENCE_FENETRES_XRUN"; then
+  ok "b : $(cadence_xruns_texte "$CADENCE_XRUNS_TOTAL" "$CADENCE_FENETRES_XRUN" "$xruns_avant" "$xruns_apres")"
 else
-  echec "b : $xruns_total nouvel(x) xrun(s) dans $fenetres_avec_xrun fenêtres sur 3 ($xruns_avant → $xruns_apres)"
+  echec "b : $(cadence_xruns_texte "$CADENCE_XRUNS_TOTAL" "$CADENCE_FENETRES_XRUN" "$xruns_avant" "$xruns_apres")"
 fi
 if [ "$xruns_recents_apres" -le "$xruns_recents_avant" ] 2>/dev/null ||
-   [ "$fenetres_avec_xrun" -le 1 ] 2>/dev/null; then
+   [ "$CADENCE_FENETRES_XRUN" -le 1 ] 2>/dev/null; then
   ok "b : aucun régime d'xrun récents ($xruns_recents_apres, référence $xruns_recents_avant)"
 else
   echec "b : xruns récents en hausse ($xruns_recents_avant → $xruns_recents_apres)"

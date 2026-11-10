@@ -180,6 +180,17 @@ else
   ignore "C : gcc absent, règle sortie_null non testée"
 fi
 
+# --- Règles et boucle de mesure de cadence audio ---------------------------
+# Module partagé par la validation macOS et le test socket Linux : formules,
+# médiane, rejet des fenêtres invalides, verdict des xruns. Aucun sommeil réel.
+if sh "$RACINE/plateforme/macos/tests/tester_cadence.sh" \
+    >"$TMP/cadence.log" 2>&1; then
+  ok "sh : règles et boucle de cadence audio (médiane, xruns en delta)"
+else
+  cat "$TMP/cadence.log"
+  echec "sh : règles et boucle de cadence audio"
+fi
+
 # --- Filtre de transposition MIDI -------------------------------------------
 if command -v gcc >/dev/null 2>&1; then
   if gcc -O2 -I "$RACINE/cosmo" "$RACINE/cosmo/tests/transposition.c" \
