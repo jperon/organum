@@ -619,12 +619,13 @@ if mode == "console" then
   print("gain_y=" .. arrondi(bloc_y + ligne_gain + gain_course / 2))
   print("gain_h=" .. arrondi(gain_course))
   -- Transposition : une seule rangée (celle des accouplements) en bas de la
-  -- colonne, quatre cellules de poids {2, 1, 1.2, 1}.
+  -- colonne. Quatre cellules de poids {2, 1, 1.2, 1} : le libellé, « − », la
+  -- valeur signée, « + ».
   local yr = arrondi(bloc_y + bloc + d.ESPACE + p.jeu / 2)
   local poids = {2, 1, 1.2, 1}
-  print("trans_moins_x=" .. arrondi(d.colonne_ratio(cx, p.largeur_colonne, poids, 1).centre))
-  print("trans_valeur_x=" .. arrondi(d.colonne_ratio(cx, p.largeur_colonne, poids, 2).centre))
-  print("trans_plus_x=" .. arrondi(d.colonne_ratio(cx, p.largeur_colonne, poids, 3).centre))
+  print("trans_moins_x=" .. arrondi(d.colonne_ratio(cx, p.largeur_colonne, poids, 2).centre))
+  print("trans_valeur_x=" .. arrondi(d.colonne_ratio(cx, p.largeur_colonne, poids, 3).centre))
+  print("trans_plus_x=" .. arrondi(d.colonne_ratio(cx, p.largeur_colonne, poids, 4).centre))
   print("trans_y=" .. yr)
 elseif mode == "qualite" then
   local rows = tonumber(os.getenv("ROWS")); local cols = tonumber(os.getenv("COLS"))
@@ -840,7 +841,24 @@ PY
   ecrire_json_api '{"volume":0.5}'
   attendre_valeur 'e["volume"]' 0.5 0.01 50
 
-  # Curseur de gain du premier clavier, vertical à droite des jeux.
+  # Molette : un cran = ±1 % (haut = plus fort), sur la colonne du curseur.
+  xdotool mousemove --window "$WID" "$general_1_x" "$general_y"
+  sleep 0.2
+  xdotool click 4
+  sleep 0.4
+  if attendre_valeur 'e["volume"]' 0.51 0.01 40; then
+    ok "natif : molette d'un cran sur la pédale (+1 %)"
+  else
+    echec "natif : la molette n'a pas augmenté la pédale de 1 % ($(lire_api | head -c 120))"
+  fi
+  xdotool click 5
+  sleep 0.4
+  if attendre_valeur 'e["volume"]' 0.5 0.01 40; then
+    ok "natif : molette d'un cran vers le bas (−1 %)"
+  else
+    echec "natif : la molette n'a pas baissé la pédale de 1 % ($(lire_api | head -c 120))"
+  fi
+
   ecrire_json_api '{"gain":{"division":0,"value":0.5}}'
   attendre_valeur 'e["divisions"][0]["gain"]' 0.5 0.01 50
   eval "$(NDIV=$NDIV MAXJEUX=$MAXJEUX LIENS=$LIENS COL=0 GENERAUX=2 coords console 1920 1080 "$R1" "$R2")"

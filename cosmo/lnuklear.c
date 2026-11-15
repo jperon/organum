@@ -471,14 +471,20 @@ static int ui_curseur_vertical(lua_State *L) {
   if (v < mn) v = mn;
   if (v > mx) v = mx;
 
-  // Renseigné avant de consommer la case : nk_widget_is_hovered regarde la
-  // prochaine case, la même que nk_widget réserve ensuite.
-  int survole = nk_widget_is_hovered(ctx);
+  // Case du widget. Le survol se lit sur l'état rendu par nk_widget : à
+  // l'intérieur d'un groupe, ctx->current est une fenêtre factice et
+  // nk_widget_is_hovered, qui exige ctx->active == ctx->current, répondrait
+  // toujours faux (le curseur serait inerte dans le bandeau et les claviers).
   struct nk_rect b;
   enum nk_widget_layout_states st = nk_widget(&b, ctx);
-  if (!st || st == NK_WIDGET_INVALID) { lua_pushnumber(L, v); return 1; }
+  if (!st || st == NK_WIDGET_INVALID || st == NK_WIDGET_DISABLED) {
+    lua_pushnumber(L, v);
+    return 1;
+  }
 
   struct nk_input *in = &ctx->input;
+  struct nk_mouse_button *btn = &in->mouse.buttons[NK_BUTTON_LEFT];
+  int survole = st == NK_WIDGET_VALID;
   float plage = mx - mn;
   float bouton_l = b.w < 40.0f ? b.w : 40.0f;
   float bouton_h = b.h < 24.0f ? b.h : 24.0f;
@@ -486,24 +492,24 @@ static int ui_curseur_vertical(lua_State *L) {
   float course = b.h - bouton_h;
 
   // Appui : on note la valeur et la position, sans rien changer.
-  if (survole && in->mouse.buttons[NK_BUTTON_LEFT].clicked &&
-      in->mouse.buttons[NK_BUTTON_LEFT].down) {
+  if (survole && btn->down && btn->clicked &&
+      nk_input_has_mouse_click_in_button_rect(in, NK_BUTTON_LEFT, b)) {
     g_glissement.actif = 1;
     g_glissement.case_widget = b;
     g_glissement.valeur0 = v;
     g_glissement.souris0 = in->mouse.pos.y;
   }
-  // Glissement relatif, tant que c'est la même case et le même bouton.
-  if (g_glissement.actif) {
-    if (!in->mouse.buttons[NK_BUTTON_LEFT].down ||
-        g_glissement.case_widget.x != b.x || g_glissement.case_widget.y != b.y ||
-        g_glissement.case_widget.w != b.w || g_glissement.case_widget.h != b.h) {
-      g_glissement.actif = 0;
-    } else if (course > 1.0f) {
-      float dy = g_glissement.souris0 - in->mouse.pos.y;
-      float nv = g_glissement.valeur0 + dy / course * plage;
-      v = nv < mn ? mn : (nv > mx ? mx : nv);
-    }
+  // Glissement relatif : seulement dans la case où l'appui a commencé. Les
+  // autres curseurs de la même image ne doivent pas interrompre le
+  // glissement ; le relâchement du bouton, lui, l'arrête partout.
+  if (g_glissement.actif && !btn->down) g_glissement.actif = 0;
+  int glisse_ici = g_glissement.actif &&
+      g_glissement.case_widget.x == b.x && g_glissement.case_widget.y == b.y &&
+      g_glissement.case_widget.w == b.w && g_glissement.case_widget.h == b.h;
+  if (glisse_ici && course > 1.0f) {
+    float dy = g_glissement.souris0 - in->mouse.pos.y;
+    float nv = g_glissement.valeur0 + dy / course * plage;
+    v = nv < mn ? mn : (nv > mx ? mx : nv);
   }
   // Molette : un cran = un pas, consommé pour ne pas faire défiler la fenêtre.
   if (survole && in->mouse.scroll_delta.y != 0.0f) {
@@ -529,9 +535,9 @@ static int ui_curseur_vertical(lua_State *L) {
                                   bas - (bouton_y + bouton_h * 0.5f));
   struct nk_rect bouton = nk_rect(b.x + (b.w - bouton_l) * 0.5f, bouton_y, bouton_l, bouton_h);
   struct nk_color teinte = style->bar_normal;
-  struct nk_color accent = g_glissement.actif ? style->bar_active : style->bar_filled;
+  struct nk_color accent = glisse_ici ? style->bar_active : style->bar_filled;
   struct nk_color bouton_col = couleur_item(survole ? &style->cursor_hover : &style->cursor_normal);
-  if (g_glissement.actif) bouton_col = couleur_item(&style->cursor_active);
+  if (glisse_ici) bouton_col = couleur_item(&style->cursor_active);
   if (rail.h > 0.0f) {
     nk_fill_rect(out, rail, rail_l * 0.5f, teinte);
     if (rempli.h > 0.0f) nk_fill_rect(out, rempli, rail_l * 0.5f, accent);

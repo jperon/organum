@@ -267,6 +267,26 @@ async function glisserVertical(expression, fraction) {
   return true;
 }
 
+// Molette sur une colonne de curseur : un cran = ±1 pas (haut = plus fort).
+async function molette(expression, crans) {
+  const r = await rect(expression);
+  if (!r) {
+    echec(`colonne de curseur introuvable (molette) : ${expression}`);
+    return false;
+  }
+  const x = r.x + r.w / 2;
+  const y = r.y + r.h / 2;
+  await cdp.envoyer('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+  for (let i = 0; i < Math.abs(crans); i += 1) {
+    await cdp.envoyer('Input.dispatchMouseEvent', {
+      type: 'mouseWheel', x, y, deltaX: 0, deltaY: crans > 0 ? -100 : 100
+    });
+    await delay(90);
+  }
+  await delay(250);
+  return true;
+}
+
 function selecteur(groupe, valeur) {
   return `document.querySelector('#${groupe} [data-valeur="${valeur}"]')`;
 }
@@ -411,6 +431,16 @@ async function testAccueil() {
   const apresAppui = (await api('/api/orgue')).volume;
   verifie(Math.abs(apresAppui - avantAppui) < 0.02,
     `web / : un appui dans la colonne ne change pas la valeur (${avantAppui.toFixed(2)} → ${apresAppui.toFixed(2)})`);
+
+  // Molette : un cran = +1 % sur la colonne du curseur (haut = plus fort).
+  await poster('/api/orgue', { volume: 0.5 });
+  await attendre(async () => Math.abs((await api('/api/orgue')).volume - 0.5) < 0.02,
+    'web / : pédale remise à 50 avant la molette');
+  await molette('document.querySelector(".pedale-general")', 1);
+  await attendre(async () => {
+    const v = (await api('/api/orgue')).volume;
+    return v >= 0.5 && v <= 0.52;
+  }, 'web / : molette d’un cran sur la pédale (+1 %)');
 
   // Curseur de gain d'un clavier : vertical, à droite des jeux, même saisie
   // relative ; la valeur est relue dans l'API.
