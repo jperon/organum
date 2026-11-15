@@ -12,6 +12,7 @@ ORGANUM_MOTEUR ?= tool/organum/../moteur/libaeolus.a
 # Commun aux deux exécutables : moteur et plateformes audio/MIDI.
 TOOL_ORGANUM_COMMUN =							\
 	o/$(MODE)/tool/organum/lorganum.o				\
+	o/$(MODE)/tool/organum/piano/piano.o				\
 	o/$(MODE)/tool/organum/plateforme_audio.o			\
 	o/$(MODE)/tool/organum/plateforme_midi.o			\
 	o/$(MODE)/tool/organum/plateforme_midi_macos.o		\
