@@ -198,6 +198,15 @@ aide.egal(orgue({piano_volume = math.huge}), nil, "orgue : piano_volume infini")
 aide.egal(orgue({piano_volume = "0.5"}), nil, "orgue : piano_volume chaîne")
 aide.egal(orgue({piano_volume = true}), nil, "orgue : piano_volume booléen")
 
+aide.egal(orgue({reinitialiser_gains = true}), "reinitialiser_gains",
+  "orgue : remise à zéro des gains valide")
+aide.egal(orgue({reinitialiser_gains = false}), nil,
+  "orgue : remise à zéro avec false refusée")
+aide.egal(orgue({reinitialiser_gains = 1}), nil,
+  "orgue : remise à zéro non booléenne refusée")
+aide.egal(orgue({reinitialiser_gains = "oui"}), nil,
+  "orgue : remise à zéro en chaîne refusée")
+
 aide.egal(orgue({qualite = {}}), "qualite", "orgue : qualité déléguée")
 aide.egal(orgue({qualite = 5}), "qualite", "orgue : qualité non table déléguée")
 
@@ -298,7 +307,8 @@ aide.egal(v.PERIODES_VALIDES[100], nil, "constantes : période 100 absente")
 aide.egal(v.DEMARRAGE_DEFAUT.periode, 512, "constantes : période par défaut")
 for _, cle in ipairs({"stop", "cancel", "step", "reverb", "panic", "gain",
                       "link", "qualite", "volume", "temperament",
-                      "transposition", "note", "piano", "piano_volume"}) do
+                      "transposition", "note", "piano", "piano_volume",
+                      "reinitialiser_gains"}) do
   aide.egal(v.ACTIONS_ORGUE[cle], true, "constantes : action " .. cle)
 end
 

@@ -67,7 +67,7 @@ extern "C" void* aeolus_creer(int taux)
     // Parameters). Without it Division::modulate() would dereference null.
     for (int i = 0; i < h->engine->getDivisionCount(); ++i) {
         auto* div = h->engine->getDivisionByIndex(i);
-        auto* param = new juce::AudioParameterFloat(0.5f);
+        auto* param = new juce::AudioParameterFloat(AEOLUS_GAIN_DEFAUT);
         div->setParamGain(param);
     }
 
@@ -221,6 +221,11 @@ extern "C" void aeolus_gain(void* moteur, int div, float v)
     auto* d = e->getDivisionByIndex(div);
     if (d->getParamGain())
         *d->getParamGain() = v;
+}
+
+extern "C" float aeolus_gain_defaut(void)
+{
+    return AEOLUS_GAIN_DEFAUT;
 }
 
 extern "C" void aeolus_qualite(void* moteur, int champ, int valeur)

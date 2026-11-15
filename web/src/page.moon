@@ -63,7 +63,7 @@ piano_html = (d, actif) ->
   etat = if actif then "on" else "off"
   h.button class: "piano-bouton", ["data-division"]: d, ["data-state"]: etat, ["aria-pressed"]: (actif and "true" or "false"), type: "button", title: "Faire jouer ce clavier sur le piano échantillonné", "Piano"
 
-division_html = (di, div, divisions, transposition = 0, colonne_transposition = nil, piano_disponible = false) ->
+division_html = (di, div, divisions, transposition = 0, colonne_transposition = nil, piano_disponible = false, gain_defaut = nil) ->
   d = tostring di
   liens = for i, l in ipairs div.links or {}
     cible = divisions[l.division + 1]
@@ -71,7 +71,8 @@ division_html = (di, div, divisions, transposition = 0, colonne_transposition = 
     h.button class: "link", ["data-division"]: d, ["data-index"]: tostring(i - 1), ["data-state"]: (l.on and "on" or "off"), type: "button", title: "Accoupler #{escape cible.name} à #{escape div.name}", "#{modele.abrege div.name}+#{modele.abrege cible.name}"
   btns = for i, jeu in ipairs div.stops
     h.button class: "stop", ["data-division"]: d, ["data-index"]: tostring(i - 1), ["data-state"]: etat_jeu(jeu), type: "button", display jeu.name
-  gain = math.floor((tonumber(div.gain) or 0.5) * 100 + 0.5)
+  -- Valeur inconnue : défaut publié par le moteur (aucune constante ici).
+  gain = math.floor((tonumber(div.gain) or tonumber(gain_defaut) or 0) * 100 + 0.5)
   -- Rangée basse du clavier : transposition (Manuel III, qui n'a pas
   -- d'accouplement), accouplements, puis le bouton Piano en dernier. Un
   -- clavier sans accouplement garde donc la transposition et reçoit le piano
@@ -166,12 +167,15 @@ clavier_html = (divisions) ->
       h.label(class: "volume-etiquette", ["for"]: c.ident, c.etiquette),
       h.input(type: "range", id: c.ident, min: "0", max: "100", step: "1", value: tostring(c.valeur), ["aria-valuetext"]: "#{c.valeur}\u{00A0}%", style: "--fill: #{c.valeur}%"),
       h.span(class: "value", id: c.valeur_id, ["aria-hidden"]: "true", "#{c.valeur}\u{00A0}%")
-  -- Pourcentage entier 0..100 d'une valeur publiée en 0..1 ; 50 par défaut
-  -- tant que le serveur n'a rien publié.
-  pourcent = (v) ->
+  -- Pourcentage entier 0..100 d'une valeur publiée en 0..1 ; `defaut` sert
+  -- tant que le serveur n'a rien publié (valeur et défaut viennent du
+  -- moteur, jamais d'une constante recopiée).
+  pourcent = (v, defaut = 50) ->
     n = tonumber v
-    return 50 unless n
+    return defaut unless n
     math.max 0, math.min 100, math.floor n * 100 + 0.5
+  defaut_gain = infos and infos.gain_defaut
+  defaut_piano = infos and infos.piano_volume_defaut
   curseurs_generaux = {
     {ident: "volume", etiquette: "Volume", classe: "curseur-general", valeur_id: "value", valeur: 50}
     {ident: "volume-pedale", etiquette: "Pédale", classe: "curseur-general pedale-general", valeur_id: "value-pedale", valeur: pourcent infos and infos.volume}
@@ -179,7 +183,7 @@ clavier_html = (divisions) ->
   if infos and infos.piano_disponible
     table.insert curseurs_generaux, {
       ident: "piano-volume", etiquette: "Piano", classe: "curseur-general piano-general"
-      valeur_id: "value-piano", valeur: pourcent infos.piano_volume
+      valeur_id: "value-piano", valeur: pourcent (infos and infos.piano_volume), (pourcent defaut_piano)
     }
   etat_html = h.span class: "status #{modele.ETATS.rouge.classe}", id: "status", role: "status", ["aria-live"]: "polite", ["aria-atomic"]: "true", title: escape(modele.ETATS.rouge.title), ["data-libelle-vert"]: escape(modele.ETATS.vert.libelle), ["data-libelle-orange"]: escape(modele.ETATS.orange.libelle), ["data-libelle-rouge"]: escape(modele.ETATS.rouge.libelle), ["data-title-vert"]: escape(modele.ETATS.vert.title), ["data-title-orange"]: escape(modele.ETATS.orange.title), ["data-title-rouge"]: escape(modele.ETATS.rouge.title),
     h.span class: "sr-only", escape(modele.ETATS.rouge.libelle)
@@ -197,11 +201,14 @@ clavier_html = (divisions) ->
     h.button(type: "button", class: "btn panic", id: "panic", "Panique"),
     h.a(class: "btn small", href: "/midi", "MIDI"),
     lien_qualite
+  reset_html = h.button(type: "button", class: "btn small reset-volumes", id: "reinitialiser-volumes", ["aria-label"]: "Volumes des claviers et du piano par défaut", title: "Volumes des claviers et du piano par défaut", "↺")
+  curseurs_html = h.div class: "curseurs-generaux", table.unpack [curseur_gen c for c in *curseurs_generaux]
   bandeau_html = h.div class: "bandeau", role: "group", ["aria-label"]: "Réglages généraux",
-    table.unpack [curseur_gen c for c in *curseurs_generaux]
+    curseurs_html,
+    reset_html
   piano_disponible = infos and infos.piano_disponible == true
   divisions_html = h.div class: "divisions",
-    table.unpack [division_html(di - 1, div, divisions, transposition, colonne_transposition, piano_disponible) for di, div in ipairs divisions]
+    table.unpack [division_html(di - 1, div, divisions, transposition, colonne_transposition, piano_disponible, defaut_gain) for di, div in ipairs divisions]
   principal_html = h.div class: "console-principal", barre_html, bandeau_degrade,
     h.p(class: "note", "L'affichage reflète l'état mémorisé par le serveur ; il peut différer si les jeux sont tirés ailleurs."),
     divisions_html,

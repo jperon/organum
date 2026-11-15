@@ -651,6 +651,16 @@ JS = [[
       fetchOrgueInitial(orgueToken);
     }
 
+    // Remise à zéro des volumes des claviers et du piano : une seule action
+    // du serveur. Les curseurs suivent par l'attente longue, comme pour un
+    // changement venu d'une autre interface.
+    var resetVolumes = document.getElementById('reinitialiser-volumes');
+    if (resetVolumes) {
+      resetVolumes.addEventListener('click', function () {
+        postOrgue({ reinitialiser_gains: true });
+      });
+    }
+
     // Bouton de la combinaison active (grand écran).
     function majCombos() {
       var cur = String(orgueState.step || 0);

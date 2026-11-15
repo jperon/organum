@@ -760,6 +760,7 @@ CSS = [[
   }
   .bandeau {
     display: flex;
+    flex-direction: column;
     align-items: stretch;
     gap: 2px;
     flex: 0 0 auto;
@@ -771,6 +772,20 @@ CSS = [[
     border: 1px solid var(--border);
     border-radius: 6px;
     background: var(--panel);
+  }
+  .curseurs-generaux {
+    display: flex;
+    align-items: stretch;
+    gap: 2px;
+  }
+  /* Bouton de remise à zéro des volumes : icône seule, sous les curseurs,
+     pleine largeur du bandeau et cible tactile de 44 px. */
+  .bandeau .reset-volumes {
+    width: 100%;
+    min-height: 44px;
+    padding: 0 4px;
+    font-size: 1.45rem;
+    line-height: 1;
   }
   .curseur-general {
     display: flex;

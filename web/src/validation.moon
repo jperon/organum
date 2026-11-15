@@ -100,7 +100,8 @@ impositions = (env, defaut) ->
 ACTIONS_ORGUE = {
   stop: true, cancel: true, step: true, reverb: true, panic: true,
   gain: true, link: true, qualite: true, volume: true, temperament: true,
-  transposition: true, note: true, piano: true, piano_volume: true
+  transposition: true, note: true, piano: true, piano_volume: true,
+  reinitialiser_gains: true
 }
 
 -- Champs acceptés par POST /api/orgue {note}. Une note du clavier web entre
@@ -180,6 +181,12 @@ valider_orgue = (data, divisions, nb_etapes, max_temperament) ->
            data.piano_volume <= 1
       return nil, "piano_volume hors limites"
     "piano_volume"
+  elseif data.reinitialiser_gains != nil
+    -- Remise à zéro des volumes des claviers et du piano : une action
+    -- booléenne, sans valeur à transporter (les défauts viennent du moteur).
+    unless data.reinitialiser_gains == true
+      return nil, "reinitialiser_gains doit être true"
+    "reinitialiser_gains"
   elseif data.qualite != nil
     "qualite"
   elseif data.temperament != nil

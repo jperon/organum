@@ -1392,6 +1392,10 @@ etat_orgue = ->
     piano_disponible: e.piano_disponible == true
     piano_volume: e.piano_volume or 0
     piano_voix: e.piano_voix or 0
+    -- Valeurs par défaut du moteur, publiées pour les deux interfaces (le
+    -- bouton de remise à zéro ne recopie aucune constante).
+    gain_defaut: e.gain_defaut
+    piano_volume_defaut: e.piano_volume_defaut
     taux: e.taux, periode: e.periode, nb_periodes: e.nb_periodes, erreurs_ecriture: e.erreurs_ecriture
     audio_disponible: e.audio_disponible == true
     midi_disponible: e.midi_disponible == true
@@ -1599,6 +1603,11 @@ handle_orgue = ->
       organum.piano p.division + 1, p.actif
     when "piano_volume"
       organum.piano_volume data.piano_volume
+    when "reinitialiser_gains"
+      -- Le moteur remet tous les gains de division et le volume du piano à
+      -- leurs défauts, en une commande ; le Volume système et la Pédale ne
+      -- bougent pas. La sauvegarde du heartbeat persiste le nouvel état.
+      organum.gains_defaut!
     when "qualite"
       reponse, err = regler_qualite data.qualite
       if reponse
@@ -1755,6 +1764,10 @@ divisions_page = ->
     volume: e.volume
     piano_disponible: e.piano_disponible == true
     piano_volume: e.piano_volume
+    -- Défauts publiés par le moteur : le rendu initial et le bouton de
+    -- remise à zéro n'ont aucune constante propre.
+    gain_defaut: e.gain_defaut
+    piano_volume_defaut: e.piano_volume_defaut
   }
   e.divisions, e.steps, e.transposition or 0, infos
 

@@ -27,8 +27,16 @@ typedef struct {
    est appliquée par web/src/calibration.moon. Renvoie 0. */
 int aeolus_calibrer(int taux, int periode, aeolus_calibrage* sortie);
 
+/* Gain par défaut d'une division, à la création du moteur. Source unique de
+   la valeur : aeolus_creer l'applique, et la remise à zéro des volumes
+   (cosmo/lorganum.c) la relit par aeolus_gain_defaut(). */
+#define AEOLUS_GAIN_DEFAUT 0.5f
+
 void* aeolus_creer(int taux);
 void aeolus_detruire(void* moteur);
+
+/* Valeur du gain par défaut (AEOLUS_GAIN_DEFAUT), sans moteur. */
+float aeolus_gain_defaut(void);
 
 /* Tempérament : nombre de valeurs, nom de chacune (chaîne allouée à
    libérer avec free()), application et lecture de la valeur effective. */

@@ -53,7 +53,7 @@ enum {
   CMD_CANAUX_DIVISION, CMD_CANAUX_CONTROLE, CMD_CANAUX_EXPRESSION,
   CMD_ASSOCIATION, CMD_NB_ASSOCIATIONS, CMD_LIEN, CMD_QUALITE,
   CMD_LIMITEUR, CMD_TETE, CMD_RECONFIG, CMD_TRANSPOSITION,
-  CMD_PIANO, CMD_PIANO_VOLUME,
+  CMD_PIANO, CMD_PIANO_VOLUME, CMD_GAINS_DEFAUT,
 };
 
 // Demande de reconfiguration audio : le tube ne transporte que des
@@ -191,7 +191,7 @@ static struct transposition_etat g_transposition_etat;
 // que par le fil audio (comme g_transposition) et publiés par publier().
 static struct piano *g_piano;
 static unsigned char g_piano_division[MAX_DIVISIONS];
-static float g_piano_volume = 0.5f;
+static float g_piano_volume = PIANO_VOLUME_DEFAUT;
 // Copie des masques de canaux de chaque division (aeolus_canaux_division),
 // tenue ici pour ne pas interroger le moteur à chaque note MIDI.
 static int g_canaux_piano[MAX_DIVISIONS];
@@ -708,6 +708,15 @@ static void appliquer(const struct commande *c) {
     case CMD_PIANO_VOLUME:
       g_piano_volume =
           c->valeur < 0 ? 0 : (c->valeur > 1 ? 1 : c->valeur);
+      break;
+    case CMD_GAINS_DEFAUT:
+      // Une seule commande pour toute la remise à zéro : chaque gain de
+      // division et le volume du piano reprennent leur valeur par défaut du
+      // moteur, sans toucher au Volume (système) ni à la Pédale (volume du
+      // moteur, CMD_VOLUME).
+      for (int d = 0; d < g_etat->ndivisions && d < MAX_DIVISIONS; ++d)
+        aeolus_gain(g_moteur, d, aeolus_gain_defaut());
+      g_piano_volume = PIANO_VOLUME_DEFAUT;
       break;
     case CMD_RECONFIG:
       // Traité par boucle_audio, qui possède les tampons de rendu.
@@ -1882,6 +1891,12 @@ static int l_etat(lua_State *L) {
   lua_setfield(L, -2, "piano_disponible");
   lua_pushnumber(L, copie.piano_volume);
   lua_setfield(L, -2, "piano_volume");
+  // Valeurs par défaut du moteur (le gain d'une division et le volume du
+  // piano), pour que les interfaces n'aient aucune constante à recopier.
+  lua_pushnumber(L, aeolus_gain_defaut());
+  lua_setfield(L, -2, "gain_defaut");
+  lua_pushnumber(L, PIANO_VOLUME_DEFAUT);
+  lua_setfield(L, -2, "piano_volume_defaut");
   lua_pushinteger(L, copie.piano_voix);
   lua_setfield(L, -2, "piano_voix");
   lua_pushinteger(L, copie.xruns), lua_setfield(L, -2, "xruns");
@@ -2059,6 +2074,15 @@ static int l_piano(lua_State *L) {
 static int l_piano_volume(lua_State *L) {
   envoyer(L, (struct commande){CMD_PIANO_VOLUME,
                                .valeur = (float)luaL_checknumber(L, 1)});
+  return 0;
+}
+
+// organum.gains_defaut() : remet tous les gains de division et le volume du
+// piano à leur valeur par défaut du moteur, en une seule commande (le fil
+// audio applique tout d'un coup). Ne touche ni au volume système ni à la
+// Pédale. Les constantes restent dans le moteur : aucune valeur recopiée ici.
+static int l_gains_defaut(lua_State *L) {
+  envoyer(L, (struct commande){CMD_GAINS_DEFAUT});
   return 0;
 }
 
@@ -2335,6 +2359,7 @@ static const luaL_Reg kFonctions[] = {
     {"jeu", l_jeu},           {"gain", l_gain},     {"volume", l_volume},
     {"reverb", l_reverb},     {"midi", l_midi},     {"panique", l_panique},
     {"piano", l_piano},       {"piano_volume", l_piano_volume},
+    {"gains_defaut", l_gains_defaut},
     {"qualite", l_qualite}, {"calibrer", l_calibrer},
     {"charge_niveau", l_charge_niveau_diag},
     {"limiteur", l_limiteur}, {"tete_reverb", l_tete_reverb},

@@ -35,7 +35,7 @@ local divisions = {
    canaux = {2}, stops = {{name = "Montre 8", on = true}}},
   {name = "Manual II", gain = nil, links = {}, canaux = {3}, stops = {}},
 }
-local html_page = page(divisions, 32)
+local html_page = page(divisions, 32, 0, {gain_defaut = 0.5})
 
 aide.verifie(html_page:sub(1, 15) == "<!DOCTYPE html>", "page : doctype")
 aide.verifie(html_page:find('<html lang="fr">', 1, true) ~= nil, "page : langue française")
@@ -72,6 +72,29 @@ aide.verifie(html_page:find('value="50"', 1, true) ~= nil,
 -- « Tout annuler »).
 aide.verifie(html_page:find('class="bandeau"', 1, true) ~= nil,
   "page : bandeau des curseurs généraux")
+aide.verifie(html_page:find('class="curseurs-generaux"', 1, true) ~= nil,
+  "page : curseurs généraux groupés au-dessus du bouton de remise à zéro")
+-- Bouton de remise à zéro : icône seule, sous les curseurs, avec un libellé
+-- accessible qui dit exactement ce qu'il remet (ni Volume ni Pédale).
+local pos_bandeau = html_page:find('class="bandeau"', 1, true)
+local pos_reset = html_page:find('id="reinitialiser-volumes"', 1, true)
+local pos_reset_fin = pos_reset and html_page:find("</button>", pos_reset, true)
+-- L'ordre des attributs n'est pas garanti (table Lua) : on remonte au début
+-- de la balise <button> avant de lire son libellé et son infobulle.
+local pos_reset_debut = pos_reset and html_page:sub(1, pos_reset):find("<button[^>]*$")
+local bouton_reset = pos_reset_debut and pos_reset_fin and
+  html_page:sub(pos_reset_debut, pos_reset_fin + 8) or ""
+aide.verifie(pos_reset ~= nil and pos_bandeau ~= nil and pos_bandeau < pos_reset,
+  "page : bouton de remise à zéro dans le bandeau")
+aide.verifie(bouton_reset:find("↺", 1, true) ~= nil,
+  "page : bouton de remise à zéro à icône seule (↺)")
+aide.verifie(bouton_reset:find('aria-label="Volumes des claviers et du piano par défaut"', 1, true) ~= nil,
+  "page : libellé accessible du bouton de remise à zéro")
+aide.verifie(bouton_reset:find('title="Volumes des claviers et du piano par défaut"', 1, true) ~= nil,
+  "page : infobulle du bouton de remise à zéro")
+local pos_dernier_curseur = html_page:find('id="volume-pedale"', 1, true)
+aide.verifie(pos_dernier_curseur and pos_reset and pos_dernier_curseur < pos_reset,
+  "page : bouton de remise à zéro après les curseurs")
 aide.verifie(html_page:find('class="console"', 1, true) ~= nil,
   "page : console en deux parties")
 aide.egal(select(2, html_page:gsub('class="curseur%-general', "")), 2,
@@ -121,6 +144,9 @@ local pos_pedale = html_piano:find('id="volume-pedale"', 1, true)
 local pos_piano_curseur = html_piano:find('id="piano-volume"', 1, true)
 aide.verifie(pos_pedale and pos_piano_curseur and pos_pedale < pos_piano_curseur,
   "page : curseur Piano après Pédale dans le bandeau")
+local pos_reset_piano = html_piano:find('id="reinitialiser-volumes"', 1, true)
+aide.verifie(pos_piano_curseur and pos_reset_piano and pos_piano_curseur < pos_reset_piano,
+  "page : bouton de remise à zéro après le curseur Piano")
 aide.egal(select(2, html_piano:gsub('class="piano%-bouton"', "")), 3,
   "page : un bouton Piano par division")
 local sections = {}

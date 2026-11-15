@@ -14,6 +14,9 @@
 struct piano;
 
 #define PIANO_CHEMIN "/zip/piano/piano.sf3"
+// Volume par défaut du piano (0..1), seule source de la valeur : le fil
+// audio l'applique au démarrage et la remise à zéro des volumes la relit.
+#define PIANO_VOLUME_DEFAUT 0.5f
 // Polyphonie maximale : voix préallouées, donc aucune allocation pendant
 // tsf_note_on (un échantillon de ce SoundFont produit une voix par note).
 #define PIANO_MAX_VOIX 48
