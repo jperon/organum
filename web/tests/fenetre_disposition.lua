@@ -139,12 +139,25 @@ for _, nb_generaux in ipairs({1, 2, 3}) do
         "disposer : curseur du bandeau au moins de la hauteur du bouton " .. nom, p.bande_curseur)
       aide.verifie(p.bouton_reset >= d.BOUTON_HAUTEUR,
         "disposer : bouton de remise à zéro au moins la hauteur du bouton " .. nom, p.bouton_reset)
-      local contenu_bande = p.reste - d.CADRE_GROUPE - d.ESPACE
-      aide.verifie(2 * p.etiquette_curseur + p.bande_curseur + p.bouton_reset +
-        3 * d.ESPACE <= contenu_bande + 1e-6,
-        "disposer : bandeau (curseurs et bouton) dans sa case " .. nom,
-        (2 * p.etiquette_curseur + p.bande_curseur + p.bouton_reset + 3 * d.ESPACE) ..
-          " > " .. contenu_bande)
+      -- Transposition sous ↺ : deux rangées de plus (étiquette et boutons)
+      -- quand la fenêtre le permet ; omise dans les fenêtres très basses.
+      if p.transposition_visible then
+        aide.egal(p.bouton_transposition, d.BOUTON_RESET,
+          "disposer : bouton de transposition de 44 px " .. nom)
+        aide.verifie(p.bouton_transposition <= p.reste - d.CADRE_GROUPE,
+          "disposer : transposition contenue dans le bandeau " .. nom)
+      else
+        aide.egal(p.bouton_transposition, 0,
+          "disposer : transposition omise faute de place " .. nom)
+      end
+      local etiquettes = p.transposition_visible and 3 or 2
+      local lignes = p.transposition_visible and 6 or 4
+      local contenu_bande = p.reste - d.CADRE_GROUPE
+      local occupe = etiquettes * p.etiquette_curseur + p.bande_curseur +
+        p.bouton_reset + p.bouton_transposition + (lignes - 1) * d.ESPACE
+      aide.verifie(occupe <= contenu_bande + 1e-6,
+        "disposer : bandeau (curseurs, ↺ et transposition) dans sa case " .. nom,
+        occupe .. " > " .. contenu_bande)
     end
   end
 end
@@ -166,6 +179,9 @@ for _, cas in ipairs({{800, 480, 50}, {1024, 640, 52}, {1920, 1080, 52}}) do
     "disposer : bandeau au plus 174 px " .. nom, p.bande)
   aide.verifie(p.bouton_reset >= 44,
     "disposer : bouton de remise à zéro de 44 px " .. nom, p.bouton_reset)
+  aide.verifie(p.transposition_visible and p.bouton_transposition >= 44,
+    "disposer : transposition sous ↺, boutons de 44 px " .. nom,
+    tostring(p.bouton_transposition))
   aide.verifie(p.curseur_largeur >= d.BOUTON_LARGEUR,
     "disposer : poignée de gain logée dans sa colonne " .. nom, p.curseur_largeur)
 end

@@ -63,7 +63,7 @@ piano_html = (d, actif) ->
   etat = if actif then "on" else "off"
   h.button class: "piano-bouton", ["data-division"]: d, ["data-state"]: etat, ["aria-pressed"]: (actif and "true" or "false"), type: "button", title: "Faire jouer ce clavier sur le piano échantillonné", "Piano"
 
-division_html = (di, div, divisions, transposition = 0, colonne_transposition = nil, piano_disponible = false, gain_defaut = nil) ->
+division_html = (di, div, divisions, piano_disponible = false, gain_defaut = nil) ->
   d = tostring di
   liens = for i, l in ipairs div.links or {}
     cible = divisions[l.division + 1]
@@ -73,13 +73,10 @@ division_html = (di, div, divisions, transposition = 0, colonne_transposition = 
     h.button class: "stop", ["data-division"]: d, ["data-index"]: tostring(i - 1), ["data-state"]: etat_jeu(jeu), type: "button", display jeu.name
   -- Valeur inconnue : défaut publié par le moteur (aucune constante ici).
   gain = math.floor((tonumber(div.gain) or tonumber(gain_defaut) or 0) * 100 + 0.5)
-  -- Rangée basse du clavier : transposition (Manuel III, qui n'a pas
-  -- d'accouplement), accouplements, puis le bouton Piano en dernier. Un
-  -- clavier sans accouplement garde donc la transposition et reçoit le piano
-  -- sur la même rangée.
+  -- Rangée basse du clavier : les accouplements, puis le bouton Piano en
+  -- dernier. La transposition n'est plus ici : elle concerne tout l'orgue et
+  -- vit dans le bandeau de gauche, sous la remise à zéro des volumes.
   bas = {}
-  if di + 1 == colonne_transposition and #liens == 0
-    table.insert bas, transposition_html transposition
   for b in *liens
     table.insert bas, b
   if piano_disponible
@@ -144,7 +141,6 @@ clavier_html = (divisions) ->
     corps
 
 (divisions, steps = 32, transposition = 0, infos = {}) ->
-  colonne_transposition = modele.colonne_transposition divisions
   -- Bandeau d'état : chaque axe (audio, MIDI) a son propre message, calculé
   -- par une règle pure et publié par le serveur. Un axe qui fonctionne se
   -- tait ; l'absence de l'assistant audio ou MIDI n'est pas une faute.
@@ -203,12 +199,17 @@ clavier_html = (divisions) ->
     lien_qualite
   reset_html = h.button(type: "button", class: "btn small reset-volumes", id: "reinitialiser-volumes", ["aria-label"]: "Volumes des claviers et du piano par défaut", title: "Volumes des claviers et du piano par défaut", "↺")
   curseurs_html = h.div class: "curseurs-generaux", table.unpack [curseur_gen c for c in *curseurs_generaux]
+  -- Pied du bandeau : la remise à zéro des volumes, puis la transposition
+  -- globale (elle concerne tout l'orgue : sa place est avec les réglages
+  -- généraux, pas dans un clavier). En largeur étroite, les deux partagent
+  -- une seule ligne.
+  pied_html = h.div class: "bandeau-pied", reset_html, transposition_html transposition
   bandeau_html = h.div class: "bandeau", role: "group", ["aria-label"]: "Réglages généraux",
     curseurs_html,
-    reset_html
+    pied_html
   piano_disponible = infos and infos.piano_disponible == true
   divisions_html = h.div class: "divisions",
-    table.unpack [division_html(di - 1, div, divisions, transposition, colonne_transposition, piano_disponible, defaut_gain) for di, div in ipairs divisions]
+    table.unpack [division_html(di - 1, div, divisions, piano_disponible, defaut_gain) for di, div in ipairs divisions]
   principal_html = h.div class: "console-principal", barre_html, bandeau_degrade,
     h.p(class: "note", "L'affichage reflète l'état mémorisé par le serveur ; il peut différer si les jeux sont tirés ailleurs."),
     divisions_html,

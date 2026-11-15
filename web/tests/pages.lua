@@ -95,6 +95,16 @@ aide.verifie(bouton_reset:find('title="Volumes des claviers et du piano par déf
 local pos_dernier_curseur = html_page:find('id="volume-pedale"', 1, true)
 aide.verifie(pos_dernier_curseur and pos_reset and pos_dernier_curseur < pos_reset,
   "page : bouton de remise à zéro après les curseurs")
+-- Transposition globale : dans le bandeau, sous la remise à zéro (elle n'est
+-- plus rattachée à un clavier).
+local pos_trans = html_page:find('id="transposition"', 1, true)
+local pos_premier_clavier = html_page:find('class="division"', 1, true)
+aide.verifie(pos_reset and pos_trans and pos_reset < pos_trans,
+  "page : transposition sous la remise à zéro, dans le bandeau")
+aide.verifie(pos_trans and pos_premier_clavier and pos_trans < pos_premier_clavier,
+  "page : transposition avant les claviers")
+aide.verifie(html_page:find('class="bandeau-pied"', 1, true) ~= nil,
+  "page : pied du bandeau (remise à zéro et transposition)")
 aide.verifie(html_page:find('class="console"', 1, true) ~= nil,
   "page : console en deux parties")
 aide.egal(select(2, html_page:gsub('class="curseur%-general', "")), 2,
@@ -123,8 +133,8 @@ aide.verifie(html_page:find("P+I", 1, true) ~= nil,
   "page : accouplement abrégé P+I")
 
 -- Bouton Piano : sur la rangée basse de chaque clavier, en dernier, avec le
--- même état qu'un accouplement ; la transposition du clavier sans
--- accouplement reste sur la même rangée. Absent sans piano disponible.
+-- même état qu'un accouplement. La transposition n'y est plus : elle vit dans
+-- le bandeau. Absent sans piano disponible.
 local html_piano = page(divisions, 32, 0, {piano_disponible = true, piano_volume = 0.4,
   volume = 0.25})
 aide.egal(select(2, html_piano:gsub('class="curseur%-general', "")), 3,
@@ -162,14 +172,16 @@ for i, morceau in ipairs(sections) do
     "page : bouton Piano en dernier sur la rangée de la division " .. (i - 1))
   aide.egal(select(2, morceau:gsub('class="links"', "")), 1,
     "page : une seule rangée basse dans la division " .. (i - 1))
+  aide.verifie(morceau:find('id="transposition"', 1, true) == nil,
+    "page : plus de transposition dans la division " .. (i - 1))
 end
-local section_trans
-for _, morceau in ipairs(sections) do
-  if morceau:find('id="transposition"', 1, true) then section_trans = morceau end
-end
-aide.verifie(section_trans ~= nil and
-  section_trans:find('class="piano-bouton"', 1, true) ~= nil,
-  "page : Piano et Transposition sur la même rangée")
+-- La transposition reste unique et dans le bandeau, avec le piano affiché.
+local pos_trans_piano = html_piano:find('id="transposition"', 1, true)
+local pos_premier_piano = html_piano:find('class="division"', 1, true)
+aide.egal(select(2, html_piano:gsub('id="transposition"', "")), 1,
+  "page : une seule transposition")
+aide.verifie(pos_trans_piano and pos_premier_piano and pos_trans_piano < pos_premier_piano,
+  "page : transposition dans le bandeau, avant les claviers (piano affiché)")
 aide.verifie(html_piano:find('aria-pressed="false"', 1, true) ~= nil,
   "page : bouton Piano inactif annoncé (aria-pressed)")
 local html_piano_actif = page({{name = "Manual I", gain = 0.5, links = {},

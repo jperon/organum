@@ -214,17 +214,32 @@ disposer = (e, l, h, rapport, rapport_deux, cible, nb_generaux = 0) ->
   p.reste = h - 2 * MARGE - p.haut * (p.entete + ESPACE) - ESPACE
   -- Hauteur d'une ligne d'étiquette ou de valeur d'un curseur vertical, et
   -- hauteur du curseur du bandeau (celui des claviers occupe tout le bloc).
-  -- Le bouton de remise à zéro occupe une rangée de plus, sous la valeur.
+  -- Sous la valeur viennent la remise à zéro des volumes, puis la
+  -- transposition globale (étiquette et rangée −/valeur/+).
   etiquette = math.min p.entete, math.max(p.police + 2, 14)
   p.etiquette_curseur = etiquette
+  contenu = p.reste - CADRE_GROUPE
+  -- La transposition n'est dessinée que si la place reste confortable :
+  -- trois rangées de cible (curseur, ↺, transposition) d'au moins 24 px et
+  -- trois étiquettes doivent tenir. Dans une fenêtre très basse elle est omise
+  -- (bouton 0) plutôt que de déborder du groupe.
+  p.transposition_visible = contenu >= 3 * etiquette + 5 * ESPACE + 3 * BOUTON_HAUTEUR
+  p.bouton_transposition = 0
+  if p.transposition_visible
+    p.bouton_transposition = math.max BOUTON_HAUTEUR,
+      math.min BOUTON_RESET, contenu - 5 * ESPACE - 3 * etiquette - 2 * BOUTON_HAUTEUR
+  lignes = if p.transposition_visible then 6 else 4
+  etiquettes = if p.transposition_visible then 3 else 2
   -- Le bouton de remise à zéro vise 44 px ; dans une fenêtre si basse que
   -- même le curseur minimal ne tiendrait pas, il se réduit (le plancher est
   -- la hauteur du bouton de curseur), plutôt que de déborder du groupe.
   p.bouton_reset = math.max BOUTON_HAUTEUR,
     math.min BOUTON_RESET,
-      p.reste - CADRE_GROUPE - 3 * ESPACE - 2 * (etiquette + ESPACE) - BOUTON_HAUTEUR
+      contenu - (lignes - 1) * ESPACE - etiquettes * etiquette -
+        p.bouton_transposition - BOUTON_HAUTEUR
   p.bande_curseur = math.max BOUTON_HAUTEUR,
-    p.reste - CADRE_GROUPE - 3 * ESPACE - 2 * (etiquette + ESPACE) - p.bouton_reset
+    contenu - (lignes - 1) * ESPACE - etiquettes * etiquette -
+      p.bouton_reset - p.bouton_transposition
   p
 
 -- Disposition du panneau MIDI : en-tête sur deux lignes (navigation, puis

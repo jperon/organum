@@ -586,8 +586,8 @@ if mode == "console" then
   local a_liens = os.getenv("LIENS") == "1"
   local nb = tonumber(os.getenv("GENERAUX") or "2")
   -- Piano : le bouton existe quand le SoundFont est chargé (PIANO=1) ; NLIENS
-  -- est le nombre d'accouplements de la colonne visée, 0 pour le clavier qui
-  -- porte la transposition.
+  -- est le nombre d'accouplements de la colonne visée, 0 pour un clavier qui
+  -- n'en a pas (son bouton Piano occupe alors seul la rangée basse).
   local piano = os.getenv("PIANO") == "1"
   local nliens = tonumber(os.getenv("NLIENS") or "0")
   local divisions = {}
@@ -625,8 +625,21 @@ if mode == "console" then
   print("reset_x=" .. arrondi(bande_contenu_x + bande_largeur / 2))
   print("reset_y=" .. arrondi(reset_y))
   print("reset_h=" .. arrondi(p.bouton_reset))
+  -- Transposition globale : dans le bandeau, sous ↺ (étiquette puis rangée
+  -- −/valeur/+ de poids {1, 1.25, 1}, comme fenetre.moon).
+  if p.bouton_transposition > 0 then
+    local bas_reset = contenu_y + 2 * p.etiquette_curseur + p.bande_curseur +
+      3 * d.ESPACE + p.bouton_reset
+    local trans_y = bas_reset + 2 * d.ESPACE + p.etiquette_curseur +
+      p.bouton_transposition / 2
+    print("trans_y=" .. arrondi(trans_y))
+    print("trans_moins_x=" .. arrondi(d.colonne_ratio(bande_contenu_x, bande_largeur, {1, 1.25, 1}, 1).centre))
+    print("trans_valeur_x=" .. arrondi(d.colonne_ratio(bande_contenu_x, bande_largeur, {1, 1.25, 1}, 2).centre))
+    print("trans_plus_x=" .. arrondi(d.colonne_ratio(bande_contenu_x, bande_largeur, {1, 1.25, 1}, 3).centre))
+  end
   -- Un clavier : COL (0 à ndiv-1). En-tête (nom et Annuler), bloc de jeux
-  -- avec le curseur de gain à droite, puis accouplements ou transposition.
+  -- avec le curseur de gain à droite, puis les accouplements et le bouton
+  -- Piano (ou le seul bouton Piano pour un clavier sans accouplement).
   local col = tonumber(os.getenv("COL") or "0")
   local cellw = p.l_jeux / ndiv
   local gx = d.MARGE + p.bande + d.ESPACE + col * (cellw + d.ESPACE)
@@ -638,23 +651,13 @@ if mode == "console" then
   print("gain_x=" .. arrondi(cx + p.largeur_colonne - p.curseur_largeur + p.curseur_largeur / 2))
   print("gain_y=" .. arrondi(bloc_y + ligne_gain + gain_course / 2))
   print("gain_h=" .. arrondi(gain_course))
-  -- Transposition : une seule rangée (celle des accouplements) en bas de la
-  -- colonne. Quatre cellules de poids {2, 1, 1.2, 1} : le libellé, « − », la
-  -- valeur signée, « + » ; le bouton Piano, quand il est là, occupe une
-  -- cinquième cellule à poids {2.4, 0.55, 0.6, 0.55, 1.1} (mêmes poids que
-  -- fenetre.moon : « Transposition » et « Piano » entiers).
-  local yr = arrondi(bloc_y + bloc + d.ESPACE + p.jeu / 2)
-  local poids = piano and {2.4, 0.55, 0.6, 0.55, 1.1} or {2, 1, 1.2, 1}
-  print("trans_moins_x=" .. arrondi(d.colonne_ratio(cx, p.largeur_colonne, poids, 2).centre))
-  print("trans_valeur_x=" .. arrondi(d.colonne_ratio(cx, p.largeur_colonne, poids, 3).centre))
-  print("trans_plus_x=" .. arrondi(d.colonne_ratio(cx, p.largeur_colonne, poids, 4).centre))
-  print("trans_y=" .. yr)
   -- Bouton Piano : dernier de la rangée basse. Rangée des accouplements
-  -- (nliens + 1 cases égales) ou rangée de transposition (5 cases à poids).
+  -- (nliens + 1 cases égales) ou rangée à une seule case pleine largeur.
+  local yr = arrondi(bloc_y + bloc + d.ESPACE + p.jeu / 2)
   if nliens > 0 then
     print("piano_x=" .. arrondi(d.case_centre(cx, p.largeur_colonne, nliens + 1, nliens)))
   else
-    print("piano_x=" .. arrondi(d.colonne_ratio(cx, p.largeur_colonne, poids, #poids).centre))
+    print("piano_x=" .. arrondi(cx + p.largeur_colonne / 2))
   end
   print("piano_y=" .. yr)
 elseif mode == "qualite" then
@@ -913,8 +916,8 @@ PY
   ecrire_json_api '{"gain":{"division":0,"value":0.5}}'
   attendre_valeur 'e["divisions"][0]["gain"]' 0.5 0.01 50
 
-  # Transposition : clic réel sur « + » dans la colonne du Manuel III, valeur
-  # relue par l'API, accent visible (captures), borne haute inactive.
+  # Transposition : clic réel sur « + » dans le bandeau, sous ↺, valeur relue
+  # par l'API, accent visible (captures), borne haute inactive.
   eval "$(NDIV=$NDIV MAXJEUX=$MAXJEUX LIENS=$LIENS COL=0 PIANO=$PIANO NLIENS=0 GENERAUX=$NGENERAUX coords console 1920 1080 "$R1" "$R2")"
   ecrire_json_api '{"transposition":0}'
   attendre_api '"transposition":0' 50
@@ -987,8 +990,8 @@ PY
       echec "natif : le second clic sur Piano ne relâche pas la division"
     fi
 
-    # 2. Manuel III : Piano partage sa rangée avec la Transposition, qui ne
-    # doit pas bouger.
+    # 2. Manuel III (sans accouplement) : son bouton Piano occupe seul sa
+    # rangée basse ; la transposition, dans le bandeau, ne doit pas bouger.
     ecrire_json_api '{"transposition":0}'
     attendre_api '"transposition":0' 50
     ecrire_json_api '{"piano":{"division":0,"actif":false}}'

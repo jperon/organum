@@ -347,16 +347,14 @@ CSS = [[
 
   .links { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 2px; }
   .links .link, .links .piano-bouton { flex: 1 1 4em; }
-  /* Le bouton Piano partage sa rangée avec la transposition du Manuel III :
-   le bloc de transposition garde sa place, le bouton vient en dernier. */
-  .links .transposition { flex: 1 1 auto; min-width: 0; margin-top: 0; }
-  /* Transposition globale, en bas de la colonne du Manuel III. */
+  /* Transposition globale : elle concerne tout l'orgue, donc avec les
+     réglages généraux (bandeau de gauche, sous la remise à zéro), et non
+     dans un clavier. */
   .transposition {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 8px;
-    margin-top: 10px;
     padding: 4px;
     border: 1px solid transparent;
     border-radius: 10px;
@@ -784,8 +782,37 @@ CSS = [[
     flex: 1 1 auto;
     align-items: stretch;
     gap: 2px;
-    /* Hauteur restante du bandeau, une fois le bouton ↺ réservé en bas. */
+    /* Hauteur restante du bandeau, une fois le pied réservé en bas. */
     min-height: 0;
+  }
+  /* Pied du bandeau : remise à zéro des volumes puis transposition globale,
+     l'une sous l'autre dans le rail vertical ; côte à côte en étroit. */
+  .bandeau-pied {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 0 0 auto;
+  }
+  .bandeau .transposition {
+    margin: 0;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 6px;
+  }
+  .bandeau .transposition-libelle {
+    flex: 1 1 100%;
+    padding: 0 2px;
+    font-size: 0.72rem;
+    line-height: 1.2;
+  }
+  .bandeau .transposition .btn.small {
+    min-width: 44px;
+    padding: 0 4px;
+  }
+  .bandeau .transposition-valeur {
+    min-width: 2.2em;
+    padding: 0 2px;
+    font-size: 1rem;
   }
   /* Bouton de remise à zéro des volumes : icône seule, sous les curseurs,
      pleine largeur du bandeau et cible tactile de 44 px. */

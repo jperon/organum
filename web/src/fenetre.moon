@@ -38,7 +38,7 @@ modele = require "modele"
 
 -- Disposition pure (tailles, police, découpe des noms) : module séparé,
 -- testable sans Nuklear ni moteur.
-{ :ESPACE, :MARGE, :POLICE_MAX
+{ :ESPACE, :MARGE, :CADRE_GROUPE, :POLICE_MAX
   :bouge, :decoupe
   :disposer, :disposer_midi, :disposer_connexions, :disposer_qualite
   :texte_calibration } = require "fenetre_disposition"
@@ -1037,14 +1037,8 @@ MAX_ASSOCIATIONS = 16
         organum.midi 0xCF, n - 1 if ui\choix(tostring(n), actif) and not actif
 
       -- Claviers, un par colonne, sur toute la hauteur restante : à gauche le
-      -- bandeau vertical des curseurs généraux, à droite les claviers.
-      -- Transposition dans la colonne du Manuel III (sans accouplement). La
-      -- rangée des accouplements n'existe que si au moins un clavier en a :
-      -- elle fournit alors la place libre en bas de sa colonne.
-      colonne_transposition = modele.colonne_transposition e.divisions
-      a_des_liens = false
-      for dd in *e.divisions
-        a_des_liens = true if #dd.liens > 0
+      -- bandeau vertical des réglages généraux (curseurs, remise à zéro,
+      -- transposition), à droite les claviers.
       -- Une rangée : le bandeau, puis une case par clavier. Les poids sont les
       -- largeurs en pixels, normalisées par ui:ligne_ratio.
       poids = {p.bande}
@@ -1077,6 +1071,37 @@ MAX_ASSOCIATIONS = 16
         -- commande au moteur, qui ne touche ni au Volume ni à la Pédale.
         ui\ligne p.bouton_reset, 1
         organum.gains_defaut! if ui\bouton_reinit!
+        -- Transposition globale, sous la remise à zéro : elle concerne tout
+        -- l'orgue, elle n'appartient donc pas à un clavier. Le libellé est
+        -- écrit en entier s'il tient dans la colonne (bornée à 52 px par
+        -- curseur), sinon « Transpos. » — jamais de troncature « … ».
+        if p.transposition_visible
+          largeur_libelle = p.bande - CADRE_GROUPE - 2
+          libelle = if ui\largeur_texte("Transposition") <= largeur_libelle
+            "Transposition"
+          else
+            "Transpos."
+          ui\ligne p.etiquette_curseur, 1
+          ui\texte libelle, "centre"
+          ui\ligne_ratio p.bouton_transposition, {1, 1.25, 1}
+          v = math.tointeger(e.transposition) or 0
+          accent = v != 0
+          -- Le jeu de police embarqué ne couvre que le latin : le signe
+          -- moins U+2212 y manque, on garde l'hyphen ASCII côté natif.
+          clique_moins = ui\etat("-", accent, false) != accent
+          if clique_moins and v > -12
+            organum.transposition v - 1
+            v -= 1
+            accent = v != 0
+          texte_valeur = modele.texte_transposition(v)\gsub "\u{2212}", "-"
+          clique_valeur = ui\etat texte_valeur, accent, false
+          if clique_valeur != accent and v != 0
+            organum.transposition 0
+            v = 0
+            accent = false
+          clique_plus = ui\etat("+", accent, false) != accent
+          if clique_plus and v < 12
+            organum.transposition v + 1
         ui\groupe_fin!
       for d, div in ipairs e.divisions
         if ui\groupe_debut "clavier #{d}"
@@ -1115,12 +1140,11 @@ MAX_ASSOCIATIONS = 16
           ui\place x_gain, bloc - ligne_gain, p.curseur_largeur, ligne_gain
           ui\texte "#{math.floor(g * 100 + 0.5)} %", "centre"
           ui\espace_fin!
-          -- Rangée basse, sous les jeux : les accouplements, ou la
-          -- transposition pour le clavier qui n'en a pas, et le bouton Piano
-          -- en dernier quand le piano échantillonné est chargé. Un clavier
-          -- sans accouplement garde donc la transposition et reçoit le piano
-          -- sur la même rangée.
-          transposition_ici = d == colonne_transposition and a_des_liens and #div.liens == 0
+          -- Rangée basse, sous les jeux : les accouplements, puis le bouton
+          -- Piano en dernier quand le piano échantillonné est chargé. Un
+          -- clavier sans accouplement (le Manuel III) n'a plus que son bouton
+          -- Piano : la transposition est dans le bandeau, avec les réglages
+          -- généraux.
           if #div.liens > 0
             ui\ligne p.jeu, #div.liens + (piano and 1 or 0)
             for i, lien in ipairs div.liens
@@ -1129,47 +1153,9 @@ MAX_ASSOCIATIONS = 16
               organum.lien d, i, not lien.actif if ui\choix(etiquette, lien.actif) != lien.actif
             if piano and ui\choix("Piano", div.piano == true) != (div.piano == true)
               organum.piano d, div.piano != true
-          elseif transposition_ici or piano
-            -- Une seule rangée disponible : −, valeur signée, +, puis Piano.
-            -- La valeur non nulle accentue les cellules (couleur de
-            -- sélection). Les poids donnent au libellé « Transposition » et
-            -- au bouton « Piano » la place de leur texte entier (le libellé
-            -- d'un clavier de 145 px de contenu en réclame 61, « Piano » 27),
-            -- sans rogner les bornes ; l'ancien partage {1.9, 0.7, 0.9, 0.7,
-            -- 1.25} tronquait « Transposition » dès que la police grandissait
-            -- avec la place rendue par le bandeau plus étroit.
-            poids = if not transposition_ici
-              {1}
-            elseif piano
-              {2.4, 0.55, 0.6, 0.55, 1.1}
-            else
-              {2, 1, 1.2, 1}
-            ui\ligne_ratio p.jeu, poids
-            if transposition_ici
-              v = math.tointeger(e.transposition) or 0
-              accent = v != 0
-              total = 0
-              for w in *poids
-                total += w
-              largeur_libelle = (p.largeur_colonne - (#poids - 1) * ESPACE) * poids[1] / total
-              ui\texte tronquer("Transposition", largeur_libelle)
-              -- Le jeu de police embarqué ne couvre que le latin : le signe
-              -- moins U+2212 y manque, on garde l'hyphen ASCII côté natif.
-              clique_moins = ui\etat("-", accent, false) != accent
-              if clique_moins and v > -12
-                organum.transposition v - 1
-                v -= 1
-                accent = v != 0
-              texte_valeur = modele.texte_transposition(v)\gsub "\u{2212}", "-"
-              clique_valeur = ui\etat texte_valeur, accent, false
-              if clique_valeur != accent and v != 0
-                organum.transposition 0
-                v = 0
-                accent = false
-              clique_plus = ui\etat("+", accent, false) != accent
-              if clique_plus and v < 12
-                organum.transposition v + 1
-            if piano and ui\choix("Piano", div.piano == true) != (div.piano == true)
+          elseif piano
+            ui\ligne p.jeu, 1
+            if ui\choix("Piano", div.piano == true) != (div.piano == true)
               organum.piano d, div.piano != true
           ui\groupe_fin!
     ui\fin!
