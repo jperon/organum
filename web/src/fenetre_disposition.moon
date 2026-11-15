@@ -109,9 +109,10 @@ disposer = (e, l, h, rapport, rapport_deux, cible, nb_generaux = 0) ->
     0
   -- Largeur laissée aux claviers, une case par division. Plancher à 1 px :
   -- une fenêtre minuscule ne doit pas produire un poids nul (refusé par
-  -- ui:ligne_ratio).
-  l_jeux = math.max 1, l - 2 * MARGE - (if nb_generaux > 0 then ESPACE else 0) - bande
-  bande = math.max 0, l - 2 * MARGE - (if nb_generaux > 0 then ESPACE else 0) - l_jeux
+  -- ui:ligne_ratio) ; le bandeau cède alors la place.
+  dispo = l - 2 * MARGE - (if nb_generaux > 0 then ESPACE else 0)
+  l_jeux = math.max 1, dispo - bande
+  bande = dispo - l_jeux
   -- Largeur du contenu d'un groupe de clavier, et largeur de la grille de
   -- jeux une fois réservée la colonne du curseur de gain. La colonne garde
   -- sa largeur sensible (44 px) tant que la case du clavier le permet ; dans
