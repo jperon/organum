@@ -79,9 +79,11 @@ qui ne se compile plus est signalé IGNORÉ avec sa raison, jamais compté OK.
 `tests-e2e.sh` pilote Chromium headless par le protocole DevTools (Node,
 sans dépendance nouvelle) sur `/`, `/midi` et `/audio` : clics réels, valeurs
 relues dans l'API, erreurs console, stabilité de `seq` et des `on`, largeurs
-420/1100 px, cibles tactiles et remplissage `--fill` des curseurs. Il pilote
+420/1100 px, cibles tactiles, curseurs verticaux (glissement relatif,
+molette, remplissage `--fill`) et valeurs en % affichées. Il pilote
 aussi la fenêtre native sous Xvfb avec xdotool (console, Audio, MIDI,
-Connexions aux trois tailles ; tempérament et réverbération par clic), puis
+Connexions aux trois tailles ; tempérament, réverbération, volume et gain
+par clic, glissement ou molette), puis
 réintroduit temporairement les régressions `--fill` et `nouveau` local pour
 vérifier que la suite les détecte, avant de restaurer les sources.
 

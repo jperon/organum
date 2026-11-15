@@ -483,20 +483,51 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   dlopen). `cosmo/lnuklear.c` : module Lua `nk` (Nuklear, rendu logiciel
   rawfb, police recuite à la taille voulue). `web/src/fenetre.moon` :
   console d'orgue, lancée par `init.moon` dans un processus fils
-  (`ORGANUM_FENETRE=non` pour s'en passer). Avec un volume système, deux
-  curseurs distincts : « Volume » (système) et « Pédale » (volume du moteur,
-  avec sa valeur en %) ; sans lui, le curseur unique règle déjà le moteur.
+  (`ORGANUM_FENETRE=non` pour s'en passer).
+  **Curseurs verticaux** (même disposition que la page web) : un bandeau à
+  gauche de la console réunit côte à côte les curseurs généraux — « Volume »
+  (système) et « Pédale » (volume du moteur) ; sans volume système, le seul
+  curseur « Volume » règle le moteur. La liste `generaux` accepte un
+  troisième réglage (« Piano ») sans refonte : la largeur du bandeau suit le
+  nombre de curseurs (une colonne par curseur, au moins 44 px et un seizième
+  de la largeur). Chaque clavier garde dans son en-tête le nom et
+  « Annuler » ; son curseur de gain devient une colonne verticale à droite
+  des jeux, de la hauteur du bloc de jeux ; la rangée des accouplements
+  reste en dessous. Chaque curseur affiche son étiquette au-dessus et sa
+  valeur en % en dessous.
+  `ui:curseur_vertical` (`cosmo/lnuklear.c`) dessine le curseur à la main
+  (rail fin, bouton 40 × 24, case sensible sur toute la hauteur) : saisie
+  relative — un appui ne fait pas sauter la valeur, le déplacement vertical
+  ajuste depuis la valeur courante, le haut augmente —, molette ±1 pas,
+  aucun double-clic. Le survol se lit sur l'état de `nk_widget` : dans un
+  groupe, `ctx->current` est une fenêtre factice et `nk_widget_is_hovered`
+  répondrait toujours faux. Un seul glissement à la fois, identifié par la
+  case du widget ; les autres curseurs de la même image ne l'interrompent
+  pas. `ui:espace_debut`/`ui:place`/`ui:espace_fin` placent les jeux et le
+  curseur en pixels (layout space de Nuklear) ; `ui:ligne_ratio` garde un
+  tableau de poids **par profondeur de panneau**, sinon la rangée imbriquée
+  d'un en-tête de clavier écrase les poids de la rangée bandeau + claviers.
+  La géométrie (largeur du bandeau et de la colonne de gain, hauteur de la
+  rangée principale, premier widget d'un groupe) est calculée dans
+  `web/src/fenetre_disposition.moon` (`colonne_curseur`, `p.reste`,
+  `groupe_contenu`, `rangee_y`, `case_centre`, `colonne_ratio`) et reprise
+  par les coordonnées cliquables de `scripts/tests-e2e.sh`. Côté web, mêmes
+  colonnes de 44 px (`writing-mode: vertical-lr; direction: rtl`), pouce
+  40 × 24, `--fill` conservé ; l'input est en `pointer-events: none` et la
+  colonne reçoit la saisie relative (`saisieVerticale` de
+  `web/src/client.moon` : pointer events et molette ; le clavier reste
+  utilisable).
   La réverbération n'est plus sur la console principale : elle est réglée
   dans le panneau « Audio », comme le curseur de la page web.
   Exigence : tout doit tenir dans la fenêtre, sans défilement, et grossir
   quand elle est agrandie. La police visée croît avec la largeur de la
   fenêtre ; parmi 1 à 3 sous-colonnes, on maximise d'abord la police
   jusqu'à cette cible, puis la hauteur des boutons. Les rangées de
-  réglages, combinaisons, nom et gain prennent environ 2,2 × police (36 px
-  si la place le permet) et toute la hauteur restante est répartie entre
-  jeux et accouplements. Un nom de jeu trop large est coupé en deux lignes
-  équilibrées par `ui:choix_deux` (`cosmo/lnuklear.c`) ; sur une ligne, le
-  rendu reste celui de `ui:choix`.
+  réglages, combinaisons, nom et « Annuler » prennent environ 2,2 × police
+  (36 px si la place le permet) et toute la hauteur restante est répartie
+  entre jeux et accouplements. Un nom de jeu trop large est coupé en deux
+  lignes équilibrées par `ui:choix_deux` (`cosmo/lnuklear.c`) ; sur une
+  ligne, le rendu reste celui de `ui:choix`.
   Essai hors moteur : `ui/essai_fenetre.moon` (état factice). X11 : socket
   Unix pour `:n`, TCP (port 6000+n) pour `hôte:n` ; testable sans
   rien ouvrir sur le bureau avec `Xvfb :2 -listen tcp -ac` et `DISPLAY=localhost:2`
