@@ -1160,12 +1160,24 @@ async function testResponsive() {
             verticaux.push({ id: e.id || e.className, w: r.width, h: r.height });
           }
         }
+        const stops = [];
+        if (${JSON.stringify(chemin)} === '/') {
+          for (const e of document.querySelectorAll('.stop')) {
+            if (e.offsetParent === null) continue;
+            const r = e.getBoundingClientRect();
+            // \s doit rester \s dans le code évalué : la chaîne est d'abord
+            // un littéral gabarit JS.
+            stops.push({ texte: e.textContent.trim().replace(/\\s+/g, ' '),
+                         h: r.height, sh: e.scrollHeight, ch: e.clientHeight });
+          }
+        }
         return {
           debord,
           petits,
           petitsTrans,
           curseurs,
           verticaux,
+          stops,
           remplissages: ${JSON.stringify(chemin)} === '/audio'
             ? [remplissage('reverb'), remplissage('qualite-polyphonie')]
             : (${JSON.stringify(chemin)} === '/' ? [remplissage('volume'), remplissage('volume-pedale')] : [])
@@ -1186,6 +1198,19 @@ async function testResponsive() {
         verifie(
           mesure.verticaux.length >= 5 && horizontaux.length === 0,
           `web / à ${largeur} px : curseurs verticaux (${mesure.verticaux.length} curseurs, ${horizontaux.map((c) => c.id).join(', ') || 'tous verticaux'})`
+        );
+        // Le texte de chaque bouton de jeu doit tenir entièrement dans la
+        // case (scrollHeight <= clientHeight + 1) : une grille étirée ou des
+        // colonnes trop étroites coupent les noms sur deux ou trois lignes.
+        const debordStops = mesure.stops.filter((b) => b.sh > b.ch + 1);
+        verifie(
+          mesure.stops.length > 0 && debordStops.length === 0,
+          `web / à ${largeur} px : aucun texte de bouton de jeu ne déborde (${debordStops.map((b) => b.texte + ' ' + b.sh + '>' + b.ch).join(', ') || mesure.stops.length + ' boutons complets'})`
+        );
+        const petitsStops = mesure.stops.filter((b) => b.h < 44);
+        verifie(
+          petitsStops.length === 0,
+          `web / à ${largeur} px : boutons de jeu ≥ 44 px (${petitsStops.map((b) => b.texte + '=' + b.h.toFixed(0)).join(', ') || 'tous'})`
         );
       }
       if (chemin === '/audio') {
