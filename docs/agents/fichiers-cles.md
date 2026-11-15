@@ -577,8 +577,17 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   (système), « Pédale » (volume du moteur) et « Piano » (volume du piano
   échantillonné, présent seulement si le SoundFont est chargé) ; sans volume
   système, le premier curseur « Volume » règle le moteur. La largeur du
-  bandeau suit le nombre de curseurs (une colonne par curseur, au moins
-  44 px et un seizième de la largeur). Chaque clavier garde dans son en-tête
+  bandeau suit le nombre de curseurs, mais chaque colonne est bornée en
+  pixels : 44 px de zone sensible au moins, 52 px au plus (`CURSEUR_MAX` de
+  `fenetre_disposition.moon`), jamais une fraction de la fenêtre (un seizième
+  faisait 64 px par colonne à 1024, soit 20 % de la largeur pour trois
+  réglages). L'étiquette et le pourcentage s'écrivent à une petite police
+  cuite dans le même atlas que celle de l'interface (`ui:police_petite` de
+  `cosmo/lnuklear.c`, 14 px au plus) : ils tiennent dans la colonne même
+  quand le reste grandit (30 px à 1920), comme les 0,72 rem du bandeau web.
+  Le bouton ↺ prend la largeur du bandeau ; son arc est tracé à 2,8 px et sa
+  pointe est plus large, pour rester visible sur un bouton étroit. Chaque
+  clavier garde dans son en-tête
   le nom et « Annuler » ; son curseur de gain devient une colonne verticale à
   droite des jeux, de la hauteur du bloc de jeux ; la rangée des
   accouplements reste en dessous. Chaque curseur affiche son étiquette
@@ -604,8 +613,14 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   40 × 24, `--fill` conservé ; l'input est en `pointer-events: none` et la
   colonne reçoit la saisie relative (`saisieVerticale` de
   `web/src/client.moon` : pointer events et molette ; le clavier reste
-  utilisable). En largeur étroite (≤ 600 px), le bandeau se serre à deux
-  colonnes de 44 px sans marge ni bordure, et la largeur gagnée revient aux
+  utilisable). Le bandeau occupe toute la hauteur visible : hauteur
+  `calc(100dvh - 8px)` avec repli `calc(100vh - 8px)`, `position: sticky` et
+  `top: 4px` ; les curseurs s'étirent (`.curseurs-generaux` en `flex: 1`),
+  le bouton ↺ reste en bas. Au-delà de 900 px, il prend la hauteur de la
+  console (`height: 100%`), la barre « Clavier » restant visible dessous,
+  sans défilement ; à 420 px la page défile et le bandeau reste collé, entier.
+  En largeur étroite (≤ 600 px), les colonnes passent à 44 px
+  sans marge ni bordure, et la largeur gagnée revient aux
   jeux ; en natif, la colonne garde déjà 44 px minimum dès que la largeur
   manque (le cadre du groupe, 10 px, reste la seule marge).
   Les boutons de jeux gardent le texte complet sur deux ou trois lignes :
@@ -618,7 +633,9 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   colonnes de jeux à 1100 px sans dépasser la hauteur de la fenêtre. L'e2e
   web vérifie sur chaque bouton `scrollWidth <= clientWidth + 1` **et**
   `scrollHeight <= clientHeight + 1`, ainsi qu'une hauteur ≥ 44 px, aux
-  largeurs 420 et 1100 px.
+  largeurs 420 et 1100 px ; il contrôle aussi la hauteur du bandeau
+  (≥ 90 % de la vue au grand écran, toute la vue en étroit) et qu'il reste
+  collé et entier après un défilement de 600 px.
   La réverbération n'est plus sur la console principale : elle est réglée
   dans le panneau « Audio », comme le curseur de la page web.
   Exigence : tout doit tenir dans la fenêtre, sans défilement, et grossir
