@@ -987,11 +987,12 @@ MAX_ASSOCIATIONS = 16
     -- seulement si le SoundFont a été chargé (sinon aucun bouton Piano).
     piano = e.piano_disponible == true
     if piano
+      defaut_piano = e.piano_volume_defaut or 0
       table.insert generaux, {
         etiquette: "Piano"
-        valeur: e.piano_volume or 0.5
+        valeur: e.piano_volume or defaut_piano
         regler: (v) ->
-          return unless bouge (e.piano_volume or 0.5), v
+          return unless bouge (e.piano_volume or defaut_piano), v
           organum.piano_volume v
       }
     p = disposer e, l, h, plus_long / police, plus_long_deux / police, cible, #generaux
@@ -1065,6 +1066,11 @@ MAX_ASSOCIATIONS = 16
         ui\ligne p.etiquette_curseur, #generaux
         for i = 1, #generaux
           ui\texte "#{math.floor(valeurs[i] * 100 + 0.5)} %", "centre"
+        -- Remise à zéro des volumes des claviers et du piano, sous les
+        -- curseurs : icône dessinée (la police latine n'a pas ↺), une seule
+        -- commande au moteur, qui ne touche ni au Volume ni à la Pédale.
+        ui\ligne p.bouton_reset, 1
+        organum.gains_defaut! if ui\bouton_reinit!
         ui\groupe_fin!
       for d, div in ipairs e.divisions
         if ui\groupe_debut "clavier #{d}"

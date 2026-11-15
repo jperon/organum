@@ -68,6 +68,7 @@ local function scenario(plan, nframes, options)
   function ui:ligne_ratio(n, ratios) self.lignes = self.lignes + (n or 0) end
   function ui:texte(t) self.textes[#self.textes + 1] = tostring(t) end
   function ui:bouton(libelle) return clic(libelle) end
+  function ui:bouton_reinit() return clic("↺") end
   function ui:choix(libelle, actif)
     if clic(libelle) then return not actif end
     return actif
@@ -114,6 +115,7 @@ local function scenario(plan, nframes, options)
   o.gain = function(d, v) noter("gain"); e.divisions[d].gain = v end
   o.piano = function(d, v) noter("piano"); e.divisions[d].piano = v end
   o.piano_volume = function(v) noter("piano_volume"); e.piano_volume = v end
+  o.gains_defaut = function() noter("gains_defaut") end
   o.volume = function(v) noter("volume"); e.volume = v end
   o.reverb = function(v) noter("reverb"); e.reverb = v end
   o.qualite = function(k, v) noter("qualite"); e.qualite[k] = v end
@@ -224,6 +226,14 @@ cmd = scenario({}, 6, {piano = true, bouger_frame = 3, bouger = "piano"})
 aide.egal(#cmd, 1, "piano : un mouvement du curseur, une commande")
 aide.egal(cmd[1] and cmd[1].nom, "piano_volume",
   "piano : la commande est le volume du piano")
+
+-- Remise à zéro des volumes : une seule commande, à l'image du clic, sans
+-- toucher au volume du bandeau (le serveur ne change ni Volume ni Pédale).
+cmd = scenario({[5] = {"↺"}}, 7)
+aide.egal(#cmd, 1, "volumes : un clic sur la remise à zéro, une commande")
+aide.egal(cmd[1] and cmd[1].nom, "gains_defaut",
+  "volumes : la commande est la remise à zéro des gains")
+aide.egal(cmd[1] and cmd[1].frame, 5, "volumes : commande à l'image du clic")
 
 -- MIDI : navigation puis plusieurs images sans clic n'émettent rien.
 cmd = scenario({[1] = {"MIDI"}}, 7, {midi = true})

@@ -618,6 +618,13 @@ if mode == "console" then
   end
   print("general_h=" .. arrondi(p.bande_curseur))
   print("bandeau_x=" .. arrondi(d.MARGE + p.bande / 2))
+  -- Bouton de remise à zéro des volumes : rangée pleine largeur sous la
+  -- valeur des curseurs (étiquette, curseur, valeur, bouton).
+  local reset_y = contenu_y + 2 * p.etiquette_curseur + p.bande_curseur +
+    3 * d.ESPACE + p.bouton_reset / 2
+  print("reset_x=" .. arrondi(bande_contenu_x + bande_largeur / 2))
+  print("reset_y=" .. arrondi(reset_y))
+  print("reset_h=" .. arrondi(p.bouton_reset))
   -- Un clavier : COL (0 à ndiv-1). En-tête (nom et Annuler), bloc de jeux
   -- avec le curseur de gain à droite, puis accouplements ou transposition.
   local col = tonumber(os.getenv("COL") or "0")
@@ -947,10 +954,10 @@ PY
   # Piano échantillonné : bouton de chaque clavier (dernier de la rangée
   # basse) et curseur du bandeau. Les cibles viennent de fenetre_disposition
   # par le même calcul que la fenêtre ; l'état est relu dans /api/orgue.
+  DERNIERE=$((NDIV - 1))
   if [ "$PIANO" = 1 ]; then
     # 1. Dernier clavier (le pédalier) : ses accouplements puis Piano,
     # dernière case de la rangée.
-    DERNIERE=$((NDIV - 1))
     ecrire_json_api "{\"piano\":{\"division\":$DERNIERE,\"actif\":false}}"
     if ! attendre_valeur "e[\"divisions\"][$DERNIERE][\"piano\"]" 0 0 50; then
       echec "natif : le piano du pédalier ne se remet pas à l'arrêt"
@@ -1031,6 +1038,71 @@ PY
   else
     ignore "natif : piano indisponible (SoundFont non chargé), contrôles Piano sautés"
   fi
+
+  # Remise à zéro des volumes : deux gains et le piano déréglés, Volume
+  # système et Pédale à des valeurs non par défaut. Un clic réel sur le
+  # bouton ↺ du bandeau (icône dessinée, sous les curseurs) doit remettre
+  # gains et piano aux défauts publiés par le moteur, sans toucher aux deux
+  # autres réglages.
+  eval "$(NDIV=$NDIV MAXJEUX=$MAXJEUX LIENS=$LIENS COL=0 PIANO=$PIANO NLIENS=0 GENERAUX=$NGENERAUX coords console 1920 1080 "$R1" "$R2")"
+  DEFAUT_GAIN=$(lire_api | python3 -c 'import json,sys; print(json.load(sys.stdin).get("gain_defaut"))')
+  DEFAUT_PIANO=$(lire_api | python3 -c 'import json,sys; print(json.load(sys.stdin).get("piano_volume_defaut"))')
+  ecrire_json_api '{"gain":{"division":0,"value":0.3}}'
+  attendre_valeur 'e["divisions"][0]["gain"]' 0.3 0.02 50
+  ecrire_json_api "{\"gain\":{\"division\":$DERNIERE,\"value\":0.7}}"
+  attendre_valeur "e[\"divisions\"][$DERNIERE][\"gain\"]" 0.7 0.02 50
+  ecrire_json_api '{"volume":0.7}'
+  attendre_valeur 'e["volume"]' 0.7 0.02 50
+  if [ "$PIANO" = 1 ]; then
+    ecrire_json_api '{"piano_volume":0.3}'
+    attendre_valeur 'e["piano_volume"]' 0.3 0.02 50
+  fi
+  curl -s -X POST -H 'Content-Type: application/json' \
+    -d '{"volume":70,"muted":false}' "$URL/api/volume" >/dev/null
+  for _ in $(seq 1 30); do
+    VS=$(curl -s "$URL/api/volume" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("volume"))' 2>/dev/null)
+    [ "${VS%.*}" = 70 ] && break
+    sleep 0.1
+  done
+  capturer "reset-avant"
+  H_RESET_AVANT=$(md5sum "$CAPTURES/reset-avant.png" | cut -d' ' -f1)
+  clic_xy "$reset_x" "$reset_y"
+  if attendre_valeur 'e["divisions"][0]["gain"]' "$DEFAUT_GAIN" 0.02 60 &&
+     attendre_valeur "e[\"divisions\"][$DERNIERE][\"gain\"]" "$DEFAUT_GAIN" 0.02 60; then
+    ok "natif : clic sur la remise à zéro, deux gains aux défauts"
+  else
+    echec "natif : la remise à zéro ne ramène pas les gains aux défauts ($(lire_api | head -c 240))"
+  fi
+  if [ "$PIANO" = 1 ]; then
+    if attendre_valeur 'e["piano_volume"]' "$DEFAUT_PIANO" 0.02 60; then
+      ok "natif : volume du piano remis au défaut par le même clic"
+    else
+      echec "natif : le volume du piano n'est pas revenu au défaut"
+    fi
+  fi
+  if attendre_valeur 'e["volume"]' 0.7 0.02 30; then
+    ok "natif : Pédale inchangée par la remise à zéro"
+  else
+    echec "natif : la remise à zéro a modifié la Pédale ($(lire_api | head -c 160))"
+  fi
+  VS=$(curl -s "$URL/api/volume" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("volume"))' 2>/dev/null)
+  if [ "${VS%.*}" = 70 ]; then
+    ok "natif : Volume système inchangé par la remise à zéro"
+  else
+    echec "natif : la remise à zéro a modifié le Volume système ($VS)"
+  fi
+  capturer "reset-apres"
+  H_RESET_APRES=$(md5sum "$CAPTURES/reset-apres.png" | cut -d' ' -f1)
+  if [ "$H_RESET_AVANT" = "$H_RESET_APRES" ]; then
+    echec "natif : les curseurs ne changent pas à l'affichage après la remise à zéro"
+  else
+    ok "natif : curseurs affichés à jour après la remise à zéro (capture changée)"
+  fi
+  # Remise en ordre pour la suite.
+  curl -s -X POST -H 'Content-Type: application/json' \
+    -d '{"volume":50,"muted":false}' "$URL/api/volume" >/dev/null
+  ecrire_json_api '{"volume":0.5}'
+  attendre_valeur 'e["volume"]' 0.5 0.02 50
 
   clic_xy "$audio_x" "$audio_y"
   read -r QROWS QCOLS QPER <<<"$(parametres_qualite)"

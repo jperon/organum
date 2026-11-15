@@ -96,6 +96,14 @@ organum.reverb = (v) ->
   etat.reverb = v
   print "reverb v=#{v}"
   bump!
+-- Remise à zéro des volumes (bouton ↺ du bandeau) : même défaut que le
+-- moteur, sur l'état factice.
+organum.gains_defaut = ->
+  for div in *etat.divisions
+    div.gain = 0.5
+  etat.piano_volume = 0.5
+  print "gains par défaut"
+  bump!
 organum.panique = ->
   print "panique"
   bump!

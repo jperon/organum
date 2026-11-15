@@ -684,6 +684,86 @@ async function testAccueil() {
     verifie(!!pianoVenu, 'web / : curseur Piano mis à jour par l’attente longue');
     await poster('/api/orgue', { piano_volume: 0.5 });
   }
+
+  // Remise à zéro des volumes des claviers et du piano : bouton à icône
+  // seule sous les curseurs. On dérègle deux gains, le piano et la Pédale,
+  // on met aussi le Volume système ailleurs, puis un clic réel doit ramener
+  // les gains et le piano aux défauts publiés par le moteur, sans toucher au
+  // Volume ni à la Pédale. Les curseurs affichés suivent (attente longue).
+  const boutonReset = await evaluer(`(() => {
+    const b = document.getElementById('reinitialiser-volumes');
+    if (!b) return null;
+    const r = b.getBoundingClientRect();
+    return { texte: b.textContent.trim(), label: b.getAttribute('aria-label'),
+             title: b.getAttribute('title'), w: r.width, h: r.height };
+  })()`);
+  verifie(boutonReset && boutonReset.texte === '\u21ba',
+    `web / : bouton de remise à zéro à icône seule (${boutonReset && boutonReset.texte})`);
+  verifie(boutonReset && boutonReset.label === 'Volumes des claviers et du piano par défaut',
+    `web / : libellé accessible du bouton de remise à zéro (${boutonReset && boutonReset.label})`);
+  verifie(boutonReset && boutonReset.title === 'Volumes des claviers et du piano par défaut',
+    `web / : infobulle du bouton de remise à zéro (${boutonReset && boutonReset.title})`);
+  verifie(boutonReset && boutonReset.h >= 44 && boutonReset.w >= 44,
+    `web / : cible tactile du bouton de remise à zéro (${boutonReset ? `${boutonReset.w.toFixed(0)}x${boutonReset.h.toFixed(0)}` : 'absent'})`);
+
+  const etatDefauts = await api('/api/orgue');
+  const gainDefaut = etatDefauts.gain_defaut;
+  const pianoDefaut = etatDefauts.piano_volume_defaut;
+  verifie(typeof gainDefaut === 'number' && typeof pianoDefaut === 'number',
+    `web / : défauts publiés par le moteur (gain ${gainDefaut}, piano ${pianoDefaut})`);
+  const dr0 = 0, dr1 = Math.min(ndiv - 1, 1);
+  await poster('/api/orgue', { gain: { division: dr0, value: 0.3 } });
+  await poster('/api/orgue', { gain: { division: dr1, value: 0.7 } });
+  await poster('/api/orgue', { volume: 0.7 });
+  await poster('/api/volume', { volume: 70, muted: false });
+  if (pianoDisponible) { await poster('/api/orgue', { piano_volume: 0.3 }); }
+  const derange = await attendre(
+    async () => {
+      const e = await api('/api/orgue');
+      const v = await api('/api/volume');
+      const ok = Math.abs(e.divisions[dr0].gain - 0.3) < 0.03 &&
+        Math.abs(e.divisions[dr1].gain - 0.7) < 0.03 &&
+        Math.abs(e.volume - 0.7) < 0.03 && Math.abs(v.volume - 70) < 1 &&
+        (!pianoDisponible || Math.abs(e.piano_volume - 0.3) < 0.03);
+      return ok ? { e, v } : null;
+    },
+    'web / : gains, piano, Pédale et Volume déréglés avant le clic'
+  );
+  verifie(!!derange, 'web / : état déréglé relu avant le clic');
+  await clic('document.getElementById("reinitialiser-volumes")');
+  const remis = await attendre(
+    async () => {
+      const e = await api('/api/orgue');
+      const v = await api('/api/volume');
+      const gainsOk = e.divisions.every((d) => Math.abs(d.gain - gainDefaut) < 0.03);
+      const pianoOk = !pianoDisponible || Math.abs(e.piano_volume - pianoDefaut) < 0.03;
+      const volumeInchange = Math.abs(e.volume - 0.7) < 0.03;
+      const systemeInchange = Math.abs(v.volume - 70) < 1;
+      if (!(gainsOk && pianoOk && volumeInchange && systemeInchange)) return null;
+      const affiches = await evaluer(`(() => {
+        const gains = Array.from(document.querySelectorAll('input.gain'))
+          .map((g) => Number(g.value));
+        const piano = document.getElementById('piano-volume');
+        return { gains, piano: piano ? Number(piano.value) : null,
+                 pedale: Number(document.getElementById('volume-pedale').value),
+                 systeme: Number(document.getElementById('volume').value) };
+      })()`);
+      const gainsAffiches = affiches.gains.every((v) => Math.abs(v - gainDefaut * 100) <= 1);
+      const pianoAffiche = !pianoDisponible ||
+        Math.abs(affiches.piano - pianoDefaut * 100) <= 1;
+      const pedaleAffichee = Math.abs(affiches.pedale - 70) <= 2;
+      const systemeAffiche = Math.abs(affiches.systeme - 70) <= 1;
+      return (gainsAffiches && pianoAffiche && pedaleAffichee && systemeAffiche) ? e : null;
+    },
+    'web / : clic sur la remise à zéro, gains et piano aux défauts, Volume et Pédale inchangés',
+    15000
+  );
+  verifie(!!remis, 'web / : remise à zéro appliquée et curseurs affichés à jour');
+  // Remise en ordre pour la suite.
+  await poster('/api/volume', { volume: 50, muted: false });
+  await poster('/api/orgue', { volume: 0.5 });
+  await attendre(async () => Math.abs((await api('/api/orgue')).volume - 0.5) < 0.02,
+    'web / : Pédale remise à 50 après le test de remise à zéro');
 }
 
 async function testClavier() {
@@ -1303,6 +1383,14 @@ async function testResponsive() {
                          sw: e.scrollWidth, cw: e.clientWidth });
           }
         }
+        const reset = [];
+        if (${JSON.stringify(chemin)} === '/') {
+          const b = document.getElementById('reinitialiser-volumes');
+          if (b) {
+            const r = b.getBoundingClientRect();
+            reset.push({ w: r.width, h: r.height, texte: b.textContent.trim() });
+          }
+        }
         const pianos = [];
         if (${JSON.stringify(chemin)} === '/') {
           for (const e of document.querySelectorAll('.piano-bouton')) {
@@ -1321,6 +1409,7 @@ async function testResponsive() {
           verticaux,
           stops,
           pianos,
+          reset,
           remplissages: ${JSON.stringify(chemin)} === '/audio'
             ? [remplissage('reverb'), remplissage('qualite-polyphonie')]
             : (${JSON.stringify(chemin)} === '/'
@@ -1372,6 +1461,13 @@ async function testResponsive() {
         verifie(
           petitsPianos.length === 0,
           `web / à ${largeur} px : boutons Piano ≥ 44 px (${petitsPianos.map((b) => b.texte + '=' + b.h.toFixed(0)).join(', ') || 'tous'})`
+        );
+        // Bouton de remise à zéro : icône seule, cible tactile, dans le
+        // bandeau (donc dans la fenêtre avec le reste).
+        const reset = mesure.reset[0];
+        verifie(
+          reset && reset.h >= 44 && reset.w >= 44 && reset.texte === '↺',
+          `web / à ${largeur} px : bouton de remise à zéro ≥ 44 px et à icône seule (${reset ? `${reset.w.toFixed(0)}x${reset.h.toFixed(0)} « ${reset.texte} »` : 'absent'})`
         );
       }
       if (chemin === '/audio') {

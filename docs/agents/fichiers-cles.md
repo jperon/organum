@@ -462,6 +462,26 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   contrôles e2e web et natifs (`scripts/tests-e2e.sh`) : clic réel sur le
   bouton du pédalier et sur celui du clavier à transposition, glissement et
   molette du curseur Piano, état relu dans `/api/orgue`.
+- Volumes par défaut et remise à zéro (web et natif) : les valeurs vivent une
+  seule fois dans le moteur — `AEOLUS_GAIN_DEFAUT` (`moteur/api/aeolus_c.h`,
+  appliqué par `aeolus_creer`) et `PIANO_VOLUME_DEFAUT`
+  (`cosmo/piano/piano.h`, appliqué à `g_piano_volume`) — et sont publiées par
+  `organum.etat()` (`gain_defaut`, `piano_volume_defaut`) donc par
+  `GET /api/orgue`. `POST /api/orgue {"reinitialiser_gains": true}`
+  (validation dans `web/src/validation.moon`) envoie la commande
+  `CMD_GAINS_DEFAUT` : le fil audio remet tous les gains de division et le
+  volume du piano d'un coup, sans toucher au Volume système ni à la Pédale
+  (clé `volume`). Le heartbeat persiste le nouvel état comme les autres
+  réglages. Interface : icône seule ↺ sous les curseurs du bandeau de gauche
+  (`#reinitialiser-volumes`, `aria-label` et `title` « Volumes des claviers
+  et du piano par défaut », cible ≥ 44 px) ; côté natif
+  `ui:bouton_reinit` (`cosmo/lnuklear.c`) dessine l'arc et la pointe avec les
+  primitives Nuklear (la police latine embarquée n'a pas U+21BA), et la
+  hauteur réservée vient de `fenetre_disposition.disposer`
+  (`p.bouton_reset`). Tests : `validation_test.lua`, `pages.lua`,
+  `fenetre_boucle.lua`, `fenetre_disposition.lua`, e2e web et natif (deux
+  gains et le piano déréglés, Volume et Pédale à d'autres valeurs, clic
+  réel, relecture de `/api/orgue` et des curseurs affichés).
 - Authentification facultative HTTP Digest SHA-256 (RFC 7616, `qop=auth`,
   royaume `organum`) : désactivée sans mot de passe ; ne sert qu'à vérifier
   les droits, sans chiffrement. Règles pures dans

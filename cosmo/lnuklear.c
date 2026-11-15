@@ -18,6 +18,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -313,6 +314,60 @@ static int ui_bouton(lua_State *L) {
 
   while (couleurs--) nk_style_pop_color(u->ctx);
   while (items--) nk_style_pop_style_item(u->ctx);
+  return 1;
+}
+
+// ui:bouton_reinit() → clic.
+//
+// Bouton normal du style courant, sans texte : une flèche circulaire ↺ est
+// dessinée au centre (arc ouvert en haut + pointe). La police latine
+// embarquée (kGlyphes) n'a pas le glyphe U+21BA, d'où le dessin ; l'aspect
+// reprend celui du bouton web (même icône, mêmes états survol/pressé).
+static int ui_bouton_reinit(lua_State *L) {
+  ui_t *u = luaL_checkudata(L, 1, "nk.ui");
+  struct nk_context *ctx = u->ctx;
+  struct nk_rect b = nk_widget_bounds(ctx);
+  // Un espace (et non une chaîne vide) pour que Nuklear dessine le fond et
+  // suive les états du bouton, sans texte visible.
+  int clique = nk_button_label(ctx, " ");
+  if (!ctx->current || !ctx->current->layout) {
+    lua_pushboolean(L, clique);
+    return 1;
+  }
+  struct nk_input *in = &ctx->input;
+  int survole = nk_input_is_mouse_hovering_rect(in, b) != 0;
+  int presse = survole && in->mouse.buttons[NK_BUTTON_LEFT].down;
+  struct nk_style_button *btn = &ctx->style.button;
+  struct nk_color col = btn->text_normal;
+  if (survole) col = btn->text_hover;
+  if (presse) col = btn->text_active;
+
+  float cx = b.x + b.w * 0.5f, cy = b.y + b.h * 0.5f;
+  float r = (b.w < b.h ? b.w : b.h) * 0.26f;
+  if (r < 6.0f) r = 6.0f;
+  // Arc ouvert en haut : de 240° à -50° en tournant dans le sens inverse des
+  // aiguilles d'une montre (l'axe y descend, donc l'angle diminue). La pointe
+  // termine en haut à droite et regarde vers la gauche, comme le ↺ du web.
+  enum { SEGMENTS = 24 };
+  float points[(SEGMENTS + 1) * 2];
+  float a0 = 240.0f * NK_PI / 180.0f, a1 = -50.0f * NK_PI / 180.0f;
+  for (int i = 0; i <= SEGMENTS; ++i) {
+    float a = a0 + (a1 - a0) * (float)i / (float)SEGMENTS;
+    points[i * 2] = cx + r * cosf(a);
+    points[i * 2 + 1] = cy + r * sinf(a);
+  }
+  struct nk_command_buffer *out = &ctx->current->buffer;
+  nk_stroke_polyline(out, points, SEGMENTS + 1, 2.0f, col);
+
+  // Pointe de flèche : triangle plein posé à l'extrémité de l'arc, dirigé
+  // vers la gauche (le sens de rotation), avec une base presque verticale.
+  float px = cx + r * cosf(a1), py = cy + r * sinf(a1);
+  float h = r * 0.58f;
+  nk_fill_triangle(out, px - h, py,
+                   px + h * 0.18f, py - h * 0.72f,
+                   px + h * 0.18f, py + h * 0.72f, col);
+
+  lua_pushboolean(L, clique);
   return 1;
 }
 
@@ -618,6 +673,7 @@ static const struct luaL_Reg uifuncs[] = {
   {"ligne_ratio", ui_ligne_ratio},
   {"texte", ui_texte},
   {"bouton", ui_bouton},
+  {"bouton_reinit", ui_bouton_reinit},
   {"choix", ui_choix},
   {"choix_deux", ui_choix_deux},
   {"etat", ui_etat},

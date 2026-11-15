@@ -133,10 +133,14 @@ for _, nb_generaux in ipairs({1, 2, 3}) do
         "disposer : hauteur d'étiquette positive " .. nom)
       aide.verifie(p.bande_curseur >= d.BOUTON_HAUTEUR,
         "disposer : curseur du bandeau au moins de la hauteur du bouton " .. nom, p.bande_curseur)
+      aide.verifie(p.bouton_reset >= d.BOUTON_HAUTEUR,
+        "disposer : bouton de remise à zéro au moins la hauteur du bouton " .. nom, p.bouton_reset)
       local contenu_bande = p.reste - d.CADRE_GROUPE - d.ESPACE
-      aide.verifie(2 * p.etiquette_curseur + p.bande_curseur + 2 * d.ESPACE <= contenu_bande + 1e-6,
-        "disposer : bandeau dans sa case " .. nom,
-        (2 * p.etiquette_curseur + p.bande_curseur + 2 * d.ESPACE) .. " > " .. contenu_bande)
+      aide.verifie(2 * p.etiquette_curseur + p.bande_curseur + p.bouton_reset +
+        3 * d.ESPACE <= contenu_bande + 1e-6,
+        "disposer : bandeau (curseurs et bouton) dans sa case " .. nom,
+        (2 * p.etiquette_curseur + p.bande_curseur + p.bouton_reset + 3 * d.ESPACE) ..
+          " > " .. contenu_bande)
     end
   end
 end
@@ -217,6 +221,8 @@ local petit = d.disposer(etat(4, 15, true), 800, 480, 9.36, 4.74, 13, 3)
 aide.egal(petit.sous, 2, "disposer : 800x480, trois curseurs et quatre claviers, deux sous-colonnes")
 aide.verifie(petit.jeu >= 2 * petit.police + 6,
   "disposer : 800x480, trois curseurs, rangées lisibles", petit.jeu)
+aide.verifie(petit.bouton_reset >= 44,
+  "disposer : 800x480, bouton de remise à zéro de 44 px", petit.bouton_reset)
 
 -- Sans curseur général, la console retrouve toute la largeur.
 local sans = d.disposer(etat(4, 12, false), 1024, 640, 30, 15, 16, 0)

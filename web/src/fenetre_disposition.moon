@@ -16,6 +16,9 @@ CADRE_GROUPE = 10
 -- Curseur vertical : zone sensible de 44 px de large sur toute la hauteur,
 -- bouton de 40 × 24 px (voir ui:curseur_vertical dans cosmo/lnuklear.c).
 CURSEUR_LARGEUR, BOUTON_LARGEUR, BOUTON_HAUTEUR = 44, 40, 24
+-- Bouton de remise à zéro des volumes, sous les curseurs du bandeau : cible
+-- tactile de 44 px de haut, pleine largeur du bandeau.
+BOUTON_RESET = 44
 -- Rapport hauteur de ligne / taille de police, et bornes de la police.
 LIGNE_POLICE, POLICE_MIN, POLICE_MAX = 1.25, 10, 64
 -- Identique à MAX_ASSOCIATIONS de cosmo/lorganum.c (#define, 16) : au-delà,
@@ -201,10 +204,17 @@ disposer = (e, l, h, rapport, rapport_deux, cible, nb_generaux = 0) ->
   p.reste = h - 2 * MARGE - p.haut * (p.entete + ESPACE) - ESPACE
   -- Hauteur d'une ligne d'étiquette ou de valeur d'un curseur vertical, et
   -- hauteur du curseur du bandeau (celui des claviers occupe tout le bloc).
+  -- Le bouton de remise à zéro occupe une rangée de plus, sous la valeur.
   etiquette = math.min p.entete, math.max(p.police + 2, 14)
   p.etiquette_curseur = etiquette
+  -- Le bouton de remise à zéro vise 44 px ; dans une fenêtre si basse que
+  -- même le curseur minimal ne tiendrait pas, il se réduit (le plancher est
+  -- la hauteur du bouton de curseur), plutôt que de déborder du groupe.
+  p.bouton_reset = math.max BOUTON_HAUTEUR,
+    math.min BOUTON_RESET,
+      p.reste - CADRE_GROUPE - 3 * ESPACE - 2 * (etiquette + ESPACE) - BOUTON_HAUTEUR
   p.bande_curseur = math.max BOUTON_HAUTEUR,
-    p.reste - CADRE_GROUPE - 2 * ESPACE - 2 * (etiquette + ESPACE)
+    p.reste - CADRE_GROUPE - 3 * ESPACE - 2 * (etiquette + ESPACE) - p.bouton_reset
   p
 
 -- Disposition du panneau MIDI : en-tête sur deux lignes (navigation, puis
@@ -344,6 +354,7 @@ texte_calibration = (c) ->
 {
   :ESPACE, :MARGE, :MARGE_GROUPE
   :CADRE_GROUPE, :CURSEUR_LARGEUR, :BOUTON_LARGEUR, :BOUTON_HAUTEUR
+  :BOUTON_RESET
   :LIGNE_POLICE, :POLICE_MIN, :POLICE_MAX
   :bouge, :decoupe
   :largeur_case, :case_x, :case_centre, :rangee_y, :groupe_contenu, :colonne_ratio
