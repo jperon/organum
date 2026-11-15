@@ -338,7 +338,9 @@ CSS = [[
 
   .divisions {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+    /* 380 px : un clavier assez large pour trois colonnes de jeux (voir
+       .stops-grid), c'est-à-dire de quoi afficher le plus long nom de jeu. */
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr));
     gap: 12px;
     align-items: start;
   }
@@ -700,10 +702,12 @@ CSS = [[
   .division-nom { padding: 0 2px; font-size: 0.85rem; }
   .stops-grid {
     gap: 3px;
-    /* 78 px : assez pour « Open Diapason » sur une ligne, donc deux lignes au
-       plus pour un nom de jeu ; la colonne du curseur de gain a déjà pris sa
-       part de la largeur du clavier. */
-    grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+    /* 112 px : de quoi loger le mot le plus long de l'orgue par défaut dans
+       la police des boutons (0,85 rem), « Sesquialtera » ≈ 97 px, plus les
+       marges et la bordure (10 px) et une marge de sécurité. Un mot n'est
+       jamais coupé au bord : la grille prend le nombre de colonnes qui tient
+       dans la largeur réelle. */
+    grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
     /* Les rangées gardent leur hauteur naturelle : une colonne voisine plus
        haute (le curseur de gain) ne doit pas les étirer. */
     align-content: start;
