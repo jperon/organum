@@ -7,7 +7,13 @@ cd "$(dirname "$0")"
 # redirigent strtol vers __isoc23_strtol@GLIBC_2.38, que les .symver de
 # versions-glibc.h ne couvrent pas et qui rendrait l'aide inutilisable sur
 # une glibc plus ancienne. Le C11 garde les noms historiques des symboles.
-cc -std=gnu11 -O2 -pie -fPIC -nostartfiles -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -include versions-glibc.h \
+#
+# -Wp,-U/-Wp,-D : certaines distributions (NixOS) activent _FORTIFY_SOURCE=3
+# après les options de l'appelant ; fprintf devient alors __fprintf_chk,
+# versionné GLIBC_2.3.4, que le garde-fou refuse. La forme -Wp passe l'option
+# directement au préprocesseur, donc après la dernière définition imposée.
+cc -std=gnu11 -O2 -pie -fPIC -nostartfiles -fno-stack-protector \
+  -Wp,-U_FORTIFY_SOURCE -Wp,-D_FORTIFY_SOURCE=0 -include versions-glibc.h \
   dlopen-helper.c -o dlopen-helper-glibc-x86_64 -Wl,-z,execstack -ldl
 strip dlopen-helper-glibc-x86_64
 # Garde-fou : aucune version de glibc postérieure à 2.2.5.
