@@ -406,24 +406,26 @@ async function testAccueil() {
   await attendre(async () => (await api('/api/volume')).volume === 50,
     'web / : volume système remis à 50 avant le glissement');
   await glisserVertical('document.querySelector(".curseur-general")', -0.2);
-  await attendre(
+  const glisseVolume = await attendre(
     async () => {
       const etat = await api('/api/volume');
-      return etat.volume >= 24 && etat.volume <= 36;
+      return etat.volume >= 24 && etat.volume <= 36 ? etat.volume : null;
     },
     'web / : curseur de volume système, glissement de −20 % (≈ 30 %)'
   );
+  verifie(!!glisseVolume, `web / : curseur de volume système glissé, valeur relue (${glisseVolume || '?'} %)`);
   await poster('/api/orgue', { volume: 0.5 });
   await attendre(async () => Math.abs((await api('/api/orgue')).volume - 0.5) < 0.02,
     'web / : pédale remise à 50 avant le glissement');
   await glisserVertical('document.querySelector(".pedale-general")', 0.2);
-  await attendre(
+  const glissePedale = await attendre(
     async () => {
       const etat = await api('/api/orgue');
-      return etat.volume >= 0.64 && etat.volume <= 0.76;
+      return etat.volume >= 0.64 && etat.volume <= 0.76 ? Math.round(etat.volume * 100) : null;
     },
     'web / : curseur de pédale, glissement de +20 % (≈ 70 %)'
   );
+  verifie(!!glissePedale, `web / : curseur de pédale glissé, valeur relue (${glissePedale || '?'} %)`);
   // Un appui simple, sans déplacement, ne doit pas faire sauter la valeur.
   const avantAppui = (await api('/api/orgue')).volume;
   await clic('document.querySelector(".pedale-general")', 0.5, 0.15);
@@ -437,10 +439,11 @@ async function testAccueil() {
   await attendre(async () => Math.abs((await api('/api/orgue')).volume - 0.5) < 0.02,
     'web / : pédale remise à 50 avant la molette');
   await molette('document.querySelector(".pedale-general")', 1);
-  await attendre(async () => {
+  const roue = await attendre(async () => {
     const v = (await api('/api/orgue')).volume;
-    return v >= 0.5 && v <= 0.52;
+    return v >= 0.5 && v <= 0.52 ? Math.round(v * 100) : null;
   }, 'web / : molette d’un cran sur la pédale (+1 %)');
+  verifie(!!roue, `web / : molette d’un cran sur la pédale (${roue || '?'} %)`);
 
   // Curseur de gain d'un clavier : vertical, à droite des jeux, même saisie
   // relative ; la valeur est relue dans l'API.
@@ -448,13 +451,15 @@ async function testAccueil() {
   await attendre(async () => Math.abs((await api('/api/orgue')).divisions[0].gain - 0.5) < 0.02,
     'web / : gain de la première division remis à 50 avant le glissement');
   await glisserVertical('document.querySelectorAll(".gain-colonne")[0]', -0.2);
-  await attendre(
+  const glisseGain = await attendre(
     async () => {
       const etat = await api('/api/orgue');
-      return etat.divisions[0].gain >= 0.24 && etat.divisions[0].gain <= 0.36;
+      return etat.divisions[0].gain >= 0.24 && etat.divisions[0].gain <= 0.36
+        ? Math.round(etat.divisions[0].gain * 100) : null;
     },
     'web / : curseur de gain d’un clavier, glissement de −20 % (≈ 30 %)'
   );
+  verifie(!!glisseGain, `web / : curseur de gain d’un clavier glissé, valeur relue (${glisseGain || '?'} %)`);
   const valeurGain = await evaluer(`(() => {
     const colonne = document.querySelectorAll('.gain-colonne')[0];
     return colonne ? colonne.querySelector('.gain-valeur').textContent.trim() : '';
