@@ -92,10 +92,10 @@ local configs = {
   {4, 12, false}, {3, 8, true},
 }
 
--- Le bandeau des curseurs généraux réserve une colonne de 44 px par réglage :
--- la largeur des jeux doit en tenir compte, et le total rester dans la
--- fenêtre. un/deux/trois couvrent « Volume » seule, puis « Volume » et
--- « Pédale », puis un futur troisième curseur.
+-- Le bandeau des curseurs généraux réserve une colonne par réglage (44 px de
+-- zone sensible, 52 px au plus) : la largeur des jeux doit en tenir compte, et
+-- le total rester dans la fenêtre. un/deux/trois couvrent « Volume » seule,
+-- puis « Volume » et « Pédale », puis un troisième curseur (« Piano »).
 for _, nb_generaux in ipairs({1, 2, 3}) do
   for _, cfg in ipairs(configs) do
     local nbdiv, njeux, liens = cfg[1], cfg[2], cfg[3]
@@ -106,7 +106,7 @@ for _, nb_generaux in ipairs({1, 2, 3}) do
       local cible = math.min(d.POLICE_MAX, math.max(13, math.floor(l / 64)))
       local p = d.disposer(e, l, h, 30, 15, cible, nb_generaux)
       aide.egal(p.nb_generaux, nb_generaux, "disposer : nombre de curseurs généraux " .. nom)
-      local colonne = math.max(d.CURSEUR_LARGEUR, l / 16)
+      local colonne = math.min(d.CURSEUR_MAX, math.max(d.CURSEUR_LARGEUR, l / 16))
       aide.egal(p.colonne_curseur, colonne, "disposer : largeur d'une colonne de curseur " .. nom)
       aide.egal(p.bande, nb_generaux * colonne + (nb_generaux - 1) * d.ESPACE + d.CADRE_GROUPE,
         "disposer : largeur du bandeau " .. nom)
@@ -118,14 +118,18 @@ for _, nb_generaux in ipairs({1, 2, 3}) do
         "disposer : largeur du contenu d'un clavier " .. nom)
       aide.egal(p.largeur_jeux, math.max(1, p.largeur_colonne - d.ESPACE - p.curseur_largeur),
         "disposer : largeur de la grille de jeux " .. nom)
-      aide.verifie(p.curseur_largeur > 0 and p.curseur_largeur <= colonne,
+      local colonne_gain = math.max(d.CURSEUR_LARGEUR, l / 16)
+      aide.egal(p.colonne_gain, colonne_gain, "disposer : largeur d'une colonne de gain " .. nom)
+      aide.verifie(p.curseur_largeur > 0 and p.curseur_largeur <= colonne_gain,
         "disposer : largeur du curseur de gain " .. nom, p.curseur_largeur)
-      if p.largeur_colonne >= colonne + d.ESPACE + 24 then
-        aide.egal(p.curseur_largeur, colonne,
+      if p.largeur_colonne >= colonne_gain + d.ESPACE + 24 then
+        aide.egal(p.curseur_largeur, colonne_gain,
           "disposer : curseur de gain assez large quand la place le permet " .. nom)
       end
       aide.verifie(p.colonne_curseur >= d.CURSEUR_LARGEUR,
         "disposer : colonne de curseur au moins sensible " .. nom, p.colonne_curseur)
+      aide.verifie(p.colonne_curseur <= d.CURSEUR_MAX,
+        "disposer : colonne de curseur bornée " .. nom, p.colonne_curseur)
       aide.verifie(p.case * p.sous + d.ESPACE * (p.sous - 1) <= p.largeur_jeux + 1e-6,
         "disposer : jeux dans leur grille " .. nom,
         (p.case * p.sous + d.ESPACE * (p.sous - 1)) .. " > " .. p.largeur_jeux)
@@ -143,6 +147,27 @@ for _, nb_generaux in ipairs({1, 2, 3}) do
           " > " .. contenu_bande)
     end
   end
+end
+
+-- Largeur du bandeau bornée en pixels : 44 px de zone sensible au moins,
+-- 52 px au plus, quelle que soit la fenêtre ; à 800 px la borne vaut déjà
+-- 50 px (un seizième), à 1024 et 1920 la colonne est plafonnée. La place
+-- gagnée revient aux claviers, et la colonne de gain garde sa propre largeur.
+for _, cas in ipairs({{800, 480, 50}, {1024, 640, 52}, {1920, 1080, 52}}) do
+  local l, h, attendu = cas[1], cas[2], cas[3]
+  local p = d.disposer(etat(4, 15, true), l, h, 9.36, 4.74, 13, 3)
+  local nom = string.format("%dx%d", l, h)
+  aide.egal(p.colonne_curseur, attendu, "disposer : colonne du bandeau bornée " .. nom)
+  aide.verifie(p.colonne_curseur >= d.CURSEUR_LARGEUR and p.colonne_curseur <= d.CURSEUR_MAX,
+    "disposer : colonne du bandeau entre 44 et 52 px " .. nom, p.colonne_curseur)
+  aide.egal(p.bande, 3 * attendu + 2 * d.ESPACE + d.CADRE_GROUPE,
+    "disposer : largeur du bandeau à trois curseurs " .. nom)
+  aide.verifie(p.bande <= 3 * d.CURSEUR_MAX + 2 * d.ESPACE + d.CADRE_GROUPE,
+    "disposer : bandeau au plus 174 px " .. nom, p.bande)
+  aide.verifie(p.bouton_reset >= 44,
+    "disposer : bouton de remise à zéro de 44 px " .. nom, p.bouton_reset)
+  aide.verifie(p.curseur_largeur >= d.BOUTON_LARGEUR,
+    "disposer : poignée de gain logée dans sa colonne " .. nom, p.curseur_largeur)
 end
 
 for _, cfg in ipairs(configs) do

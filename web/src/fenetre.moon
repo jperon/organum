@@ -1053,7 +1053,12 @@ MAX_ASSOCIATIONS = 16
       ui\ligne_ratio p.reste, poids
       if ui\groupe_debut "generaux"
         -- Chaque curseur général : étiquette au-dessus, curseur vertical,
-        -- valeur en % en dessous ; tous côte à côte.
+        -- valeur en % en dessous ; tous côte à côte. La colonne est bornée en
+        -- pixels (44 à 52, voir fenetre_disposition), plus étroite que la
+        -- police de l'interface aux grandes fenêtres : l'étiquette et la
+        -- valeur s'écrivent à la petite police, comme sur la page web
+        -- (0,72 rem pour « Volume »), pour tenir dans la colonne.
+        ui\police_petite!
         ui\ligne p.etiquette_curseur, #generaux
         for c in *generaux
           ui\texte c.etiquette, "centre"
@@ -1066,6 +1071,7 @@ MAX_ASSOCIATIONS = 16
         ui\ligne p.etiquette_curseur, #generaux
         for i = 1, #generaux
           ui\texte "#{math.floor(valeurs[i] * 100 + 0.5)} %", "centre"
+        ui\police_normale!
         -- Remise à zéro des volumes des claviers et du piano, sous les
         -- curseurs : icône dessinée (la police latine n'a pas ↺), une seule
         -- commande au moteur, qui ne touche ni au Volume ni à la Pédale.

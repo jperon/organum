@@ -63,6 +63,10 @@ local function scenario(plan, nframes, options)
   end
   function ui:taille() return self.l, self.h end
   function ui:police(p) self.police_courante = p end
+  -- Petite police du bandeau (libellés des colonnes bornées) : sans effet sur
+  -- la doublure, qui ne dessine rien ; on note seulement la bascule.
+  function ui:police_petite() self.police_petite_active = true end
+  function ui:police_normale() self.police_petite_active = false end
   function ui:largeur_texte(s) return #tostring(s) * 8 end
   function ui:ligne(n, cols) self.lignes = self.lignes + (n or 0) end
   function ui:ligne_ratio(n, ratios) self.lignes = self.lignes + (n or 0) end

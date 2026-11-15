@@ -16,6 +16,11 @@ CADRE_GROUPE = 10
 -- Curseur vertical : zone sensible de 44 px de large sur toute la hauteur,
 -- bouton de 40 × 24 px (voir ui:curseur_vertical dans cosmo/lnuklear.c).
 CURSEUR_LARGEUR, BOUTON_LARGEUR, BOUTON_HAUTEUR = 44, 40, 24
+-- Largeur maximale d'une colonne du bandeau des curseurs généraux : bornée en
+-- pixels, du même ordre que la colonne de gain des claviers, au lieu d'une
+-- fraction de la fenêtre (un seizième faisait 64 px par colonne à 1024 px,
+-- soit 20 % de la largeur pour trois réglages).
+CURSEUR_MAX = 52
 -- Bouton de remise à zéro des volumes, sous les curseurs du bandeau : cible
 -- tactile de 44 px de haut, pleine largeur du bandeau.
 BOUTON_RESET = 44
@@ -100,12 +105,16 @@ disposer = (e, l, h, rapport, rapport_deux, cible, nb_generaux = 0) ->
     maxjeux = math.max maxjeux, #d.jeux
     liens or= #d.liens > 0
   -- Bandeau des curseurs généraux : une colonne par curseur, côte à côte,
-  -- plus le cadre du groupe. La colonne fait au moins 44 px (zone sensible) et
-  -- un seizième de la largeur : la police visée valant largeur / 64, cela
-  -- laisse de quoi afficher six caractères (« Volume », « Pédale », « 100 % »)
-  -- sans chevaucher la colonne voisine. La liste accepte un curseur de plus
-  -- sans refonte (troisième réglage « Piano » prévu).
-  colonne_curseur = math.max CURSEUR_LARGEUR, l / 16
+  -- plus le cadre du groupe. La colonne garde la zone sensible de 44 px mais
+  -- ne dépasse pas 52 px : c'est une largeur en pixels, pas une proportion de
+  -- la fenêtre. La police de l'interface grandissant avec la fenêtre,
+  -- fenetre.moon écrit l'étiquette et la valeur à une petite police
+  -- (ui:police_petite) pour qu'elles tiennent dans la colonne.
+  colonne_curseur = math.min CURSEUR_MAX, math.max(CURSEUR_LARGEUR, l / 16)
+  -- Colonne de gain des claviers : même zone sensible, mais elle suit la
+  -- largeur de la fenêtre comme avant (le libellé « Gain » et la valeur y
+  -- tiennent à toute police) ; elle ne dépend pas de la borne du bandeau.
+  colonne_gain = math.max CURSEUR_LARGEUR, l / 16
   bande = if nb_generaux > 0
     nb_generaux * colonne_curseur + (nb_generaux - 1) * ESPACE + CADRE_GROUPE
   else
@@ -121,7 +130,7 @@ disposer = (e, l, h, rapport, rapport_deux, cible, nb_generaux = 0) ->
   -- sa largeur sensible (44 px) tant que la case du clavier le permet ; dans
   -- une fenêtre minuscule elle se réduit plutôt que d'écraser les jeux.
   largeur_colonne = l_jeux / ndiv - CADRE_GROUPE
-  curseur_largeur = math.min colonne_curseur, math.max(8, largeur_colonne - 2 * MARGE_GROUPE)
+  curseur_largeur = math.min colonne_gain, math.max(8, largeur_colonne - 2 * MARGE_GROUPE)
   largeur_jeux = math.max 1, largeur_colonne - ESPACE - curseur_largeur
   meilleure, repli = nil, nil
   for sous = 1, 3
@@ -198,6 +207,7 @@ disposer = (e, l, h, rapport, rapport_deux, cible, nb_generaux = 0) ->
   p.bande, p.l_jeux, p.nb_generaux = bande, l_jeux, nb_generaux
   p.largeur_colonne, p.largeur_jeux = largeur_colonne, largeur_jeux
   p.curseur_largeur, p.colonne_curseur = curseur_largeur, colonne_curseur
+  p.colonne_gain = colonne_gain
   p.haut = 1 + p.lignes_combi
   -- Hauteur de la rangée principale (bandeau et claviers) : tout ce qui
   -- reste après les rangées du haut et l'espacement de fin de rangée.
@@ -353,7 +363,7 @@ texte_calibration = (c) ->
 
 {
   :ESPACE, :MARGE, :MARGE_GROUPE
-  :CADRE_GROUPE, :CURSEUR_LARGEUR, :BOUTON_LARGEUR, :BOUTON_HAUTEUR
+  :CADRE_GROUPE, :CURSEUR_LARGEUR, :CURSEUR_MAX, :BOUTON_LARGEUR, :BOUTON_HAUTEUR
   :BOUTON_RESET
   :LIGNE_POLICE, :POLICE_MIN, :POLICE_MAX
   :bouge, :decoupe

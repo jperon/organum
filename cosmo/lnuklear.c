@@ -31,7 +31,7 @@
 #include "../ui/x11.c"
 #include "../ui/wayland.c"
 
-static unsigned char police[1024 * 1024];  // atlas des glyphes (alpha)
+static unsigned char police[2 * 1024 * 1024];  // atlas des glyphes (alpha)
 
 typedef struct {
   fenetre_t *f;
@@ -42,7 +42,16 @@ typedef struct {
   int sale;
   char *ttf;  // police TrueType (copie), ou NULL : police bitmap de Nuklear
   size_t nttf;
+  // Deux tailles cuites dans le même atlas : la police de l'interface, qui
+  // grandit avec la fenêtre, et une petite pour les libellés serrés (bandeau
+  // des curseurs généraux, colonnes bornées à 52 px). Changer de police dans
+  // une image ne coûte qu'un pointeur (nk_style_set_font), pas une cuisson.
+  struct nk_font *fonte, *fonte_petite;
 } ui_t;
+
+// Taille maximale de la petite police : « Pédale » et « 100 % » tiennent dans
+// une colonne de 44 px à cette taille (voir fenetre_disposition).
+#define POLICE_PETITE_MAX 14
 
 // Glyphes cuits : latin de base et Latin-1, œ, tirets, guillemets, points de suspension.
 static const nk_rune kGlyphes[] = {0x0020, 0x00FF, 0x0152, 0x0153, 0x2013, 0x2014,
@@ -61,11 +70,13 @@ static int ui_gc(lua_State *L) {
   return 0;
 }
 
-// (Re)cuit la police par défaut à la taille donnée. Coûteux : à n'appeler
-// qu'au changement de taille (mise à l'échelle de la fenêtre).
+// (Re)cuit la police par défaut à la taille donnée, et une petite police pour
+// les libellés serrés. Coûteux : à n'appeler qu'au changement de taille (mise
+// à l'échelle de la fenêtre).
 static int cuire_police(ui_t *u, int taille) {
   if (taille < 6) taille = 6;
   if (taille > 96) taille = 96;
+  int petite = taille < POLICE_PETITE_MAX ? taille : POLICE_PETITE_MAX;
   struct nk_font_atlas *atlas = &u->rf->atlas;
   nk_font_atlas_clear(atlas);
   nk_font_atlas_init_default(atlas);
@@ -80,12 +91,29 @@ static int cuire_police(ui_t *u, int taille) {
     fonte = nk_font_atlas_add_default(atlas, taille, NULL);
   }
   if (!fonte) return -1;
+  // Petite police, même atlas : elle sert aux libellés des colonnes bornées
+  // (« Volume », « 100 % »). À la taille plancher elle se confond avec la
+  // police de l'interface, inutile de cuire deux fois.
+  struct nk_font *fonte_petite = fonte;
+  if (petite != taille) {
+    if (u->ttf) {
+      struct nk_font_config cp = nk_font_config(petite);
+      cp.range = kGlyphes;
+      cp.oversample_h = 3, cp.oversample_v = 1;
+      fonte_petite = nk_font_atlas_add_from_memory(atlas, u->ttf, u->nttf, petite, &cp);
+    } else {
+      fonte_petite = nk_font_atlas_add_default(atlas, petite, NULL);
+    }
+    if (!fonte_petite) fonte_petite = fonte;
+  }
   int tl, th;
   const void *tex = nk_font_atlas_bake(atlas, &tl, &th, NK_FONT_ATLAS_ALPHA8);
   if (!tex || (size_t)tl * th > sizeof police) return -1;
   memcpy(police, tex, (size_t)tl * th);
   u->rf->font_tex.w = tl, u->rf->font_tex.h = th, u->rf->font_tex.pitch = tl;
   nk_font_atlas_end(atlas, nk_handle_ptr(NULL), NULL);
+  u->fonte = fonte;
+  u->fonte_petite = fonte_petite;
   nk_style_set_font(u->ctx, &fonte->handle);
   return 0;
 }
@@ -142,6 +170,22 @@ static int ui_police(lua_State *L) {
   ui_t *u = luaL_checkudata(L, 1, "nk.ui");
   lua_pushboolean(L, cuire_police(u, (int)luaL_checkinteger(L, 2)) == 0);
   return 1;
+}
+
+// ui:police_petite() / ui:police_normale() : bascule entre la petite police
+// (libellés des colonnes bornées du bandeau) et celle de l'interface. Les deux
+// sont cuites ensemble : le changement ne fait que changer le pointeur de
+// style, sans nouvelle cuisson.
+static int ui_police_petite(lua_State *L) {
+  ui_t *u = luaL_checkudata(L, 1, "nk.ui");
+  if (u->fonte_petite) nk_style_set_font(u->ctx, &u->fonte_petite->handle);
+  return 0;
+}
+
+static int ui_police_normale(lua_State *L) {
+  ui_t *u = luaL_checkudata(L, 1, "nk.ui");
+  if (u->fonte) nk_style_set_font(u->ctx, &u->fonte->handle);
+  return 0;
 }
 
 // ui:largeur_texte(s) → largeur en pixels avec la police courante.
@@ -357,12 +401,16 @@ static int ui_bouton_reinit(lua_State *L) {
     points[i * 2 + 1] = cy + r * sinf(a);
   }
   struct nk_command_buffer *out = &ctx->current->buffer;
-  nk_stroke_polyline(out, points, SEGMENTS + 1, 2.0f, col);
+  // Trait un peu plus épais que le reste du dessin (2,8 px) : l'icône reste
+  // lisible sur un bouton large, sans devenir pâteuse.
+  nk_stroke_polyline(out, points, SEGMENTS + 1, 2.8f, col);
 
   // Pointe de flèche : triangle plein posé à l'extrémité de l'arc, dirigé
   // vers la gauche (le sens de rotation), avec une base presque verticale.
+  // Elle est plus large que l'arc (0,72 r contre 0,58 avant) pour rester
+  // visible.
   float px = cx + r * cosf(a1), py = cy + r * sinf(a1);
-  float h = r * 0.58f;
+  float h = r * 0.72f;
   nk_fill_triangle(out, px - h, py,
                    px + h * 0.18f, py - h * 0.72f,
                    px + h * 0.18f, py + h * 0.72f, col);
@@ -664,6 +712,8 @@ static const struct luaL_Reg nkfuncs[] = {
 static const struct luaL_Reg uifuncs[] = {
   {"protocole", ui_protocole},
   {"police", ui_police},
+  {"police_petite", ui_police_petite},
+  {"police_normale", ui_police_normale},
   {"largeur_texte", ui_largeur_texte},
   {"evenements", ui_evenements},
   {"debut", ui_debut},
