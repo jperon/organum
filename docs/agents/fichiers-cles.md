@@ -385,20 +385,24 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   −12..12. `POST /api/orgue {"transposition": N}` (entier −12..12, sinon
   400, validation dans `web/src/validation.moon`) et `GET /api/orgue`
   publient `transposition`. Interface : bloc « Transposition » (−, valeur
-  signée, +) en bas de la colonne du Manuel III dans `web/src/page.moon` /
-  `client.moon` / `style.moon` et `web/src/fenetre.moon` (la colonne est
-  choisie par `modele.colonne_transposition` : Manuel III, sinon première
-  division sans accouplement) ; valeur non nulle accentuée, bornes inactives,
-  cibles web ≥ 44 px. Un clic sur la valeur centrale (page web et fenêtre
-  native) remet la transposition à 0. Quand le piano est disponible, cette
-  rangée porte aussi son bouton, en dernier : côté natif les poids passent à
-  {2.4, 0.55, 0.6, 0.55, 1.1}, de quoi écrire « Transposition » et « Piano »
-  entiers à la police courante (le libellé n'est tronqué qu'en dessous, et
-  les bornes gardent leur cible) ; côté web le bloc de transposition et le
-  bouton partagent la rangée `.links`. Côté natif, le signe moins est
-  l'hyphen ASCII (la police latin embarquée n'a pas U+2212). Tests réels :
-  `web/scripts/test-transposition.sh`, e2e web et natif (dont croisé),
-  `scripts/tests-unitaires.sh` pour l'en-tête C.
+  signée, +) avec les réglages généraux, dans le bandeau de gauche sous la
+  remise à zéro des volumes — elle concerne tout l'orgue, elle n'est donc
+  rattachée à aucun clavier (`web/src/page.moon` / `client.moon` /
+  `style.moon` et `web/src/fenetre.moon`). Côté natif, le bandeau réserve deux
+  rangées de plus (`p.bouton_transposition`, `p.transposition_visible` de
+  `fenetre_disposition.moon`, omise seulement dans une fenêtre si basse que
+  rien ne tiendrait) : étiquette « Transposition », ou « Transpos. » quand la
+  colonne de 174 px ne suffit pas à la police courante (jamais de « … »),
+  puis −, valeur signée et + de 44 px sur une rangée `{1, 1.25, 1}`. Côté
+  web, le pied `.bandeau-pied` porte ↺ puis la transposition, l'une sous
+  l'autre dans le rail vertical et côte à côte dans la barre compacte des
+  écrans étroits. Valeur non nulle accentuée, bornes inactives, cibles web
+  ≥ 44 px. Un clic sur la valeur centrale (page web et fenêtre native) remet
+  la transposition à 0. Le Manuel III n'a plus que son bouton Piano sur sa
+  rangée basse, comme les claviers qui n'ont qu'un accouplement. Côté natif,
+  le signe moins est l'hyphen ASCII (la police latin embarquée n'a pas
+  U+2212). Tests réels : `web/scripts/test-transposition.sh`, e2e web et
+  natif (dont croisé), `scripts/tests-unitaires.sh` pour l'en-tête C.
 - Piano échantillonné, joué en parallèle de l'orgue : `cosmo/piano/`
   (`piano.c`, `piano.h`, `tsf.h` de TinySoundFont, `stb_vorbis.c`).
   Aeolus n'est pas modifié : le piano est un second générateur, mixé dans le
@@ -449,7 +453,7 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   mêmes contrôles) : un bouton « Piano » par clavier, en dernier sur la
   rangée des accouplements, même style et même bascule (`data-state`,
   `aria-pressed`) que ceux-ci ; un clavier sans accouplement (le Manuel III)
-  le partage avec la Transposition, sans la déplacer. Un curseur vertical
+  n'a que ce bouton sur sa rangée basse. Un curseur vertical
   « Piano » s'ajoute dans le bandeau après « Pédale » (id `piano-volume` côté
   web, troisième entrée de `generaux` côté natif). Les deux sont **absents**
   quand `piano_disponible` est faux, et suivent l'état par l'attente longue
@@ -614,16 +618,25 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   40 × 24, `--fill` conservé ; l'input est en `pointer-events: none` et la
   colonne reçoit la saisie relative (`saisieVerticale` de
   `web/src/client.moon` : pointer events et molette ; le clavier reste
-  utilisable). Le bandeau occupe toute la hauteur visible : hauteur
-  `calc(100dvh - 8px)` avec repli `calc(100vh - 8px)`, `position: sticky` et
-  `top: 4px` ; les curseurs s'étirent (`.curseurs-generaux` en `flex: 1`),
-  le bouton ↺ reste en bas. Au-delà de 900 px, il prend la hauteur de la
+  utilisable). Au-delà de 600 px, le bandeau vertical occupe toute la hauteur
+  visible : hauteur `calc(100dvh - 8px)` avec repli `calc(100vh - 8px)`,
+  `position: sticky` et `top: 4px` ; les curseurs s'étirent
+  (`.curseurs-generaux` en `flex: 1`) et le pied `.bandeau-pied` (↺ puis
+  transposition) reste en bas. Au-delà de 900 px, il prend la hauteur de la
   console (`height: 100%`), la barre « Clavier » restant visible dessous,
-  sans défilement ; à 420 px la page défile et le bandeau reste collé, entier.
-  En largeur étroite (≤ 600 px), les colonnes passent à 44 px
-  sans marge ni bordure, et la largeur gagnée revient aux
-  jeux ; en natif, la colonne garde déjà 44 px minimum dès que la largeur
-  manque (le cadre du groupe, 10 px, reste la seule marge).
+  sans défilement.
+  **En largeur étroite (≤ 600 px)**, le rail disparaît au profit d'une barre
+  compacte en haut de la page (non collée) : `.console` passe en colonne et
+  chaque curseur général devient une ligne horizontale de 44 px
+  (`writing-mode: horizontal-tb`, piste de 12 px, pouce 24 × 40, `--fill`
+  vers la droite), l'étiquette à gauche et le pourcentage à droite ; ↺ (44 ×
+  44) et la transposition partagent la ligne suivante. La hauteur totale
+  reste ≤ ~200 px à 420 px de large, ce qui libère l'écran pour les claviers.
+  La saisie relative lit l'orientation de la zone à l'appui (largeur > hauteur
+  = horizontale, vers la droite la valeur monte) : même `saisieVerticale` de
+  `web/src/client.moon`, mêmes pointer events et molette. En natif, rien ne
+  change : la colonne garde 44 px minimum dès que la largeur manque (le cadre
+  du groupe, 10 px, reste la seule marge).
   Les boutons de jeux gardent le texte complet sur deux ou trois lignes :
   colonnes d'au moins 112 px — de quoi loger le mot le plus long de l'orgue
   par défaut dans la police des boutons (0,85 rem), « Sesquialtera » ≈ 97 px,
@@ -634,9 +647,10 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   colonnes de jeux à 1100 px sans dépasser la hauteur de la fenêtre. L'e2e
   web vérifie sur chaque bouton `scrollWidth <= clientWidth + 1` **et**
   `scrollHeight <= clientHeight + 1`, ainsi qu'une hauteur ≥ 44 px, aux
-  largeurs 420 et 1100 px ; il contrôle aussi la hauteur du bandeau
-  (≥ 90 % de la vue au grand écran, toute la vue en étroit) et qu'il reste
-  collé et entier après un défilement de 600 px.
+  largeurs 420 et 1100 px ; il contrôle aussi le bandeau : pleine hauteur de
+  la console à 1100 px, barre compacte ≤ 200 px à 420 px avec curseurs
+  horizontaux (largeur > hauteur), ↺ et transposition présents et
+  fonctionnels, et aucun débordement horizontal.
   La réverbération n'est plus sur la console principale : elle est réglée
   dans le panneau « Audio », comme le curseur de la page web.
   Exigence : tout doit tenir dans la fenêtre, sans défilement, et grossir
