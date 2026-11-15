@@ -767,7 +767,13 @@ CSS = [[
     align-self: flex-start;
     position: sticky;
     top: 4px;
-    max-height: calc(100dvh - 8px);
+    /* Toute la hauteur visible : repli 100vh pour les navigateurs sans unité
+       dynamique, puis 100dvh (barres d'outils mobiles). Le bandeau reste
+       collé en haut quand la page défile ; il ne réduit pas la hauteur des
+       claviers, qui gardent la leur. */
+    height: calc(100vh - 8px);
+    height: calc(100dvh - 8px);
+    min-height: 0;
     padding: 2px;
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -775,8 +781,11 @@ CSS = [[
   }
   .curseurs-generaux {
     display: flex;
+    flex: 1 1 auto;
     align-items: stretch;
     gap: 2px;
+    /* Hauteur restante du bandeau, une fois le bouton ↺ réservé en bas. */
+    min-height: 0;
   }
   /* Bouton de remise à zéro des volumes : icône seule, sous les curseurs,
      pleine largeur du bandeau et cible tactile de 44 px. */
@@ -794,10 +803,12 @@ CSS = [[
     gap: 2px;
     width: 48px;
     min-width: 48px;
-    /* En étroit, les curseurs restent verticaux mais moins hauts ; la hauteur
-       suit la fenêtre, pour que le pouce reste visible sans défiler. */
-    height: min(46vh, 380px);
-    min-height: 140px;
+    flex: 0 0 auto;
+    /* La hauteur vient de la rangée (étirée) : le curseur occupe toute la
+       place laissée par l'étiquette et la valeur, et grandit avec la fenêtre.
+       En étroit, les curseurs restent verticaux et suivent la même règle. */
+    height: auto;
+    min-height: 0;
     touch-action: none;
     cursor: ns-resize;
   }
@@ -938,7 +949,7 @@ CSS = [[
     .curseur-general {
       width: 44px;
       min-width: 44px;
-      height: min(40vh, 320px);
+      height: auto;
     }
     /* « Volume » tient tout juste dans 44 px : un peu plus petit pour laisser
        de l'air entre les deux étiquettes voisines. */
@@ -948,6 +959,10 @@ CSS = [[
   @media (min-width: 900px) {
     .console { flex: 1 1 auto; min-height: 0; }
     .console-principal { flex: 1 1 auto; min-height: 0; }
+    /* Le bandeau prend toute la hauteur de la console : la barre « Clavier »
+       (44 px) reste visible sous lui, en bas de la vue ; main a déjà la
+       hauteur de la vue. Pas de défilement, pas de recouvrement. */
+    .bandeau { height: 100%; }
     .barre .btn.mute,
     .barre .btn.panic { flex: 0 0 auto; padding: 0 24px; margin: 0; }
   }

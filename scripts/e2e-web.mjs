@@ -1401,6 +1401,21 @@ async function testResponsive() {
                           sw: e.scrollWidth, cw: e.clientWidth });
           }
         }
+        // Bandeau de gauche : toute la hauteur visible (console entière au
+        // grand écran, barre « Clavier » dégagée ; hauteur de la vue en
+        // étroit, où la page défile et où le bandeau reste collé).
+        const bandeau = [];
+        if (${JSON.stringify(chemin)} === '/') {
+          const b = document.querySelector('.bandeau').getBoundingClientRect();
+          const c = document.querySelector('.curseur-general').getBoundingClientRect();
+          const consoleR = document.querySelector('.console').getBoundingClientRect();
+          const summary = document.querySelector('#clavier-panneau > summary');
+          bandeau.push({
+            h: b.height, haut: b.top, bas: b.bottom, vue: window.innerHeight,
+            consoleBas: consoleR.bottom, curseur: c.height, defile: window.scrollY,
+            clavierHaut: summary ? summary.getBoundingClientRect().top : null
+          });
+        }
         return {
           debord,
           petits,
@@ -1410,6 +1425,7 @@ async function testResponsive() {
           stops,
           pianos,
           reset,
+          bandeau,
           remplissages: ${JSON.stringify(chemin)} === '/audio'
             ? [remplissage('reverb'), remplissage('qualite-polyphonie')]
             : (${JSON.stringify(chemin)} === '/'
@@ -1469,6 +1485,47 @@ async function testResponsive() {
           reset && reset.h >= 44 && reset.w >= 44 && reset.texte === '↺',
           `web / à ${largeur} px : bouton de remise à zéro ≥ 44 px et à icône seule (${reset ? `${reset.w.toFixed(0)}x${reset.h.toFixed(0)} « ${reset.texte} »` : 'absent'})`
         );
+        // Bandeau de gauche sur toute la hauteur visible : au grand écran il
+        // remplit la console, la barre « Clavier » restant visible dessous ;
+        // en étroit il prend la hauteur de la vue et reste collé en haut
+        // quand la page défile.
+        const b = mesure.bandeau[0];
+        if (largeur >= 900) {
+          verifie(
+            b && b.h >= b.vue * 0.9,
+            `web / à ${largeur} px : bandeau sur toute la hauteur visible (${b ? b.h.toFixed(0) : '?'} px sur ${b ? b.vue : '?'})`
+          );
+          verifie(
+            b && Math.abs(b.bas - b.consoleBas) <= 1 &&
+              b.clavierHaut !== null && b.clavierHaut >= b.bas - 1,
+            `web / à ${largeur} px : bandeau jusqu'au bas de la console, barre Clavier dégagée (bas ${b ? b.bas.toFixed(0) : '?'} / console ${b ? b.consoleBas.toFixed(0) : '?'} / Clavier ${b && b.clavierHaut !== null ? b.clavierHaut.toFixed(0) : '?'})`
+          );
+          verifie(
+            b && b.curseur >= 400,
+            `web / à ${largeur} px : curseurs étirés sur la hauteur du bandeau (${b ? b.curseur.toFixed(0) : '?'} px)`
+          );
+        } else {
+          verifie(
+            b && b.h >= b.vue - 12 && b.haut <= 6,
+            `web / à ${largeur} px : bandeau sur toute la hauteur de la vue (${b ? b.h.toFixed(0) : '?'} px sur ${b ? b.vue : '?'})`
+          );
+          const apres = await evaluer(`(async () => {
+            window.scrollTo(0, 600);
+            await new Promise((r) => setTimeout(r, 250));
+            const bande = document.querySelector('.bandeau').getBoundingClientRect();
+            const c = document.querySelector('.curseur-general').getBoundingClientRect();
+            return { top: bande.top, bas: bande.bottom, h: bande.height,
+                     curseur: c.height, defile: window.scrollY, vue: window.innerHeight };
+          })()`);
+          verifie(
+            apres.defile > 0 && Math.abs(apres.top - 4) <= 2 && apres.bas <= apres.vue + 1,
+            `web / à ${largeur} px : bandeau collé et entier après défilement (haut ${apres.top.toFixed(0)}, bas ${apres.bas.toFixed(0)}, défilé ${apres.defile}, vue ${apres.vue})`
+          );
+          verifie(
+            apres.curseur >= apres.vue * 0.6,
+            `web / à ${largeur} px : curseurs étirés après défilement (${apres.curseur.toFixed(0)} px sur ${apres.vue})`
+          );
+        }
       }
       if (chemin === '/audio') {
         verifie(
