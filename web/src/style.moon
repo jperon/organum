@@ -700,9 +700,18 @@ CSS = [[
   .division-nom { padding: 0 2px; font-size: 0.85rem; }
   .stops-grid {
     gap: 3px;
-    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    /* 78 px : assez pour « Open Diapason » sur une ligne, donc deux lignes au
+       plus pour un nom de jeu ; la colonne du curseur de gain a déjà pris sa
+       part de la largeur du clavier. */
+    grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+    /* Les rangées gardent leur hauteur naturelle : une colonne voisine plus
+       haute (le curseur de gain) ne doit pas les étirer. */
+    align-content: start;
   }
-  .stop, .link { min-height: 40px; padding: 2px 4px; border-width: 1px; border-radius: 4px; }
+  /* Deux lignes de texte (0,85 rem, interligne 1,2) plus marges et bordure
+     font ~41 px : 44 px garantit la cible tactile et deux lignes entières. */
+  .stop, .link { min-height: 44px; padding: 2px 4px; border-width: 1px; border-radius: 4px; }
+  .stop { padding-block: 3px; }
   .transposition { margin-top: 2px; gap: 4px; padding: 2px; }
   .transposition .btn.small { min-width: 44px; min-height: 44px; }
   .cancel-division { min-height: 30px; }
@@ -711,11 +720,17 @@ CSS = [[
     body { padding: 4px; align-items: stretch; }
     main:has(#panel-orgue:not([hidden])) { height: calc(100dvh - 8px); }
     #panel-orgue:not([hidden]) { flex: 1; min-height: 0; }
-    .divisions { flex: 1; min-height: 0; grid-auto-rows: 1fr; align-items: stretch; }
+    /* Les claviers prennent la hauteur de leur contenu (cible tactile et
+       texte complet) ; si tout tient, la rangée s'étire pour remplir la
+       fenêtre. */
+    .divisions { flex: 1 1 auto; min-height: 0; grid-auto-rows: auto; align-items: stretch; }
     .division { min-height: 0; }
     .division-corps { flex: 1 1 auto; min-height: 0; }
-    .stops-grid { flex: 1; min-height: 0; grid-auto-rows: 1fr; }
-    .stop { min-height: 0; }
+    /* Rangées de jeux à la hauteur de leur contenu (44 px minimum par la
+       taille des boutons) : un nom de jeu sur trois lignes n'est jamais coupé.
+       La grille ne se laisse pas écraser (flex-shrink 0) et grandit si la
+       rangée de claviers est plus haute. */
+    .stops-grid { flex: 1 0 auto; min-height: 0; grid-auto-rows: max-content; }
   }
 
   /* Page unique : console en deux parties. À gauche un bandeau vertical de
@@ -787,7 +802,12 @@ CSS = [[
     writing-mode: vertical-lr;
     direction: rtl;
     width: 44px;
-    height: 100%;
+    /* Pas de height: 100% : dans un parent de hauteur automatique, le
+       pourcentage se résout contre la fenêtre et la colonne du curseur
+       gonflerait le bloc de jeux (rangées étirées, boutons énormes en
+       étroit). La croissance en flex suffit dès que la colonne a une
+       hauteur définie (bandeau) ou étirée (colonne de gain). */
+    height: auto;
     min-height: 96px;
     flex: 1 1 auto;
     margin: 0;
@@ -882,6 +902,25 @@ CSS = [[
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
     text-align: center;
+  }
+  /* En largeur étroite, le bandeau se serre : deux colonnes de 44 px
+     exactement, sans marge ni bordure superflue ; la largeur gagnée revient
+     aux jeux. Les curseurs restent verticaux et plus courts. */
+  @media (max-width: 600px) {
+    .bandeau {
+      padding: 0;
+      border: 0;
+      gap: 2px;
+      background: transparent;
+    }
+    .curseur-general {
+      width: 44px;
+      min-width: 44px;
+      height: min(40vh, 320px);
+    }
+    /* « Volume » tient tout juste dans 44 px : un peu plus petit pour laisser
+       de l'air entre les deux étiquettes voisines. */
+    .curseur-general .volume-etiquette { font-size: 0.68rem; }
   }
 
   @media (min-width: 900px) {
