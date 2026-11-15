@@ -56,7 +56,14 @@ transposition_html = (valeur) ->
     h.button attrs_valeur, texte,
     h.button attrs_plus
 
-division_html = (di, div, divisions, transposition = 0, colonne_transposition = nil) ->
+-- Bouton « Piano » d'un clavier : même style et même comportement qu'un
+-- accouplement (bascule, état enfoncé = actif), placé en dernier sur la
+-- rangée basse. Il n'apparaît que si le piano échantillonné est disponible.
+piano_html = (d, actif) ->
+  etat = if actif then "on" else "off"
+  h.button class: "piano-bouton", ["data-division"]: d, ["data-state"]: etat, ["aria-pressed"]: (actif and "true" or "false"), type: "button", title: "Faire jouer ce clavier sur le piano échantillonné", "Piano"
+
+division_html = (di, div, divisions, transposition = 0, colonne_transposition = nil, piano_disponible = false) ->
   d = tostring di
   liens = for i, l in ipairs div.links or {}
     cible = divisions[l.division + 1]
@@ -65,9 +72,17 @@ division_html = (di, div, divisions, transposition = 0, colonne_transposition = 
   btns = for i, jeu in ipairs div.stops
     h.button class: "stop", ["data-division"]: d, ["data-index"]: tostring(i - 1), ["data-state"]: etat_jeu(jeu), type: "button", display jeu.name
   gain = math.floor((tonumber(div.gain) or 0.5) * 100 + 0.5)
-  commande_transposition = ""
+  -- Rangée basse du clavier : transposition (Manuel III, qui n'a pas
+  -- d'accouplement), accouplements, puis le bouton Piano en dernier. Un
+  -- clavier sans accouplement garde donc la transposition et reçoit le piano
+  -- sur la même rangée.
+  bas = {}
   if di + 1 == colonne_transposition and #liens == 0
-    commande_transposition = transposition_html transposition
+    table.insert bas, transposition_html transposition
+  for b in *liens
+    table.insert bas, b
+  if piano_disponible
+    table.insert bas, piano_html d, div.piano == true
   -- Curseur de gain vertical, à droite des jeux et de leur hauteur ; il a
   -- quitté la rangée d'en-tête, qui garde le nom et « Annuler ». La valeur en
   -- % est sous le curseur, le libellé au-dessus.
@@ -81,8 +96,8 @@ division_html = (di, div, divisions, transposition = 0, colonne_transposition = 
   corps_html = h.div class: "division-corps",
     h.div(class: "stops-grid", table.unpack btns),
     gain_html
-  liens_html = if #liens > 0 then h.div(class: "links", table.unpack liens) else ""
-  h.section class: "division", tete_html, corps_html, liens_html, commande_transposition
+  bas_html = if #bas > 0 then h.div(class: "links", table.unpack bas) else ""
+  h.section class: "division", tete_html, corps_html, bas_html
 
 -- Panneau repliable « Clavier », replié par défaut : <details> natif, sans
 -- JavaScript pour le repli. Une option par division réellement publiée par
@@ -143,14 +158,29 @@ clavier_html = (divisions) ->
   else
     ""
   -- Console : bandeau vertical des curseurs généraux à gauche, claviers et
-  -- barre de réglages à droite. Le bandeau est une liste : le jour où un
-  -- troisième réglage (« Piano ») s'ajoute, il suffit d'une entrée de plus,
-  -- la disposition suit.
-  curseur_gen = (ident, etiquette) ->
-    h.div class: (if ident == "volume" then "curseur-general" else "curseur-general pedale-general"),
-      h.label(class: "volume-etiquette", ["for"]: ident, etiquette),
-      h.input(type: "range", id: ident, min: "0", max: "100", step: "1", value: "50", ["aria-valuetext"]: "50\u{00A0}%", style: "--fill: 50%"),
-      h.span(class: "value", id: "value#{if ident == "volume" then "" else "-pedale"}", ["aria-hidden"]: "true", "50\u{00A0}%")
+  -- barre de réglages à droite. Le bandeau est une liste : « Volume »
+  -- (système), « Pédale » (volume du moteur) et, si le piano échantillonné est
+  -- chargé, « Piano » — la disposition suit sans refonte.
+  curseur_gen = (c) ->
+    h.div class: c.classe,
+      h.label(class: "volume-etiquette", ["for"]: c.ident, c.etiquette),
+      h.input(type: "range", id: c.ident, min: "0", max: "100", step: "1", value: tostring(c.valeur), ["aria-valuetext"]: "#{c.valeur}\u{00A0}%", style: "--fill: #{c.valeur}%"),
+      h.span(class: "value", id: c.valeur_id, ["aria-hidden"]: "true", "#{c.valeur}\u{00A0}%")
+  -- Pourcentage entier 0..100 d'une valeur publiée en 0..1 ; 50 par défaut
+  -- tant que le serveur n'a rien publié.
+  pourcent = (v) ->
+    n = tonumber v
+    return 50 unless n
+    math.max 0, math.min 100, math.floor n * 100 + 0.5
+  curseurs_generaux = {
+    {ident: "volume", etiquette: "Volume", classe: "curseur-general", valeur_id: "value", valeur: 50}
+    {ident: "volume-pedale", etiquette: "Pédale", classe: "curseur-general pedale-general", valeur_id: "value-pedale", valeur: pourcent infos and infos.volume}
+  }
+  if infos and infos.piano_disponible
+    table.insert curseurs_generaux, {
+      ident: "piano-volume", etiquette: "Piano", classe: "curseur-general piano-general"
+      valeur_id: "value-piano", valeur: pourcent infos.piano_volume
+    }
   etat_html = h.span class: "status #{modele.ETATS.rouge.classe}", id: "status", role: "status", ["aria-live"]: "polite", ["aria-atomic"]: "true", title: escape(modele.ETATS.rouge.title), ["data-libelle-vert"]: escape(modele.ETATS.vert.libelle), ["data-libelle-orange"]: escape(modele.ETATS.orange.libelle), ["data-libelle-rouge"]: escape(modele.ETATS.rouge.libelle), ["data-title-vert"]: escape(modele.ETATS.vert.title), ["data-title-orange"]: escape(modele.ETATS.orange.title), ["data-title-rouge"]: escape(modele.ETATS.rouge.title),
     h.span class: "sr-only", escape(modele.ETATS.rouge.libelle)
   combo_html = h.div class: "combo", ["aria-label"]: "Combinaison",
@@ -168,10 +198,10 @@ clavier_html = (divisions) ->
     h.a(class: "btn small", href: "/midi", "MIDI"),
     lien_qualite
   bandeau_html = h.div class: "bandeau", role: "group", ["aria-label"]: "Réglages généraux",
-    curseur_gen("volume", "Volume"),
-    curseur_gen("volume-pedale", "Pédale")
+    table.unpack [curseur_gen c for c in *curseurs_generaux]
+  piano_disponible = infos and infos.piano_disponible == true
   divisions_html = h.div class: "divisions",
-    table.unpack [division_html(di - 1, div, divisions, transposition, colonne_transposition) for di, div in ipairs divisions]
+    table.unpack [division_html(di - 1, div, divisions, transposition, colonne_transposition, piano_disponible) for di, div in ipairs divisions]
   principal_html = h.div class: "console-principal", barre_html, bandeau_degrade,
     h.p(class: "note", "L'affichage reflète l'état mémorisé par le serveur ; il peut différer si les jeux sont tirés ailleurs."),
     divisions_html,

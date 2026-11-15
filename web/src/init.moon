@@ -1749,6 +1749,12 @@ divisions_page = ->
     audio_etat: e.qualite.audio_etat
     audio_message: e.qualite.audio_message
     midi_message: e.qualite.midi_message
+    -- Valeurs initiales des curseurs généraux, en 0..1 comme l'API : le
+    -- client les corrige ensuite par l'attente longue, mais la page s'affiche
+    -- juste.
+    volume: e.volume
+    piano_disponible: e.piano_disponible == true
+    piano_volume: e.piano_volume
   }
   e.divisions, e.steps, e.transposition or 0, infos
 

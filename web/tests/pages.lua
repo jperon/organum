@@ -76,6 +76,10 @@ aide.verifie(html_page:find('class="console"', 1, true) ~= nil,
   "page : console en deux parties")
 aide.egal(select(2, html_page:gsub('class="curseur%-general', "")), 2,
   "page : deux curseurs généraux côte à côte")
+aide.verifie(html_page:find('class="piano-bouton"', 1, true) == nil,
+  "page : aucun bouton Piano quand le piano n'est pas disponible")
+aide.verifie(html_page:find('id="piano-volume"', 1, true) == nil,
+  "page : aucun curseur Piano quand le piano n'est pas disponible")
 aide.verifie(html_page:find('class="volume-general"', 1, true) == nil,
   "page : plus de volume horizontal dans la barre")
 aide.egal(select(2, html_page:gsub('class="gain%-colonne"', "")), 3,
@@ -94,6 +98,61 @@ aide.verifie(pos_tete_fin and pos_annuler and pos_annuler < pos_tete_fin,
   "page : bouton Tout annuler dans l'en-tête")
 aide.verifie(html_page:find("P+I", 1, true) ~= nil,
   "page : accouplement abrégé P+I")
+
+-- Bouton Piano : sur la rangée basse de chaque clavier, en dernier, avec le
+-- même état qu'un accouplement ; la transposition du clavier sans
+-- accouplement reste sur la même rangée. Absent sans piano disponible.
+local html_piano = page(divisions, 32, 0, {piano_disponible = true, piano_volume = 0.4,
+  volume = 0.25})
+aide.egal(select(2, html_piano:gsub('class="curseur%-general', "")), 3,
+  "page : trois curseurs généraux quand le piano est disponible")
+aide.verifie(html_piano:find('id="volume-pedale"', 1, true) ~= nil,
+  "page : pédale toujours présente avec le piano")
+aide.verifie(html_piano:find('id="piano-volume"', 1, true) ~= nil,
+  "page : curseur Piano dans le bandeau")
+aide.verifie(html_piano:find('id="value-piano"', 1, true) ~= nil,
+  "page : valeur en %% du curseur Piano")
+aide.verifie(html_piano:find('style="--fill: 40%"', 1, true) ~= nil,
+  "page : remplissage initial du curseur Piano")
+aide.verifie(html_piano:find('style="--fill: 25%"', 1, true) ~= nil,
+  "page : remplissage initial de la pédale depuis l'état publié")
+-- Ordre du bandeau : Volume, Pédale, Piano (après Pédale).
+local pos_pedale = html_piano:find('id="volume-pedale"', 1, true)
+local pos_piano_curseur = html_piano:find('id="piano-volume"', 1, true)
+aide.verifie(pos_pedale and pos_piano_curseur and pos_pedale < pos_piano_curseur,
+  "page : curseur Piano après Pédale dans le bandeau")
+aide.egal(select(2, html_piano:gsub('class="piano%-bouton"', "")), 3,
+  "page : un bouton Piano par division")
+local sections = {}
+for morceau in html_piano:gmatch('<section class="division">(.-)</section>') do
+  sections[#sections + 1] = morceau
+end
+aide.egal(#sections, 3, "page : une section par division avec le piano")
+for i, morceau in ipairs(sections) do
+  local pos = morceau:find('class="piano-bouton"', 1, true)
+  local apres = pos and morceau:sub(pos) or ""
+  aide.verifie(pos ~= nil and apres:find('class="link"', 1, true) == nil and
+    apres:find('class="transposition', 1, true) == nil,
+    "page : bouton Piano en dernier sur la rangée de la division " .. (i - 1))
+  aide.egal(select(2, morceau:gsub('class="links"', "")), 1,
+    "page : une seule rangée basse dans la division " .. (i - 1))
+end
+local section_trans
+for _, morceau in ipairs(sections) do
+  if morceau:find('id="transposition"', 1, true) then section_trans = morceau end
+end
+aide.verifie(section_trans ~= nil and
+  section_trans:find('class="piano-bouton"', 1, true) ~= nil,
+  "page : Piano et Transposition sur la même rangée")
+aide.verifie(html_piano:find('aria-pressed="false"', 1, true) ~= nil,
+  "page : bouton Piano inactif annoncé (aria-pressed)")
+local html_piano_actif = page({{name = "Manual I", gain = 0.5, links = {},
+  piano = true, stops = {{name = "Montre 8", on = true}}}}, 1, 0,
+  {piano_disponible = true})
+aide.verifie(html_piano_actif:find('data-state="on"', 1, true) ~= nil,
+  "page : bouton Piano enfoncé quand la division joue sur le piano")
+aide.verifie(html_piano_actif:find('aria-pressed="true"', 1, true) ~= nil,
+  "page : état enfoncé porté par aria-pressed")
 aide.verifie(html_page:find('data-step="0"', 1, true) ~= nil,
   "page : première combinaison")
 aide.verifie(html_page:find('data-step="31"', 1, true) ~= nil,
@@ -277,7 +336,11 @@ local client = require "client"
 aide.verifie(type(client) == "string" and #client > 1000, "client : chaîne JavaScript")
 aide.verifie(client:find("setProperty('--fill'", 1, true) ~= nil,
   "client : volume pose --fill")
-aide.verifie(client:find("pedalSlider", 1, true) ~= nil, "client : curseur pédale")
+aide.verifie(client:find("creerCurseurOrgue", 1, true) ~= nil,
+  "client : curseurs de pédale et de piano")
+aide.verifie(client:find("pianoCurseur", 1, true) ~= nil, "client : curseur piano")
+aide.verifie(client:find("majPianos", 1, true) ~= nil,
+  "client : boutons piano mis à jour par l'état")
 aide.verifie(client:find("saisieVerticale", 1, true) ~= nil,
   "client : saisie relative des curseurs verticaux")
 aide.verifie(client:find("lienQualite", 1, true) ~= nil, "client : lien qualité")

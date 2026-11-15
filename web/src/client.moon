@@ -317,85 +317,99 @@ JS = [[
     send({ muted: !state.muted });
   });
 
-  // --- Volume de la pédale (volume du moteur, distinct du volume système) ---
-  var PEDALE_API = '/api/orgue';
-  var pedalSlider = document.getElementById('volume-pedale');
-  var pedalValueDisplay = document.getElementById('value-pedale');
-  var pedalManip = false;
-  var pedalPending = null;
-  var pedalThrottleTimer = null;
-  var lastPedalPost = 0;
+  // --- Curseurs du moteur : pédale et piano --------------------------------
+  // Même widget vertical et même saisie relative que le volume système ; la
+  // valeur est lue dans /api/orgue et renvoyée sous la clé indiquée (`volume`
+  // en 0..1 pour la pédale, `piano_volume` pour le piano). Un curseur absent
+  // de la page (piano non chargé) n'installe rien.
+  var ORGUE_API = '/api/orgue';
 
-  function paintPedale(percent) {
-    if (!pedalSlider || !pedalValueDisplay) { return; }
-    pedalValueDisplay.textContent = percent + '\u00a0%';
-    pedalSlider.setAttribute('aria-valuetext', percent + '\u00a0%');
-    pedalSlider.style.setProperty('--fill', percent + '%');
-    if (!pedalManip) { pedalSlider.value = String(percent); }
-  }
+  function creerCurseurOrgue(curseur, valeur, cle) {
+    if (!curseur || !valeur) { return null; }
+    var manip = false;
+    var enAttente = null;
+    var minuterie = null;
+    var dernier = 0;
 
-  function sendPedale(percent) {
-    return fetch(PEDALE_API, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ volume: percent / 100 })
-    }).catch(function () {});
-  }
-
-  function flushPedale() {
-    if (pedalPending === null) { return; }
-    var percent = pedalPending;
-    pedalPending = null;
-    lastPedalPost = Date.now();
-    sendPedale(percent);
-  }
-
-  function queuePedale(percent) {
-    pedalPending = percent;
-    if (pedalThrottleTimer !== null) { return; }
-    var wait = Math.max(0, THROTTLE_DELAY - (Date.now() - lastPedalPost));
-    if (wait === 0) {
-      flushPedale();
-      return;
+    function peindre(percent) {
+      valeur.textContent = percent + '\u00a0%';
+      curseur.setAttribute('aria-valuetext', percent + '\u00a0%');
+      curseur.style.setProperty('--fill', percent + '%');
+      if (!manip) { curseur.value = String(percent); }
     }
-    pedalThrottleTimer = window.setTimeout(function () {
-      pedalThrottleTimer = null;
-      flushPedale();
-    }, wait);
-  }
 
-  function finishPedale() {
-    if (!pedalManip) { return; }
-    var percent = clampVolume(pedalSlider.value);
-    pedalManip = false;
-    if (pedalThrottleTimer !== null) {
-      window.clearTimeout(pedalThrottleTimer);
-      pedalThrottleTimer = null;
+    function envoyer(percent) {
+      var corps = {};
+      corps[cle] = percent / 100;
+      return fetch(ORGUE_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(corps)
+      }).catch(function () {});
     }
-    pedalPending = null;
-    if (percent === null) { return; }
-    paintPedale(percent);
-    sendPedale(percent);
-  }
 
-  if (pedalSlider) {
-    pedalSlider.addEventListener('pointerdown', function () { pedalManip = true; });
-    pedalSlider.addEventListener('input', function () {
-      var percent = clampVolume(pedalSlider.value);
+    function vider() {
+      if (enAttente === null) { return; }
+      var percent = enAttente;
+      enAttente = null;
+      dernier = Date.now();
+      envoyer(percent);
+    }
+
+    function empiler(percent) {
+      enAttente = percent;
+      if (minuterie !== null) { return; }
+      var attente = Math.max(0, THROTTLE_DELAY - (Date.now() - dernier));
+      if (attente === 0) {
+        vider();
+        return;
+      }
+      minuterie = window.setTimeout(function () {
+        minuterie = null;
+        vider();
+      }, attente);
+    }
+
+    function fin() {
+      if (!manip) { return; }
+      var percent = clampVolume(curseur.value);
+      manip = false;
+      if (minuterie !== null) {
+        window.clearTimeout(minuterie);
+        minuterie = null;
+      }
+      enAttente = null;
       if (percent === null) { return; }
-      pedalManip = true;
-      paintPedale(percent);
-      queuePedale(percent);
+      peindre(percent);
+      envoyer(percent);
+    }
+
+    curseur.addEventListener('pointerdown', function () { manip = true; });
+    curseur.addEventListener('input', function () {
+      var percent = clampVolume(curseur.value);
+      if (percent === null) { return; }
+      manip = true;
+      peindre(percent);
+      empiler(percent);
     });
-    pedalSlider.addEventListener('change', finishPedale);
-    pedalSlider.addEventListener('blur', finishPedale);
-    window.addEventListener('pointerup', finishPedale);
-    window.addEventListener('touchend', finishPedale, { passive: true });
-    window.addEventListener('pointercancel', finishPedale);
-    saisieVerticale(pedalSlider);
-    var initial = clampVolume(pedalSlider.value);
-    paintPedale(initial === null ? 50 : initial);
+    curseur.addEventListener('change', fin);
+    curseur.addEventListener('blur', fin);
+    window.addEventListener('pointerup', fin);
+    window.addEventListener('touchend', fin, { passive: true });
+    window.addEventListener('pointercancel', fin);
+    saisieVerticale(curseur);
+    var initial = clampVolume(curseur.value);
+    peindre(initial === null ? 50 : initial);
+    return {
+      peindre: peindre,
+      manipule: function () { return manip; }
+    };
   }
+
+  var pedalCurseur = creerCurseurOrgue(document.getElementById('volume-pedale'),
+    document.getElementById('value-pedale'), 'volume');
+  var pianoCurseur = creerCurseurOrgue(document.getElementById('piano-volume'),
+    document.getElementById('value-piano'), 'piano_volume');
 
   document.addEventListener('visibilitychange', function () {
     if (!document.hidden) { refresh(); }
@@ -534,6 +548,7 @@ JS = [[
         orgueState.stops = stops;
         if (window.majGains) { window.majGains(data.divisions); }
         if (window.majLiens) { window.majLiens(data.divisions); }
+        if (window.majPianos) { window.majPianos(data.divisions); }
         majClavierCanaux(data.divisions);
       }
       document.querySelectorAll('.stop').forEach(function (btn) {
@@ -551,9 +566,17 @@ JS = [[
       if (data && typeof data === 'object' && typeof data.transposition === 'number' && isFinite(data.transposition)) {
         if (window.majTransposition) { window.majTransposition(data.transposition); }
       }
-      if (data && typeof data === 'object' && typeof data.volume === 'number' && isFinite(data.volume)) {
-        var pourcent = Math.round(Math.max(0, Math.min(1, data.volume)) * 100);
-        if (!pedalManip) { paintPedale(pourcent); }
+      // Curseurs généraux du moteur : valeurs publiées par le fil audio,
+      // jamais pendant qu'on les manipule (la saisie locale l'emporte).
+      if (data && typeof data === 'object') {
+        if (typeof data.volume === 'number' && isFinite(data.volume) &&
+            pedalCurseur && !pedalCurseur.manipule()) {
+          pedalCurseur.peindre(Math.round(Math.max(0, Math.min(1, data.volume)) * 100));
+        }
+        if (typeof data.piano_volume === 'number' && isFinite(data.piano_volume) &&
+            pianoCurseur && !pianoCurseur.manipule()) {
+          pianoCurseur.peindre(Math.round(Math.max(0, Math.min(1, data.piano_volume)) * 100));
+        }
       }
       if (data && typeof data === 'object' && data.source === 'aeolus') {
         aeolusMode = true;
@@ -984,6 +1007,28 @@ JS = [[
         var div = divisions[parseInt(btn.getAttribute('data-division'), 10)];
         var l = div && div.links && div.links[parseInt(btn.getAttribute('data-index'), 10)];
         if (l) { btn.setAttribute('data-state', l.on ? 'on' : 'off'); }
+      });
+    };
+
+    // Bouton Piano de chaque clavier : bascule le drapeau de la division
+    // (le piano joue en parallèle de l'orgue). L'état est republié par le fil
+    // audio, donc l'attente longue le reflète, y compris depuis une autre
+    // interface ou après un redémarrage.
+    document.querySelectorAll('.piano-bouton').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        postOrgue({ piano: {
+          division: parseInt(btn.getAttribute('data-division'), 10),
+          actif: btn.getAttribute('data-state') !== 'on'
+        } });
+      });
+    });
+    window.majPianos = function (divisions) {
+      document.querySelectorAll('.piano-bouton').forEach(function (btn) {
+        var div = divisions[parseInt(btn.getAttribute('data-division'), 10)];
+        if (!div) { return; }
+        var actif = div.piano === true;
+        btn.setAttribute('data-state', actif ? 'on' : 'off');
+        btn.setAttribute('aria-pressed', actif ? 'true' : 'false');
       });
     };
 

@@ -346,7 +346,10 @@ CSS = [[
   }
 
   .links { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 2px; }
-  .links .link { flex: 1 1 4em; }
+  .links .link, .links .piano-bouton { flex: 1 1 4em; }
+  /* Le bouton Piano partage sa rangée avec la transposition du Manuel III :
+   le bloc de transposition garde sa place, le bouton vient en dernier. */
+  .links .transposition { flex: 1 1 auto; min-width: 0; margin-top: 0; }
   /* Transposition globale, en bas de la colonne du Manuel III. */
   .transposition {
     display: flex;
@@ -549,7 +552,7 @@ CSS = [[
     gap: 8px;
     margin-top: 10px;
   }
-  .stop, .link {
+  .stop, .link, .piano-bouton {
     min-height: 46px;
     padding: 6px 8px;
     border: 2px solid var(--border);
@@ -563,16 +566,16 @@ CSS = [[
     cursor: pointer;
     touch-action: manipulation;
   }
-  .stop[data-state="on"], .link[data-state="on"] {
+  .stop[data-state="on"], .link[data-state="on"], .piano-bouton[data-state="on"] {
     border-color: var(--on);
     background: rgba(124, 240, 178, 0.15);
     color: var(--on);
   }
-  .stop[data-state="off"], .link[data-state="off"] {
+  .stop[data-state="off"], .link[data-state="off"], .piano-bouton[data-state="off"] {
     border-color: var(--border);
     color: var(--text-dim);
   }
-  .stop[data-state="unknown"], .link[data-state="unknown"] {
+  .stop[data-state="unknown"], .link[data-state="unknown"], .piano-bouton[data-state="unknown"] {
     border-style: dashed;
     color: var(--unknown);
   }
@@ -714,7 +717,7 @@ CSS = [[
   }
   /* Deux lignes de texte (0,85 rem, interligne 1,2) plus marges et bordure
      font ~41 px : 44 px garantit la cible tactile et deux lignes entières. */
-  .stop, .link { min-height: 44px; padding: 2px 4px; border-width: 1px; border-radius: 4px; }
+  .stop, .link, .piano-bouton { min-height: 44px; padding: 2px 4px; border-width: 1px; border-radius: 4px; }
   .stop { padding-block: 3px; }
   .transposition { margin-top: 2px; gap: 4px; padding: 2px; }
   .transposition .btn.small { min-width: 44px; min-height: 44px; }
