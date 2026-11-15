@@ -1168,7 +1168,8 @@ async function testResponsive() {
             // \s doit rester \s dans le code évalué : la chaîne est d'abord
             // un littéral gabarit JS.
             stops.push({ texte: e.textContent.trim().replace(/\\s+/g, ' '),
-                         h: r.height, sh: e.scrollHeight, ch: e.clientHeight });
+                         h: r.height, sh: e.scrollHeight, ch: e.clientHeight,
+                         sw: e.scrollWidth, cw: e.clientWidth });
           }
         }
         return {
@@ -1202,10 +1203,13 @@ async function testResponsive() {
         // Le texte de chaque bouton de jeu doit tenir entièrement dans la
         // case (scrollHeight <= clientHeight + 1) : une grille étirée ou des
         // colonnes trop étroites coupent les noms sur deux ou trois lignes.
-        const debordStops = mesure.stops.filter((b) => b.sh > b.ch + 1);
+        // Le nom doit tenir entièrement dans le bouton : ni hauteur coupée
+        // (rangée trop basse), ni largeur coupée (mot plus large que la case,
+        // coupé au bord).
+        const debordStops = mesure.stops.filter((b) => b.sh > b.ch + 1 || b.sw > b.cw + 1);
         verifie(
           mesure.stops.length > 0 && debordStops.length === 0,
-          `web / à ${largeur} px : aucun texte de bouton de jeu ne déborde (${debordStops.map((b) => b.texte + ' ' + b.sh + '>' + b.ch).join(', ') || mesure.stops.length + ' boutons complets'})`
+          `web / à ${largeur} px : aucun texte de bouton de jeu ne déborde (${debordStops.map((b) => b.texte + ' ' + b.sh + '>' + b.ch + ' / ' + b.sw + '>' + b.cw).join(', ') || mesure.stops.length + ' boutons complets'})`
         );
         const petitsStops = mesure.stops.filter((b) => b.h < 44);
         verifie(
