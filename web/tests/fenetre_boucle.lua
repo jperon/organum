@@ -7,6 +7,7 @@ local function nouvel_etat()
   local e = {
     seq = 1, etape = 0, netapes = 32, volume = 0.5, reverb = 0.3,
     temperament = 5, midi = "128:0", canaux_actifs = 0,
+    piano_disponible = false, piano_volume = 0.5, piano_voix = 0,
     netapes = 32, divisions = {},
     qualite = {
       bruit_attaque = true, instabilite = true, spatialisation = 2,
@@ -34,6 +35,10 @@ end
 local function scenario(plan, nframes, options)
   options = options or {}
   local e = nouvel_etat()
+  if options.piano then
+    e.piano_disponible = true
+    for _, div in ipairs(e.divisions) do div.piano = false end
+  end
   local commandes = {}
 
   local ui = {l = options.largeur or 1024, h = options.hauteur or 640,
@@ -80,6 +85,8 @@ local function scenario(plan, nframes, options)
     self.curseur_appels = (self.curseur_appels or 0) + 1
     if self.bouger == "general" and self.curseur_appels == 1 then
       return valeur + 0.1
+    elseif self.bouger == "piano" and self.curseur_appels == 2 then
+      return valeur + 0.1
     elseif self.bouger == "gains" and self.curseur_appels > 1 then
       return valeur + 0.1
     end
@@ -105,6 +112,8 @@ local function scenario(plan, nframes, options)
   end
   o.lien = function(d, i, v) noter("lien"); e.divisions[d].liens[i].actif = v end
   o.gain = function(d, v) noter("gain"); e.divisions[d].gain = v end
+  o.piano = function(d, v) noter("piano"); e.divisions[d].piano = v end
+  o.piano_volume = function(v) noter("piano_volume"); e.piano_volume = v end
   o.volume = function(v) noter("volume"); e.volume = v end
   o.reverb = function(v) noter("reverb"); e.reverb = v end
   o.qualite = function(k, v) noter("qualite"); e.qualite[k] = v end
@@ -201,6 +210,20 @@ end
 aide.egal(gains, 4, "gain : commandes gain")
 aide.egal(volumes, 0, "gain : aucune commande de volume")
 aide.egal(cmd[1] and cmd[1].frame, 3, "gain : commande à l'image du mouvement")
+
+-- Piano : le bouton de la rangée basse de chaque clavier bascule le drapeau
+-- de sa division (une seule commande par clic).
+cmd = scenario({[5] = {"Piano"}}, 7, {piano = true})
+aide.egal(#cmd, 1, "piano : un clic sur Piano, une commande")
+aide.egal(cmd[1] and cmd[1].nom, "piano", "piano : la commande est le piano")
+aide.egal(cmd[1] and cmd[1].frame, 5, "piano : commande à l'image du clic")
+
+-- Piano : le curseur du bandeau règle le volume du piano (deuxième curseur
+-- général quand le volume système est absent : Volume, puis Piano).
+cmd = scenario({}, 6, {piano = true, bouger_frame = 3, bouger = "piano"})
+aide.egal(#cmd, 1, "piano : un mouvement du curseur, une commande")
+aide.egal(cmd[1] and cmd[1].nom, "piano_volume",
+  "piano : la commande est le volume du piano")
 
 -- MIDI : navigation puis plusieurs images sans clic n'émettent rien.
 cmd = scenario({[1] = {"MIDI"}}, 7, {midi = true})

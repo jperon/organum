@@ -162,12 +162,35 @@ disposer = (e, l, h, rapport, rapport_deux, cible, nb_generaux = 0) ->
               meilleure = {police: police, entete: entete, jeu: jeu, case: case_jeu, :sous, :lignes_combi, :rangs, :score}
             break
       -- Repli pour une fenêtre trop petite : la plus grande police possible,
-      -- quitte à rogner les rangées d'en-tête.
-      if not repli or par_largeur > repli.police
-        police_repli = math.max POLICE_MIN, par_largeur
-        entete_repli = math.max police_repli + 4, math.ceil(2.2 * police_repli)
-        jeu_repli = math.max 1, (h - fixe - (haut + 1) * entete_repli) / col_jeu - ESPACE
-        repli = {police: police_repli, entete: entete_repli, jeu: jeu_repli, case: case_jeu, :sous, :lignes_combi, :rangs}
+      -- quitte à rogner les rangées d'en-tête. La police est d'abord bornée
+      -- par la hauteur de rangée (deux lignes de texte doivent tenir, sinon un
+      -- clavier de quinze jeux dans une fenêtre basse superposerait les noms),
+      -- puis, entre deux replis, on préfère des rangées lisibles, la plus
+      -- large case de jeu et enfin la plus haute : à 800 × 480 avec quatre
+      -- claviers, deux sous-colonnes rognent à peine les noms les plus longs,
+      -- une seule les rend illisibles.
+      police_repli = math.max POLICE_MIN, math.min(par_largeur, POLICE_MAX)
+      entete_repli, jeu_repli = nil, nil
+      for _ = 1, 4
+        entete_essai = math.max police_repli + 4, math.ceil(2.2 * police_repli)
+        jeu_essai = math.max 1, (h - fixe - (haut + 1) * entete_essai) / col_jeu - ESPACE
+        police_essai = math.max POLICE_MIN, math.floor (jeu_essai - 6) / 2
+        entete_repli, jeu_repli = entete_essai, jeu_essai
+        break if police_essai >= police_repli
+        police_repli = police_essai
+      candidat = {
+        police: police_repli
+        entete: entete_repli
+        jeu: jeu_repli
+        case: case_jeu
+        :sous, :lignes_combi, :rangs
+        lisible: jeu_repli >= 2 * police_repli + 6
+      }
+      if not repli or (candidat.lisible and not repli.lisible) or
+          (candidat.lisible == repli.lisible and
+           (candidat.case > repli.case + 1e-6 or
+            (math.abs(candidat.case - repli.case) <= 1e-6 and candidat.jeu > repli.jeu)))
+        repli = candidat
   p = meilleure or repli
   p.bande, p.l_jeux, p.nb_generaux = bande, l_jeux, nb_generaux
   p.largeur_colonne, p.largeur_jeux = largeur_colonne, largeur_jeux

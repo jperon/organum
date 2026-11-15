@@ -208,6 +208,16 @@ aide.egal(etroit.colonne_curseur, d.CURSEUR_LARGEUR,
 aide.egal(etroit.bande, 2 * d.CURSEUR_LARGEUR + d.ESPACE + d.CADRE_GROUPE,
   "disposer : bandeau serré en étroit")
 
+-- Fenêtre native la plus petite avec les trois curseurs généraux (Volume,
+-- Pédale, Piano), quatre claviers et quinze jeux : la place manque pour une
+-- disposition confortable, mais le repli doit garder deux sous-colonnes et
+-- des rangées assez hautes pour deux lignes de texte ; sinon les noms se
+-- superposent (mesuré sur l'orgue par défaut : r1 ≈ 9,36, r2 ≈ 4,74).
+local petit = d.disposer(etat(4, 15, true), 800, 480, 9.36, 4.74, 13, 3)
+aide.egal(petit.sous, 2, "disposer : 800x480, trois curseurs et quatre claviers, deux sous-colonnes")
+aide.verifie(petit.jeu >= 2 * petit.police + 6,
+  "disposer : 800x480, trois curseurs, rangées lisibles", petit.jeu)
+
 -- Sans curseur général, la console retrouve toute la largeur.
 local sans = d.disposer(etat(4, 12, false), 1024, 640, 30, 15, 16, 0)
 aide.egal(sans.bande, 0, "disposer : aucun bandeau sans curseur général")

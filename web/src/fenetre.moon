@@ -983,6 +983,17 @@ MAX_ASSOCIATIONS = 16
         valeur: e.volume
         regler: (v) -> organum.volume v if bouge e.volume, v
       }
+    -- Piano échantillonné : troisième curseur du bandeau, après « Pédale »,
+    -- seulement si le SoundFont a été chargé (sinon aucun bouton Piano).
+    piano = e.piano_disponible == true
+    if piano
+      table.insert generaux, {
+        etiquette: "Piano"
+        valeur: e.piano_volume or 0.5
+        regler: (v) ->
+          return unless bouge (e.piano_volume or 0.5), v
+          organum.piano_volume v
+      }
     p = disposer e, l, h, plus_long / police, plus_long_deux / police, cible, #generaux
     if p.police != police
       ui\police p.police
@@ -1092,36 +1103,58 @@ MAX_ASSOCIATIONS = 16
           ui\place x_gain, bloc - ligne_gain, p.curseur_largeur, ligne_gain
           ui\texte "#{math.floor(g * 100 + 0.5)} %", "centre"
           ui\espace_fin!
-          -- Ligne des accouplements (ou transposition), sous les jeux.
+          -- Rangée basse, sous les jeux : les accouplements, ou la
+          -- transposition pour le clavier qui n'en a pas, et le bouton Piano
+          -- en dernier quand le piano échantillonné est chargé. Un clavier
+          -- sans accouplement garde donc la transposition et reçoit le piano
+          -- sur la même rangée.
+          transposition_ici = d == colonne_transposition and a_des_liens and #div.liens == 0
           if #div.liens > 0
-            ui\ligne p.jeu, #div.liens
+            ui\ligne p.jeu, #div.liens + (piano and 1 or 0)
             for i, lien in ipairs div.liens
               cible = e.divisions[lien.division]
               etiquette = "#{modele.abrege div.nom}+#{modele.abrege cible and cible.nom or '?'}"
               organum.lien d, i, not lien.actif if ui\choix(etiquette, lien.actif) != lien.actif
-          elseif d == colonne_transposition and a_des_liens
-            -- Une seule rangée disponible : −, valeur signée, +. La valeur
-            -- non nulle accentue les trois cellules (couleur de sélection).
-            v = math.tointeger(e.transposition) or 0
-            accent = v != 0
-            ui\ligne_ratio p.jeu, {2, 1, 1.2, 1}
-            ui\texte tronquer("Transposition", (p.largeur_colonne - 3 * ESPACE) * 2 / 5.2)
-            -- Le jeu de police embarqué ne couvre que le latin : le signe
-            -- moins U+2212 y manque, on garde l'hyphen ASCII côté natif.
-            clique_moins = ui\etat("-", accent, false) != accent
-            if clique_moins and v > -12
-              organum.transposition v - 1
-              v -= 1
+            if piano and ui\choix("Piano", div.piano == true) != (div.piano == true)
+              organum.piano d, div.piano != true
+          elseif transposition_ici or piano
+            -- Une seule rangée disponible : −, valeur signée, +, puis Piano.
+            -- La valeur non nulle accentue les cellules (couleur de
+            -- sélection). Les poids laissent au bouton Piano la place de son
+            -- libellé, sans rogner les bornes.
+            poids = if not transposition_ici
+              {1}
+            elseif piano
+              {1.9, 0.7, 0.9, 0.7, 1.25}
+            else
+              {2, 1, 1.2, 1}
+            ui\ligne_ratio p.jeu, poids
+            if transposition_ici
+              v = math.tointeger(e.transposition) or 0
               accent = v != 0
-            texte_valeur = modele.texte_transposition(v)\gsub "\u{2212}", "-"
-            clique_valeur = ui\etat texte_valeur, accent, false
-            if clique_valeur != accent and v != 0
-              organum.transposition 0
-              v = 0
-              accent = false
-            clique_plus = ui\etat("+", accent, false) != accent
-            if clique_plus and v < 12
-              organum.transposition v + 1
+              total = 0
+              for w in *poids
+                total += w
+              largeur_libelle = (p.largeur_colonne - (#poids - 1) * ESPACE) * poids[1] / total
+              ui\texte tronquer("Transposition", largeur_libelle)
+              -- Le jeu de police embarqué ne couvre que le latin : le signe
+              -- moins U+2212 y manque, on garde l'hyphen ASCII côté natif.
+              clique_moins = ui\etat("-", accent, false) != accent
+              if clique_moins and v > -12
+                organum.transposition v - 1
+                v -= 1
+                accent = v != 0
+              texte_valeur = modele.texte_transposition(v)\gsub "\u{2212}", "-"
+              clique_valeur = ui\etat texte_valeur, accent, false
+              if clique_valeur != accent and v != 0
+                organum.transposition 0
+                v = 0
+                accent = false
+              clique_plus = ui\etat("+", accent, false) != accent
+              if clique_plus and v < 12
+                organum.transposition v + 1
+            if piano and ui\choix("Piano", div.piano == true) != (div.piano == true)
+              organum.piano d, div.piano != true
           ui\groupe_fin!
     ui\fin!
     ui\dessiner 30, 30, 30
