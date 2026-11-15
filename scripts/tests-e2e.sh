@@ -641,9 +641,10 @@ if mode == "console" then
   -- Transposition : une seule rangée (celle des accouplements) en bas de la
   -- colonne. Quatre cellules de poids {2, 1, 1.2, 1} : le libellé, « − », la
   -- valeur signée, « + » ; le bouton Piano, quand il est là, occupe une
-  -- cinquième cellule à poids {1.9, 0.7, 0.9, 0.7, 1.25}.
+  -- cinquième cellule à poids {2.4, 0.55, 0.6, 0.55, 1.1} (mêmes poids que
+  -- fenetre.moon : « Transposition » et « Piano » entiers).
   local yr = arrondi(bloc_y + bloc + d.ESPACE + p.jeu / 2)
-  local poids = piano and {1.9, 0.7, 0.9, 0.7, 1.25} or {2, 1, 1.2, 1}
+  local poids = piano and {2.4, 0.55, 0.6, 0.55, 1.1} or {2, 1, 1.2, 1}
   print("trans_moins_x=" .. arrondi(d.colonne_ratio(cx, p.largeur_colonne, poids, 2).centre))
   print("trans_valeur_x=" .. arrondi(d.colonne_ratio(cx, p.largeur_colonne, poids, 3).centre))
   print("trans_plus_x=" .. arrondi(d.colonne_ratio(cx, p.largeur_colonne, poids, 4).centre))

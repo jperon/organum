@@ -1132,12 +1132,16 @@ MAX_ASSOCIATIONS = 16
           elseif transposition_ici or piano
             -- Une seule rangée disponible : −, valeur signée, +, puis Piano.
             -- La valeur non nulle accentue les cellules (couleur de
-            -- sélection). Les poids laissent au bouton Piano la place de son
-            -- libellé, sans rogner les bornes.
+            -- sélection). Les poids donnent au libellé « Transposition » et
+            -- au bouton « Piano » la place de leur texte entier (le libellé
+            -- d'un clavier de 145 px de contenu en réclame 61, « Piano » 27),
+            -- sans rogner les bornes ; l'ancien partage {1.9, 0.7, 0.9, 0.7,
+            -- 1.25} tronquait « Transposition » dès que la police grandissait
+            -- avec la place rendue par le bandeau plus étroit.
             poids = if not transposition_ici
               {1}
             elseif piano
-              {1.9, 0.7, 0.9, 0.7, 1.25}
+              {2.4, 0.55, 0.6, 0.55, 1.1}
             else
               {2, 1, 1.2, 1}
             ui\ligne_ratio p.jeu, poids

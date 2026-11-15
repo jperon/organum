@@ -392,10 +392,11 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   cibles web ≥ 44 px. Un clic sur la valeur centrale (page web et fenêtre
   native) remet la transposition à 0. Quand le piano est disponible, cette
   rangée porte aussi son bouton, en dernier : côté natif les poids passent à
-  {1.9, 0.7, 0.9, 0.7, 1.25} et le libellé est tronqué à la largeur de sa
-  case ; côté web le bloc de transposition et le bouton partagent la rangée
-  `.links`. Côté natif, le signe moins est l'hyphen ASCII (la
-  police latin embarquée n'a pas U+2212). Tests réels :
+  {2.4, 0.55, 0.6, 0.55, 1.1}, de quoi écrire « Transposition » et « Piano »
+  entiers à la police courante (le libellé n'est tronqué qu'en dessous, et
+  les bornes gardent leur cible) ; côté web le bloc de transposition et le
+  bouton partagent la rangée `.links`. Côté natif, le signe moins est
+  l'hyphen ASCII (la police latin embarquée n'a pas U+2212). Tests réels :
   `web/scripts/test-transposition.sh`, e2e web et natif (dont croisé),
   `scripts/tests-unitaires.sh` pour l'en-tête C.
 - Piano échantillonné, joué en parallèle de l'orgue : `cosmo/piano/`
