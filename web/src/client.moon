@@ -23,6 +23,10 @@ JS = [[
   // course. Molette : un pas par cran. Double-clic : rien. Les événements
   // input/change de l'input sont émis à la main pour réutiliser les
   // gestionnaires existants (envoi au serveur, --fill, valeur affichée).
+  // Saisie relative d'un curseur, vertical (bandeau large, colonne de gain)
+  // ou horizontal (bandeau compact des écrans étroits) : l'orientation est
+  // lue sur la zone au moment de l'appui (un appui ne fait pas sauter la
+  // valeur ; vers le haut ou la droite, la valeur monte).
   function saisieVerticale(curseur) {
     if (!curseur) { return; }
     var zone = curseur.closest('.curseur-general, .gain-colonne') || curseur.parentNode;
@@ -45,15 +49,20 @@ JS = [[
       curseur.value = String(v);
       curseur.dispatchEvent(new Event('input', { bubbles: true }));
     }
-    function course() {
-      // Course utile : la hauteur de la colonne moins le pouce (24 px).
-      var h = zone.getBoundingClientRect().height - 24;
-      return h > 1 ? h : 1;
+    function geometrie() {
+      // Course utile : la longueur de la zone moins le pouce (24 px), et
+      // orientation : une zone plus large que haute est horizontale.
+      var r = zone.getBoundingClientRect();
+      var horizontale = r.width > r.height;
+      var course = (horizontale ? r.width : r.height) - 24;
+      return { horizontale: horizontale, course: course > 1 ? course : 1 };
     }
     zone.addEventListener('pointerdown', function (e) {
       if (typeof e.button === 'number' && e.button !== 0) { return; }
       e.preventDefault();
-      glisse = { y: e.clientY, valeur: Number(curseur.value) || 0, id: e.pointerId };
+      var g = geometrie();
+      glisse = { x: e.clientX, y: e.clientY, horizontale: g.horizontale,
+                 valeur: Number(curseur.value) || 0, id: e.pointerId };
       try { zone.setPointerCapture(e.pointerId); } catch (err) {}
       // Sans bulle : le même gestionnaire est sur la colonne, l'événement
       // synthétique ne doit pas y revenir (récursion infinie).
@@ -62,7 +71,9 @@ JS = [[
     zone.addEventListener('pointermove', function (e) {
       if (!glisse) { return; }
       e.preventDefault();
-      poser(glisse.valeur + (glisse.y - e.clientY) / course() * (max - min));
+      var g = geometrie();
+      var delta = glisse.horizontale ? e.clientX - glisse.x : glisse.y - e.clientY;
+      poser(glisse.valeur + delta / g.course * (max - min));
     });
     function finGlisse() {
       if (!glisse) { return; }

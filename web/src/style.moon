@@ -963,24 +963,109 @@ CSS = [[
     font-variant-numeric: tabular-nums;
     text-align: center;
   }
-  /* En largeur étroite, le bandeau se serre : deux colonnes de 44 px
-     exactement, sans marge ni bordure superflue ; la largeur gagnée revient
-     aux jeux. Les curseurs restent verticaux et plus courts. */
+  /* En largeur étroite (téléphone), le bandeau vertical pleine hauteur
+     disparaît : une barre compacte en haut de la page réunit les curseurs
+     généraux à l'horizontale (une ligne chacun), puis ↺ et la transposition
+     sur une même ligne. Objectif : libérer l'écran (≤ ~200 px de haut à
+     420 px) ; plus de bandeau collé, la page défile normalement. Au-delà de
+     600 px, le rail vertical pleine hauteur reste la règle. */
   @media (max-width: 600px) {
-    .bandeau {
-      padding: 0;
-      border: 0;
-      gap: 2px;
-      background: transparent;
+    .console {
+      flex-direction: column;
+      gap: 4px;
     }
+    .bandeau {
+      position: static;
+      width: 100%;
+      height: auto;
+      padding: 2px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      gap: 2px;
+      background: var(--panel);
+    }
+    .curseurs-generaux {
+      flex: 0 0 auto;
+      flex-direction: column;
+      gap: 2px;
+    }
+    /* Curseur horizontal : étiquette, piste, valeur sur une ligne de 44 px. */
     .curseur-general {
+      flex-direction: row;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+      min-width: 0;
+      height: 44px;
+      min-height: 44px;
+    }
+    .curseur-general .volume-etiquette {
+      flex: 0 0 4.4em;
+      font-size: 0.75rem;
+    }
+    .curseur-general .value {
+      flex: 0 0 3.2em;
+      text-align: right;
+      font-size: 0.8rem;
+    }
+    .curseur-general input[type="range"] {
+      writing-mode: horizontal-tb;
+      direction: ltr;
+      width: auto;
+      height: 44px;
+      min-height: 44px;
+      flex: 1 1 auto;
+    }
+    /* Remplissage horizontal : le dégradé part de la gauche. */
+    .curseur-general input[type="range"]::-webkit-slider-runnable-track {
+      width: 100%;
+      height: 12px;
+      background: linear-gradient(
+        to right,
+        var(--accent) 0%,
+        var(--accent) var(--fill),
+        var(--track) var(--fill),
+        var(--track) 100%
+      );
+    }
+    .curseur-general input[type="range"]::-webkit-slider-thumb {
+      width: 24px;
+      height: 40px;
+      margin-top: 0;
+      margin-left: 0;
+    }
+    .curseur-general input[type="range"]::-moz-range-track {
+      width: 100%;
+      height: 12px;
+    }
+    .curseur-general input[type="range"]::-moz-range-progress {
+      width: auto;
+      height: 12px;
+    }
+    .curseur-general input[type="range"]::-moz-range-thumb {
+      width: 24px;
+      height: 40px;
+    }
+    /* Pied : ↺ (44 × 44) puis la transposition sur la même ligne. */
+    .bandeau-pied {
+      flex-direction: row;
+      align-items: stretch;
+      gap: 2px;
+    }
+    .bandeau .reset-volumes {
       width: 44px;
       min-width: 44px;
-      height: auto;
+      flex: 0 0 auto;
     }
-    /* « Volume » tient tout juste dans 44 px : un peu plus petit pour laisser
-       de l'air entre les deux étiquettes voisines. */
-    .curseur-general .volume-etiquette { font-size: 0.68rem; }
+    .bandeau .transposition {
+      flex: 1 1 auto;
+      flex-wrap: nowrap;
+      min-width: 0;
+    }
+    .bandeau .transposition-libelle {
+      flex: 0 0 auto;
+      font-size: 0.75rem;
+    }
   }
 
   @media (min-width: 900px) {

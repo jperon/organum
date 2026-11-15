@@ -270,6 +270,42 @@ async function glisserVertical(expression, fraction) {
   return true;
 }
 
+// Glissement horizontal relatif (bandeau compact des écrans étroits) : la
+// ligne reçoit le pointeur ; vers la droite, la valeur monte. Même contrat
+// que glisserVertical (aucun saut au point cliqué).
+async function glisserHorizontal(expression, fraction) {
+  const r = await rect(expression);
+  if (!r) {
+    echec(`ligne de curseur introuvable : ${expression}`);
+    return false;
+  }
+  const x = r.x + r.w / 2;
+  const y = r.y + r.h / 2;
+  if (!(await cibleSousPoint(expression, x, y))) {
+    echec(`ligne de curseur non cliquable : ${expression}`);
+    return false;
+  }
+  const course = r.w - 24;
+  const arrivee = Math.round(Math.max(r.x + 2, Math.min(r.x + r.w - 2, x + fraction * course)));
+  await cdp.envoyer('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+  await cdp.envoyer('Input.dispatchMouseEvent', {
+    type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1
+  });
+  await delay(60);
+  for (let pas = 1; pas <= 4; pas += 1) {
+    await cdp.envoyer('Input.dispatchMouseEvent', {
+      type: 'mouseMoved', x: x + (arrivee - x) * pas / 4, y, button: 'left', buttons: 1
+    });
+    await delay(50);
+  }
+  await delay(120);
+  await cdp.envoyer('Input.dispatchMouseEvent', {
+    type: 'mouseReleased', x: arrivee, y, button: 'left', buttons: 0, clickCount: 1
+  });
+  await delay(300);
+  return true;
+}
+
 // Molette sur une colonne de curseur : un cran = ±1 pas (haut = plus fort).
 async function molette(expression, crans) {
   const r = await rect(expression);
@@ -581,14 +617,15 @@ async function testAccueil() {
     })()`);
     verifie(rangs.length === 0,
       `web / : bouton Piano en dernier sur chaque rangée (${rangs.join(', ') || 'tous'})`);
-    const memeRangee = await evaluer(`(() => {
+    const piedBandeau = await evaluer(`(() => {
       const t = document.querySelector('.transposition');
       if (!t) return null;
-      const rangee = t.parentNode;
-      return !!(rangee.querySelector('.piano-bouton') &&
-        rangee.querySelector('.transposition'));
+      return { dansBandeau: !!t.closest('.bandeau'),
+               dansBandeauPied: !!t.closest('.bandeau-pied'),
+               dansClavier: !!t.closest('.division') };
     })()`);
-    verifie(memeRangee === true, 'web / : Piano et Transposition sur la même rangée');
+    verifie(piedBandeau && piedBandeau.dansBandeauPied && !piedBandeau.dansClavier,
+      'web / : transposition dans le pied du bandeau, hors des claviers');
 
     // Clic réel sur le bouton du dernier clavier (le pédalier) : état relu
     // dans l'API et bouton enfoncé (data-state).
@@ -612,28 +649,27 @@ async function testAccueil() {
     await attendre(async () => (await api('/api/orgue')).divisions[dp].piano === false,
       'web / : second clic sur Piano relâche la division');
 
-    // Le clavier qui porte la Transposition : le clic sur Piano ne la touche
-    // pas, et un POST d'une autre interface se reflète dans le bouton.
-    const dtrans = await evaluer(`(() => {
-      const t = document.querySelector('.transposition');
-      if (!t) return -1;
-      return Array.prototype.indexOf.call(
-        document.querySelectorAll('.division'), t.closest('.division'));
-    })()`);
-    if (dtrans >= 0) {
+    // La transposition est un réglage global, dans le bandeau : le clic sur
+    // Piano d'un clavier ne la touche pas, et un POST d'une autre interface
+    // se reflète dans le bouton.
+    const dtrans = 0;
+    const transDansBandeau = await evaluer(
+      "!!document.querySelector('.bandeau .transposition')");
+    verifie(transDansBandeau, 'web / : transposition dans le bandeau, pas dans un clavier');
+    {
       await poster('/api/orgue', { transposition: 0 });
       await attendre(async () => (await api('/api/orgue')).transposition === 0,
         'web / : transposition remise à 0 avant le bouton Piano');
       await poster('/api/orgue', { piano: { division: dtrans, actif: false } });
       await attendre(async () => (await api('/api/orgue')).divisions[dtrans].piano === false,
-        'web / : piano du clavier à transposition remis à l’arrêt');
+        'web / : piano du clavier remis à l’arrêt');
       await clic(`document.querySelectorAll('.division')[${dtrans}].querySelector('.piano-bouton')`);
       const vu = await attendre(
         async () => {
           const e = await api('/api/orgue');
           return (e.divisions[dtrans].piano === true && e.transposition === 0) ? e : null;
         },
-        'web / : Piano du clavier à transposition, transposition inchangée'
+        'web / : Piano du clavier, transposition inchangée'
       );
       verifie(!!vu, `web / : divisions[${dtrans}].piano vrai et transposition à 0`);
       // POST venu d'ailleurs : le bouton suit par l'attente longue.
@@ -870,6 +906,75 @@ async function testClavier() {
     `web / à 420 px, clavier ouvert : aucun débordement horizontal (${mesure.debord} px)`);
   verifie(mesure.petits.length === 0,
     `web / à 420 px : touches ≥ 44 px (${mesure.petits.join(', ') || 'toutes'})`);
+}
+
+// Téléphone (420 px) : le bandeau compact place les curseurs généraux à
+// l'horizontale ; la saisie relative doit suivre cet axe, et les commandes du
+// pied (remise à zéro, transposition) rester opérantes.
+async function testEtroit() {
+  await viewport(420);
+  await navigate('/');
+  await attendre(() => evaluer('document.querySelector(".piano-general") !== null'),
+    'web / à 420 px : curseur Piano présent');
+
+  await poster('/api/orgue', { piano_volume: 0.6 });
+  await attendre(async () => Math.abs((await api('/api/orgue')).piano_volume - 0.6) < 0.02,
+    'web / à 420 px : volume du piano remis à 60 avant le glissement');
+  const avantPiano = (await api('/api/orgue')).piano_volume;
+  await glisserHorizontal('document.querySelector(".piano-general")', -0.25);
+  const glisse = await attendre(
+    async () => {
+      const etat = await api('/api/orgue');
+      return Math.abs(etat.piano_volume - (avantPiano - 0.25)) <= 0.07
+        ? Math.round(etat.piano_volume * 100) : null;
+    },
+    'web / à 420 px : curseur Piano horizontal, glissement de −25 %'
+  );
+  verifie(!!glisse,
+    `web / à 420 px : curseur Piano glissé horizontalement, piano_volume relu (${glisse || '?'} %)`);
+  const valeurPiano = await evaluer(`(() => {
+    const c = document.querySelector('.piano-general .value');
+    return c ? c.textContent.trim() : '';
+  })()`);
+  verifie(/^3\d\u00a0%$/.test(valeurPiano),
+    `web / à 420 px : valeur du curseur Piano horizontal affichée (${valeurPiano})`);
+  await poster('/api/orgue', { piano_volume: 0.5 });
+
+  // ↺ dans le pied du bandeau : les gains des claviers reviennent au défaut.
+  const defaut = (await api('/api/orgue')).gain_defaut;
+  await poster('/api/orgue', { gain: { division: 0, value: 0.2 } });
+  await attendre(async () => Math.abs((await api('/api/orgue')).divisions[0].gain - 0.2) < 0.02,
+    'web / à 420 px : gain du premier clavier réglé à 20 % avant ↺');
+  await clic('document.getElementById("reinitialiser-volumes")');
+  const remis = await attendre(
+    async () => {
+      const e = await api('/api/orgue');
+      return Math.abs(e.divisions[0].gain - defaut) < 0.02 ? e.divisions[0].gain : null;
+    },
+    'web / à 420 px : ↺ remet les gains au défaut'
+  );
+  verifie(remis !== null, `web / à 420 px : ↺ fonctionnel (${remis !== null ? (remis * 100).toFixed(0) : '?'} %)`);
+
+  // Transposition dans le pied : + puis clic sur la valeur.
+  await poster('/api/orgue', { transposition: 0 });
+  await attendre(async () => (await api('/api/orgue')).transposition === 0,
+    'web / à 420 px : transposition remise à 0 avant le test');
+  await clic('document.querySelector(".transposition-plus")');
+  const plusUn = await attendre(
+    async () => {
+      const e = await api('/api/orgue');
+      const texte = await evaluer('document.querySelector(".transposition-valeur").textContent');
+      return (e.transposition === 1 && texte === '+1') ? e : null;
+    },
+    'web / à 420 px : + transposite de +1'
+  );
+  verifie(!!plusUn, 'web / à 420 px : transposition +1 relue dans /api/orgue');
+  await clic('document.querySelector(".transposition-valeur")');
+  const retour = await attendre(
+    async () => (await api('/api/orgue')).transposition === 0,
+    'web / à 420 px : clic sur la valeur remet la transposition à 0'
+  );
+  verifie(!!retour, 'web / à 420 px : valeur de transposition cliquable');
 }
 
 async function testMidi() {
@@ -1363,12 +1468,15 @@ async function testResponsive() {
             curseurs.push({ classe: s.className, w: r.width, h: r.height });
           }
         }
-        const verticaux = [];
+        // Curseurs (piste) : orientation et taille, et appartenance au
+        // bandeau (vertical plein écran d'un côté, barre compacte de l'autre).
+        const ranges = [];
         if (${JSON.stringify(chemin)} === '/') {
           for (const e of document.querySelectorAll('.bandeau input[type="range"], .gain-colonne input[type="range"]')) {
             if (e.offsetParent === null) continue;
             const r = e.getBoundingClientRect();
-            verticaux.push({ id: e.id || e.className, w: r.width, h: r.height });
+            ranges.push({ id: e.id || e.className, w: r.width, h: r.height,
+                          bandeau: !!e.closest('.bandeau') });
           }
         }
         const stops = [];
@@ -1421,7 +1529,7 @@ async function testResponsive() {
           petits,
           petitsTrans,
           curseurs,
-          verticaux,
+          ranges,
           stops,
           pianos,
           reset,
@@ -1444,11 +1552,37 @@ async function testResponsive() {
           mesure.curseurs.length >= 5 && etroites.length === 0,
           `web / à ${largeur} px : colonnes de curseurs verticales ≥ 44 px (${mesure.curseurs.length} colonnes, ${etroites.map((c) => c.w.toFixed(0)).join(', ') || 'toutes'})`
         );
-        const horizontaux = mesure.verticaux.filter((c) => c.h <= c.w);
-        verifie(
-          mesure.verticaux.length >= 5 && horizontaux.length === 0,
-          `web / à ${largeur} px : curseurs verticaux (${mesure.verticaux.length} curseurs, ${horizontaux.map((c) => c.id).join(', ') || 'tous verticaux'})`
-        );
+        const duBandeau = mesure.ranges.filter((c) => c.bandeau);
+        if (largeur >= 900) {
+          // Rail vertical : les curseurs du bandeau sont verticaux et
+          // larges d'au moins 44 px, comme ceux des claviers.
+          const mauvais = duBandeau.filter((c) => c.h <= c.w || c.w < 44);
+          verifie(
+            duBandeau.length >= 2 && mauvais.length === 0,
+            `web / à ${largeur} px : curseurs du bandeau verticaux ≥ 44 px (${duBandeau.length} curseurs, ${mauvais.map((c) => `${c.id} ${c.w.toFixed(0)}x${c.h.toFixed(0)}`).join(', ') || 'tous verticaux'})`
+          );
+          const gain = mesure.ranges.filter((c) => !c.bandeau);
+          const mauvaisGain = gain.filter((c) => c.h <= c.w || c.w < 44);
+          verifie(
+            gain.length >= 1 && mauvaisGain.length === 0,
+            `web / à ${largeur} px : curseurs de gain verticaux ≥ 44 px (${gain.length}, ${mauvaisGain.map((c) => c.id).join(', ') || 'tous'})`
+          );
+        } else {
+          // Barre compacte : les curseurs généraux sont horizontaux (plus
+          // larges que hauts) et hauts d'au moins 44 px ; ceux des claviers
+          // restent des colonnes verticales.
+          const mauvais = duBandeau.filter((c) => c.w <= c.h || c.h < 44);
+          verifie(
+            duBandeau.length >= 2 && mauvais.length === 0,
+            `web / à ${largeur} px : curseurs du bandeau horizontaux ≥ 44 px de haut (${duBandeau.length} curseurs, ${mauvais.map((c) => `${c.id} ${c.w.toFixed(0)}x${c.h.toFixed(0)}`).join(', ') || 'tous horizontaux'})`
+          );
+          const gain = mesure.ranges.filter((c) => !c.bandeau);
+          const mauvaisGain = gain.filter((c) => c.h <= c.w || c.w < 44);
+          verifie(
+            gain.length >= 1 && mauvaisGain.length === 0,
+            `web / à ${largeur} px : curseurs de gain verticaux ≥ 44 px (${gain.length}, ${mauvaisGain.map((c) => c.id).join(', ') || 'tous'})`
+          );
+        }
         // Le texte de chaque bouton de jeu doit tenir entièrement dans la
         // case (scrollHeight <= clientHeight + 1) : une grille étirée ou des
         // colonnes trop étroites coupent les noms sur deux ou trois lignes.
@@ -1485,10 +1619,9 @@ async function testResponsive() {
           reset && reset.h >= 44 && reset.w >= 44 && reset.texte === '↺',
           `web / à ${largeur} px : bouton de remise à zéro ≥ 44 px et à icône seule (${reset ? `${reset.w.toFixed(0)}x${reset.h.toFixed(0)} « ${reset.texte} »` : 'absent'})`
         );
-        // Bandeau de gauche sur toute la hauteur visible : au grand écran il
-        // remplit la console, la barre « Clavier » restant visible dessous ;
-        // en étroit il prend la hauteur de la vue et reste collé en haut
-        // quand la page défile.
+        // Bandeau : rail vertical pleine hauteur au grand écran (barre
+        // « Clavier » dégagée dessous) ; barre compacte en haut de la page en
+        // étroit, la plus basse possible pour libérer l'écran.
         const b = mesure.bandeau[0];
         if (largeur >= 900) {
           verifie(
@@ -1506,24 +1639,24 @@ async function testResponsive() {
           );
         } else {
           verifie(
-            b && b.h >= b.vue - 12 && b.haut <= 6,
-            `web / à ${largeur} px : bandeau sur toute la hauteur de la vue (${b ? b.h.toFixed(0) : '?'} px sur ${b ? b.vue : '?'})`
+            b && b.h <= 200 && b.haut <= 6,
+            `web / à ${largeur} px : bandeau compact en haut de la page (${b ? b.h.toFixed(0) : '?'} px, haut ${b ? b.haut.toFixed(0) : '?'})`
           );
-          const apres = await evaluer(`(async () => {
-            window.scrollTo(0, 600);
-            await new Promise((r) => setTimeout(r, 250));
-            const bande = document.querySelector('.bandeau').getBoundingClientRect();
-            const c = document.querySelector('.curseur-general').getBoundingClientRect();
-            return { top: bande.top, bas: bande.bottom, h: bande.height,
-                     curseur: c.height, defile: window.scrollY, vue: window.innerHeight };
+          verifie(
+            b && b.h < b.vue / 2,
+            `web / à ${largeur} px : le bandeau ne prend plus la hauteur de la vue (${b ? b.h.toFixed(0) : '?'} px sur ${b ? b.vue : '?'})`
+          );
+          const pied = await evaluer(`(() => {
+            const p = document.querySelector('.bandeau-pied');
+            const r = p.getBoundingClientRect();
+            const t = document.querySelector('.bandeau .transposition');
+            const rt = t ? t.getBoundingClientRect() : null;
+            return { haut: r.top, bas: r.bottom, h: r.height,
+                     trans: rt ? { h: rt.height, w: rt.width } : null };
           })()`);
           verifie(
-            apres.defile > 0 && Math.abs(apres.top - 4) <= 2 && apres.bas <= apres.vue + 1,
-            `web / à ${largeur} px : bandeau collé et entier après défilement (haut ${apres.top.toFixed(0)}, bas ${apres.bas.toFixed(0)}, défilé ${apres.defile}, vue ${apres.vue})`
-          );
-          verifie(
-            apres.curseur >= apres.vue * 0.6,
-            `web / à ${largeur} px : curseurs étirés après défilement (${apres.curseur.toFixed(0)} px sur ${apres.vue})`
+            pied.trans && pied.trans.w >= 44 && pied.trans.h >= 44,
+            `web / à ${largeur} px : transposition dans le pied du bandeau (${pied.trans ? `${pied.trans.w.toFixed(0)}x${pied.trans.h.toFixed(0)}` : 'absente'})`
           );
         }
       }
@@ -1753,6 +1886,7 @@ async function principal() {
 
   await testAccueil();
   await testClavier();
+  await testEtroit();
   await testMidi();
   await testAudio();
   await testReseaux();

@@ -1028,14 +1028,24 @@ PY
     else
       echec "natif : le glissement du curseur Piano ne donne pas ~0,3 ($(lire_api | head -c 200))"
     fi
-    xdotool mousemove --window "$WID" "$general_2_x" "$general_y"
-    sleep 0.2
-    xdotool click 4
-    sleep 0.4
-    if attendre_valeur 'e["piano_volume"]' 0.31 0.01 40; then
+    # Une molette perdue est déjà arrivée (position et cran dans la même
+    # image) : un second cran après un court délai, comme le ferait un
+    # utilisateur, évite un échec sans rapport avec le curseur.
+    roue_piano() {
+      xdotool mousemove --window "$WID" "$general_2_x" "$general_y"
+      sleep 0.3
+      xdotool click 4
+      sleep 0.4
+    }
+    AVANT_ROUE=$(lire_api | python3 -c 'import json,sys; print(json.load(sys.stdin)["piano_volume"])')
+    roue_piano
+    if ! attendre_valeur 'e["piano_volume"]' "$(python3 -c "print($AVANT_ROUE + 0.01)")" 0.006 30; then
+      roue_piano
+    fi
+    if attendre_valeur 'e["piano_volume"]' "$(python3 -c "print($AVANT_ROUE + 0.01)")" 0.006 40; then
       ok "natif : molette d'un cran sur le curseur Piano (+1 %)"
     else
-      echec "natif : la molette n'a pas augmenté le piano de 1 % ($(lire_api | head -c 120))"
+      echec "natif : la molette n'a pas augmenté le piano de 1 % (piano_volume=$(lire_api | python3 -c 'import json,sys; print(json.load(sys.stdin)["piano_volume"])' 2>/dev/null))"
     fi
     ecrire_json_api '{"piano_volume":0.5}'
     attendre_valeur 'e["piano_volume"]' 0.5 0.01 50
