@@ -15,6 +15,71 @@ JS = [[
   var muteButton = document.getElementById('mute');
   var lienQualite = document.getElementById('lien-qualite');
 
+  // --- Curseurs verticaux : saisie relative --------------------------------
+  // La colonne (.curseur-general, .gain-colonne) reçoit le pointeur ; l'input
+  // est en pointer-events:none (le clavier reste utilisable). Un appui ne
+  // change pas la valeur : seul le déplacement vertical la modifie depuis la
+  // valeur courante (vers le haut = plus fort), proportionnellement à la
+  // course. Molette : un pas par cran. Double-clic : rien. Les événements
+  // input/change de l'input sont émis à la main pour réutiliser les
+  // gestionnaires existants (envoi au serveur, --fill, valeur affichée).
+  function saisieVerticale(curseur) {
+    if (!curseur) { return; }
+    var zone = curseur.closest('.curseur-general, .gain-colonne') || curseur.parentNode;
+    if (!zone) { return; }
+    var glisse = null;
+    var pas = Number(curseur.step) || 1;
+    var min = Number(curseur.min) || 0;
+    var max = Number(curseur.max) || 100;
+    function borner(valeur) {
+      var v = Number(valeur);
+      if (!isFinite(v)) { return null; }
+      v = Math.round(v / pas) * pas;
+      if (v < min) { v = min; }
+      if (v > max) { v = max; }
+      return v;
+    }
+    function poser(valeur) {
+      var v = borner(valeur);
+      if (v === null || String(v) === curseur.value) { return; }
+      curseur.value = String(v);
+      curseur.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    function course() {
+      // Course utile : la hauteur de la colonne moins le pouce (24 px).
+      var h = zone.getBoundingClientRect().height - 24;
+      return h > 1 ? h : 1;
+    }
+    zone.addEventListener('pointerdown', function (e) {
+      if (typeof e.button === 'number' && e.button !== 0) { return; }
+      e.preventDefault();
+      glisse = { y: e.clientY, valeur: Number(curseur.value) || 0, id: e.pointerId };
+      try { zone.setPointerCapture(e.pointerId); } catch (err) {}
+      // Sans bulle : le même gestionnaire est sur la colonne, l'événement
+      // synthétique ne doit pas y revenir (récursion infinie).
+      curseur.dispatchEvent(new Event('pointerdown', { bubbles: false }));
+    });
+    zone.addEventListener('pointermove', function (e) {
+      if (!glisse) { return; }
+      e.preventDefault();
+      poser(glisse.valeur + (glisse.y - e.clientY) / course() * (max - min));
+    });
+    function finGlisse() {
+      if (!glisse) { return; }
+      glisse = null;
+      curseur.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    zone.addEventListener('pointerup', finGlisse);
+    zone.addEventListener('pointercancel', finGlisse);
+    zone.addEventListener('wheel', function (e) {
+      e.preventDefault();
+      var cran = e.deltaY < 0 ? 1 : e.deltaY > 0 ? -1 : 0;
+      if (!cran) { return; }
+      poser((Number(curseur.value) || 0) + cran * pas);
+      curseur.dispatchEvent(new Event('change', { bubbles: true }));
+    }, { passive: false });
+  }
+
   // Couleur du lien Qualité : vient de charge_niveau déjà reçu par la boucle
   // d'état, sans requête supplémentaire. Le texte porte aussi le niveau.
   function majLienQualite(qualite) {
@@ -245,6 +310,7 @@ JS = [[
   window.addEventListener('pointerup', finishInteraction);
   window.addEventListener('touchend', finishInteraction, { passive: true });
   window.addEventListener('pointercancel', finishInteraction);
+  saisieVerticale(slider);
 
   muteButton.addEventListener('click', function () {
     revision += 1;
@@ -326,6 +392,7 @@ JS = [[
     window.addEventListener('pointerup', finishPedale);
     window.addEventListener('touchend', finishPedale, { passive: true });
     window.addEventListener('pointercancel', finishPedale);
+    saisieVerticale(pedalSlider);
     var initial = clampVolume(pedalSlider.value);
     paintPedale(initial === null ? 50 : initial);
   }
@@ -879,13 +946,26 @@ JS = [[
       }
     }
 
-    // Volume de chaque clavier (via le socket d'Aeolus).
+    // Volume de chaque clavier (via le socket d'Aeolus). Le curseur est
+    // vertical, à droite des jeux ; sa valeur en % et son remplissage suivent
+    // la valeur, comme les curseurs généraux.
     var gainManip = {};
+    function peindreGain(g) {
+      var v = Number(g.value);
+      if (!isFinite(v)) { return; }
+      g.style.setProperty('--fill', v + '%');
+      var colonne = g.closest('.gain-colonne');
+      var valeur = colonne && colonne.querySelector('.gain-valeur');
+      if (valeur) { valeur.textContent = v + '\u00a0%'; }
+    }
     document.querySelectorAll('input.gain').forEach(function (g) {
       var d = parseInt(g.getAttribute('data-division'), 10);
-      g.addEventListener('input', function () { gainManip[d] = true; });
+      peindreGain(g);
+      saisieVerticale(g);
+      g.addEventListener('input', function () { gainManip[d] = true; peindreGain(g); });
       g.addEventListener('change', function () {
         gainManip[d] = false;
+        peindreGain(g);
         postOrgue({ gain: { division: d, value: parseInt(g.value, 10) / 100 } });
       });
     });
@@ -913,6 +993,7 @@ JS = [[
         var div = divisions[d];
         if (div && typeof div.gain === 'number' && !gainManip[d]) {
           g.value = String(Math.round(div.gain * 100));
+          peindreGain(g);
         }
       });
     };

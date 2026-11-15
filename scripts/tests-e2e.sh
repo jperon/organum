@@ -247,6 +247,9 @@ demarrer_xvfb() {
 }
 
 # demarrer_organum <avec_fenetre oui|non>
+# Avec la fenêtre, le volume système vient du faux wpctl de $TMP/bin : la
+# fenêtre affiche alors les deux curseurs généraux (Volume et Pédale) comme
+# sur un poste réel, sans jamais toucher au volume de l'utilisateur.
 demarrer_organum() {
   fenetre=$1
   PORT=$(trouver_port)
@@ -256,7 +259,8 @@ demarrer_organum() {
   JOURNAL="$TMP/organum-$PORT.log"
   if [ "$fenetre" = oui ]; then
     setsid env -u ORGANUM_FENETRE -u WAYLAND_DISPLAY \
-      ORGANUM_VOLUME=aucun ORGANUM_PERIPHERIQUE=null ORGANUM_QUALITE=3 \
+      PATH="$TMP/bin:$PATH" ORGANUM_VOLUME=wpctl \
+      ORGANUM_PERIPHERIQUE=null ORGANUM_QUALITE=3 \
       ORGANUM_ETAT="$ETAT" ORGANUM_CONFIG_MIDI="$CONFIG" \
       DISPLAY="$DISPLAY" "$BIN" -l 127.0.0.1 -p "$PORT" >"$JOURNAL" 2>&1 &
   else
@@ -407,6 +411,28 @@ ecrire_json_api() {
   curl -s -X POST -H 'Content-Type: application/json' -d "$1" "$URL/api/orgue" >/dev/null
 }
 
+# attendre_valeur <expression python sur l'état> <cible> <tolérance> <dixièmes>
+# Compare une valeur numérique de /api/orgue à une cible, avec tolérance :
+# une valeur glissée n'est jamais exactement ronde.
+attendre_valeur() {
+  expression=$1; cible=$2; tolerance=$3; dixiemes=$4
+  for _ in $(seq 1 "$dixiemes"); do
+    lire_api >"$TMP/valeur.json"
+    if python3 - "$TMP/valeur.json" "$cible" "$tolerance" "$expression" <<'PY'
+import json, sys
+e = json.load(open(sys.argv[1]))
+cible, tolerance = float(sys.argv[2]), float(sys.argv[3])
+valeur = eval(sys.argv[4], {"e": e})
+sys.exit(0 if abs(float(valeur) - cible) <= tolerance else 1)
+PY
+    then
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
 # Coordonnées calculées par fenetre_disposition, jamais codées en dur.
 # coords <mode> <largeur> <hauteur> [paramètres...]
 coords() {
@@ -550,40 +576,56 @@ if mode == "console" then
   local ndiv = tonumber(os.getenv("NDIV") or "1")
   local maxjeux = tonumber(os.getenv("MAXJEUX") or "10")
   local a_liens = os.getenv("LIENS") == "1"
+  local nb = tonumber(os.getenv("GENERAUX") or "2")
   local divisions = {}
   for i = 1, ndiv do
     local jeux = {}
     for j = 1, maxjeux do jeux[j] = {} end
     divisions[i] = {jeux = jeux, liens = (a_liens and i > 1) and {{}} or {}}
   end
-  local p = d.disposer({divisions = divisions, netapes = 32}, l, h, r1, r2, cible)
-  local y = ligne_y(0, p.entete)
-  local x_audio = colonne(6, 4)
-  local x_panique = colonne(6, 3)
-  local x_midi = colonne(6, 5)
-  print("audio_x=" .. arrondi(x_audio)); print("audio_y=" .. arrondi(y))
-  print("panique_x=" .. arrondi(x_panique)); print("panique_y=" .. arrondi(y))
-  print("midi_x=" .. arrondi(x_midi)); print("midi_y=" .. arrondi(y))
-  -- Transposition : une seule rangée (celle des accouplements) en bas de la
-  -- colonne COL. Rangée intérieure : bord (1) + marge de groupe (4) + une
-  -- rangée d'en-tête de 4 px avant le premier widget, puis nom, gain et
-  -- rangées de jeux (chacune augmentée de l'espacement 4).
-  local col = tonumber(os.getenv("COL") or "0")
-  local w = (l - 2 * MARGE - ESPACE * (ndiv - 1)) / ndiv
-  local gx = MARGE + col * (w + ESPACE)
-  local g = 16 + 2 * p.entete
-  local yr = g + 17 + 2 * p.entete + p.rangs * (p.jeu + ESPACE) + p.jeu / 2
-  local xc = gx + 5
-  local panel = (w - 10) - 4 * ESPACE
-  local total = 5.2
-  local function centre(i, avant, ratio)
-    local x = xc + (avant / total) * panel + i * ESPACE
-    return x + (ratio / total) * panel / 2
+  local p = d.disposer({divisions = divisions, netapes = 32}, l, h, r1, r2, cible, nb)
+  -- Rangée des réglages : Panique, Audio, MIDI, puis trois cases vides ;
+  -- boutons compacts sur six colonnes égales.
+  local y = arrondi(d.rangee_y(0, p.entete))
+  print("panique_x=" .. arrondi(d.case_centre(d.MARGE, l - 2 * d.MARGE, 6, 0))); print("panique_y=" .. y)
+  print("audio_x=" .. arrondi(d.case_centre(d.MARGE, l - 2 * d.MARGE, 6, 1))); print("audio_y=" .. y)
+  print("midi_x=" .. arrondi(d.case_centre(d.MARGE, l - 2 * d.MARGE, 6, 2))); print("midi_y=" .. y)
+  -- Rangée principale : bandeau à gauche, claviers à droite. À l'intérieur
+  -- d'un groupe, le premier widget commence après la bordure, la marge
+  -- interne et l'espacement de la première rangée (groupe_contenu).
+  local principale_y = d.MARGE + d.ESPACE + p.haut * (p.entete + d.ESPACE)
+  local contenu_y = d.groupe_contenu(principale_y)
+  -- Bandeau : étiquette, curseur, valeur en % ; les curseurs côte à côte.
+  local bande_contenu_x = d.MARGE + d.CADRE_GROUPE / 2
+  local bande_largeur = p.bande - d.CADRE_GROUPE
+  local curseur_y = contenu_y + p.etiquette_curseur + d.ESPACE + p.bande_curseur / 2
+  print("general_y=" .. arrondi(curseur_y))
+  for c = 0, nb - 1 do
+    print("general_" .. c .. "_x=" .. arrondi(d.case_centre(bande_contenu_x, bande_largeur, nb, c)))
   end
-  print("trans_moins_x=" .. arrondi(centre(1, 2, 1)))
-  print("trans_plus_x=" .. arrondi(centre(3, 4.2, 1)))
-  print("trans_valeur_x=" .. arrondi(centre(2, 3, 1.2)))
-  print("trans_y=" .. arrondi(yr))
+  print("general_h=" .. arrondi(p.bande_curseur))
+  print("bandeau_x=" .. arrondi(d.MARGE + p.bande / 2))
+  -- Un clavier : COL (0 à ndiv-1). En-tête (nom et Annuler), bloc de jeux
+  -- avec le curseur de gain à droite, puis accouplements ou transposition.
+  local col = tonumber(os.getenv("COL") or "0")
+  local cellw = p.l_jeux / ndiv
+  local gx = d.MARGE + p.bande + d.ESPACE + col * (cellw + d.ESPACE)
+  local cx = gx + d.CADRE_GROUPE / 2
+  local bloc_y = contenu_y + p.entete + d.ESPACE
+  local bloc = p.rangs * p.jeu + (p.rangs - 1) * d.ESPACE
+  local ligne_gain = math.min(p.etiquette_curseur, math.max(0, bloc / 5))
+  local gain_course = bloc - 2 * ligne_gain
+  print("gain_x=" .. arrondi(cx + p.largeur_colonne - p.curseur_largeur + p.curseur_largeur / 2))
+  print("gain_y=" .. arrondi(bloc_y + ligne_gain + gain_course / 2))
+  print("gain_h=" .. arrondi(gain_course))
+  -- Transposition : une seule rangée (celle des accouplements) en bas de la
+  -- colonne, quatre cellules de poids {2, 1, 1.2, 1}.
+  local yr = arrondi(bloc_y + bloc + d.ESPACE + p.jeu / 2)
+  local poids = {2, 1, 1.2, 1}
+  print("trans_moins_x=" .. arrondi(d.colonne_ratio(cx, p.largeur_colonne, poids, 1).centre))
+  print("trans_valeur_x=" .. arrondi(d.colonne_ratio(cx, p.largeur_colonne, poids, 2).centre))
+  print("trans_plus_x=" .. arrondi(d.colonne_ratio(cx, p.largeur_colonne, poids, 3).centre))
+  print("trans_y=" .. yr)
 elseif mode == "qualite" then
   local rows = tonumber(os.getenv("ROWS")); local cols = tonumber(os.getenv("COLS"))
   local p = d.disposer_qualite(rows, l, h, cols)
@@ -761,9 +803,65 @@ if demarrer_xvfb && demarrer_organum oui && attendre_fenetre; then
   read -r R1 R2 <<<"$(parametres_console)"
   eval "$(coords console 1920 1080 "$R1" "$R2")"
 
+  # Bandeau des curseurs généraux : « Volume » (système, faux wpctl) et
+  # « Pédale » (volume du moteur) côte à côte et verticaux. Saisie relative :
+  # un appui seul ne change rien, un glissement de 20 % baisse la valeur.
+  read -r NDIV MAXJEUX LIENS <<<"$(parametres_transposition)"
+  eval "$(NDIV=$NDIV MAXJEUX=$MAXJEUX LIENS=$LIENS COL=0 GENERAUX=2 coords console 1920 1080 "$R1" "$R2")"
+  ecrire_json_api '{"volume":0.5}'
+  attendre_valeur 'e["volume"]' 0.5 0.01 50
+  VOL_AVANT=$(lire_api | python3 -c 'import json,sys; print(json.load(sys.stdin)["volume"])' 2>/dev/null || echo 0.5)
+  clic_xy "$general_1_x" "$general_y"
+  sleep 0.3
+  VOL_APRES_CLIC=$(lire_api | python3 -c 'import json,sys; print(json.load(sys.stdin)["volume"])' 2>/dev/null || echo 0.5)
+  if python3 - "$VOL_AVANT" "$VOL_APRES_CLIC" <<'PY'
+import sys
+sys.exit(0 if abs(float(sys.argv[1]) - float(sys.argv[2])) < 0.02 else 1)
+PY
+  then
+    ok "natif : un appui dans la colonne du curseur ne change pas la valeur"
+  else
+    echec "natif : l'appui dans la colonne a fait sauter la valeur ($VOL_AVANT → $VOL_APRES_CLIC)"
+  fi
+  # Glissement vers le bas de 20 % de la course : la valeur diminue d'autant.
+  eval "$(python3 - "$general_1_x" "$general_y" "$general_h" <<'PY'
+import sys
+x, y, h = float(sys.argv[1]), float(sys.argv[2]), float(sys.argv[3])
+course = h - 24
+print("glisse_depart_y=%d glisse_arrivee_y=%d" % (round(y), round(y + 0.2 * course)))
+PY
+)"
+  glisser_xy "$general_1_x" "$glisse_depart_y" "$general_1_x" "$glisse_arrivee_y"
+  if attendre_valeur 'e["volume"]' 0.3 0.05 60; then
+    ok "natif : glissement du curseur de pédale, valeur relue dans /api/orgue"
+  else
+    echec "natif : le glissement du curseur de pédale ne donne pas ~0,3 ($(lire_api | head -c 200))"
+  fi
+  ecrire_json_api '{"volume":0.5}'
+  attendre_valeur 'e["volume"]' 0.5 0.01 50
+
+  # Curseur de gain du premier clavier, vertical à droite des jeux.
+  ecrire_json_api '{"gain":{"division":0,"value":0.5}}'
+  attendre_valeur 'e["divisions"][0]["gain"]' 0.5 0.01 50
+  eval "$(NDIV=$NDIV MAXJEUX=$MAXJEUX LIENS=$LIENS COL=0 GENERAUX=2 coords console 1920 1080 "$R1" "$R2")"
+  eval "$(python3 - "$gain_x" "$gain_y" "$gain_h" <<'PY'
+import sys
+x, y, h = float(sys.argv[1]), float(sys.argv[2]), float(sys.argv[3])
+course = h - 24
+print("gain_depart_y=%d gain_arrivee_y=%d" % (round(y), round(y + 0.2 * course)))
+PY
+)"
+  glisser_xy "$gain_x" "$gain_depart_y" "$gain_x" "$gain_arrivee_y"
+  if attendre_valeur 'e["divisions"][0]["gain"]' 0.3 0.05 60; then
+    ok "natif : glissement du curseur de gain d'un clavier, valeur relue dans /api/orgue"
+  else
+    echec "natif : le glissement du curseur de gain ne donne pas ~0,3 ($(lire_api | head -c 200))"
+  fi
+  ecrire_json_api '{"gain":{"division":0,"value":0.5}}'
+  attendre_valeur 'e["divisions"][0]["gain"]' 0.5 0.01 50
+
   # Transposition : clic réel sur « + » dans la colonne du Manuel III, valeur
   # relue par l'API, accent visible (captures), borne haute inactive.
-  read -r NDIV MAXJEUX LIENS <<<"$(parametres_transposition)"
   eval "$(NDIV=$NDIV MAXJEUX=$MAXJEUX LIENS=$LIENS COL=0 coords console 1920 1080 "$R1" "$R2")"
   ecrire_json_api '{"transposition":0}'
   attendre_api '"transposition":0' 50

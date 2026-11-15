@@ -55,6 +55,21 @@ aide.egal(d.texte_calibration({echeance_ms = 10, voix_ref = 0}),
   "Calibration automatique · échéance 10.0 ms · 0 voix",
   "calibration : sans niveau mais avec échéance")
 
+-- Géométrie des rangées : largeurs et positions, formes fermées.
+aide.egal(d.largeur_case(100, 2), 48, "géométrie : largeur de case (2 colonnes)")
+aide.egal(d.largeur_case(100, 1), 100, "géométrie : une seule colonne")
+aide.egal(d.case_x(10, 100, 2, 0), 10, "géométrie : bord gauche de la première case")
+aide.egal(d.case_x(10, 100, 2, 1), 62, "géométrie : bord gauche de la seconde case")
+aide.egal(d.case_centre(10, 100, 2, 1), 86, "géométrie : centre de la seconde case")
+aide.egal(d.rangee_y(0, 36), d.MARGE + d.ESPACE + 18, "géométrie : centre de la première rangée")
+aide.egal(d.rangee_y(2, 36), d.MARGE + d.ESPACE + 2 * 40 + 18, "géométrie : centre de la troisième rangée")
+aide.egal(d.groupe_contenu(100), 100 + d.CADRE_GROUPE / 2 + d.ESPACE,
+  "géométrie : premier widget d'un groupe")
+local colonne = d.colonne_ratio(10, 100, {3, 1}, 2)
+aide.egal(colonne.largeur, (100 - d.ESPACE) / 4, "géométrie : largeur d'une case à poids")
+aide.egal(colonne.x, 10 + 3 * (100 - d.ESPACE) / 4 + d.ESPACE, "géométrie : bord d'une case à poids")
+aide.egal(colonne.centre, colonne.x + colonne.largeur / 2, "géométrie : centre d'une case à poids")
+
 local function etat(nbdiv, njeux, liens, netapes)
   local e = {netapes = netapes or 32, divisions = {}}
   for i = 1, nbdiv do
@@ -70,12 +85,61 @@ local function etat(nbdiv, njeux, liens, netapes)
   return e
 end
 
-local tailles = {{320, 200}, {480, 320}, {640, 480}, {1024, 640},
+local tailles = {{320, 200}, {480, 320}, {640, 480}, {800, 480}, {1024, 640},
                  {1280, 720}, {1920, 1080}, {2560, 1440}, {3840, 2160}}
 local configs = {
   {1, 0, false}, {1, 1, false}, {1, 12, false}, {4, 15, true},
   {4, 12, false}, {3, 8, true},
 }
+
+-- Le bandeau des curseurs généraux réserve une colonne de 44 px par réglage :
+-- la largeur des jeux doit en tenir compte, et le total rester dans la
+-- fenêtre. un/deux/trois couvrent « Volume » seule, puis « Volume » et
+-- « Pédale », puis un futur troisième curseur.
+for _, nb_generaux in ipairs({1, 2, 3}) do
+  for _, cfg in ipairs(configs) do
+    local nbdiv, njeux, liens = cfg[1], cfg[2], cfg[3]
+    local e = etat(nbdiv, njeux, liens)
+    for _, size in ipairs(tailles) do
+      local l, h = size[1], size[2]
+      local nom = string.format("%dx%d, %d div, %d jeux, %d curseurs", l, h, nbdiv, njeux, nb_generaux)
+      local cible = math.min(d.POLICE_MAX, math.max(13, math.floor(l / 64)))
+      local p = d.disposer(e, l, h, 30, 15, cible, nb_generaux)
+      aide.egal(p.nb_generaux, nb_generaux, "disposer : nombre de curseurs généraux " .. nom)
+      local colonne = math.max(d.CURSEUR_LARGEUR, l / 16)
+      aide.egal(p.colonne_curseur, colonne, "disposer : largeur d'une colonne de curseur " .. nom)
+      aide.egal(p.bande, nb_generaux * colonne + (nb_generaux - 1) * d.ESPACE + d.CADRE_GROUPE,
+        "disposer : largeur du bandeau " .. nom)
+      aide.verifie(p.l_jeux >= 1, "disposer : largeur des claviers positive " .. nom, p.l_jeux)
+      aide.verifie(p.bande + d.ESPACE + p.l_jeux + 2 * d.MARGE <= l + 1e-6,
+        "disposer : bandeau et claviers dans la fenêtre " .. nom,
+        (p.bande + d.ESPACE + p.l_jeux + 2 * d.MARGE) .. " > " .. l)
+      aide.egal(p.largeur_colonne, p.l_jeux / nbdiv - d.CADRE_GROUPE,
+        "disposer : largeur du contenu d'un clavier " .. nom)
+      aide.egal(p.largeur_jeux, math.max(1, p.largeur_colonne - d.ESPACE - p.curseur_largeur),
+        "disposer : largeur de la grille de jeux " .. nom)
+      aide.verifie(p.curseur_largeur > 0 and p.curseur_largeur <= colonne,
+        "disposer : largeur du curseur de gain " .. nom, p.curseur_largeur)
+      if p.largeur_colonne >= colonne + d.ESPACE + 24 then
+        aide.egal(p.curseur_largeur, colonne,
+          "disposer : curseur de gain assez large quand la place le permet " .. nom)
+      end
+      aide.verifie(p.colonne_curseur >= d.CURSEUR_LARGEUR,
+        "disposer : colonne de curseur au moins sensible " .. nom, p.colonne_curseur)
+      aide.verifie(p.case * p.sous + d.ESPACE * (p.sous - 1) <= p.largeur_jeux + 1e-6,
+        "disposer : jeux dans leur grille " .. nom,
+        (p.case * p.sous + d.ESPACE * (p.sous - 1)) .. " > " .. p.largeur_jeux)
+      aide.verifie(p.etiquette_curseur >= d.BOUTON_HAUTEUR / 2 or p.etiquette_curseur > 0,
+        "disposer : hauteur d'étiquette positive " .. nom)
+      aide.verifie(p.bande_curseur >= d.BOUTON_HAUTEUR,
+        "disposer : curseur du bandeau au moins de la hauteur du bouton " .. nom, p.bande_curseur)
+      local contenu_bande = p.reste - d.CADRE_GROUPE - d.ESPACE
+      aide.verifie(2 * p.etiquette_curseur + p.bande_curseur + 2 * d.ESPACE <= contenu_bande + 1e-6,
+        "disposer : bandeau dans sa case " .. nom,
+        (2 * p.etiquette_curseur + p.bande_curseur + 2 * d.ESPACE) .. " > " .. contenu_bande)
+    end
+  end
+end
 
 for _, cfg in ipairs(configs) do
   local nbdiv, njeux, liens = cfg[1], cfg[2], cfg[3]
@@ -83,7 +147,7 @@ for _, cfg in ipairs(configs) do
   for _, size in ipairs(tailles) do
     local l, h = size[1], size[2]
     local cible = math.min(d.POLICE_MAX, math.max(13, math.floor(l / 64)))
-    local p = d.disposer(e, l, h, 30, 15, cible)
+    local p = d.disposer(e, l, h, 30, 15, cible, 2)
     local nom = string.format("%dx%d, %d div, %d jeux", l, h, nbdiv, njeux)
     aide.verifie(p ~= nil, "disposer : résultat " .. nom)
     if p then
@@ -91,19 +155,22 @@ for _, cfg in ipairs(configs) do
       aide.verifie(p.sous >= 1 and p.sous <= 3, "disposer : sous-colonnes " .. nom)
       aide.verifie(p.lignes_combi >= 1 and p.lignes_combi <= 2, "disposer : lignes combi " .. nom)
       aide.egal(p.rangs, math.ceil(njeux / p.sous), "disposer : rangées " .. nom)
+      -- Rangées d'un clavier : en-tête (nom et Annuler), bloc de jeux, puis
+      -- accouplements éventuels. Chaque rangée avance de sa hauteur + ESPACE,
+      -- sauf la dernière du bloc (d'où le - ESPACE).
       local haut = 1 + p.lignes_combi
       local col_jeu = math.max(1, p.rangs + ((liens and nbdiv > 1) and 1 or 0))
-      local fixe = 2 * d.MARGE + d.ESPACE * (haut + 1) +
-        2 * d.MARGE_GROUPE + d.ESPACE * (2 + col_jeu)
-      local utilise = fixe + (haut + 2) * p.entete + col_jeu * p.jeu
-      local largeur = nbdiv * p.sous *
-        (p.case + 2 * d.MARGE_GROUPE / p.sous + d.ESPACE) + 2 * d.MARGE
-      aide.verifie(p.case > 0, "disposer : case positive " .. nom, p.case)
-      aide.verifie(largeur <= l + 1e-6, "disposer : largeur dans la fenêtre " .. nom,
-        largeur .. " > " .. l)
-      if p.score then
+      local utilise = 2 * d.MARGE + d.CADRE_GROUPE + 2 * d.ESPACE +
+        (haut + 1) * (p.entete + d.ESPACE) + col_jeu * (p.jeu + d.ESPACE) - d.ESPACE
+      aide.verifie(p.reste > 0, "disposer : rangée principale positive " .. nom, p.reste)
+      aide.egal(p.reste, h - 2 * d.MARGE - haut * (p.entete + d.ESPACE) - d.ESPACE,
+        "disposer : hauteur de la rangée principale " .. nom)
+      if p.score or p.jeu > 1 then
         aide.verifie(utilise <= h + 1e-6, "disposer : hauteur dans la fenêtre " .. nom,
           utilise .. " > " .. h)
+      end
+      aide.verifie(p.case > 0, "disposer : case positive " .. nom, p.case)
+      if p.score then
         aide.verifie(p.police <= cible, "disposer : police sous la cible " .. nom)
         -- Cible de AGENTS.md : 36 px d'abord, sinon 2,2 × police, sinon
         -- seulement 2 × police pour ne pas écraser les jeux.
@@ -126,6 +193,17 @@ for _, cfg in ipairs(configs) do
     end
   end
 end
+
+-- Les fonctions de géométrie restent utilisables après un calcul de
+-- disposition (aucun nom local ne doit masquer un export du module).
+aide.egal(d.case_centre(0, 100, 2, 1), 76, "géométrie : case_centre après disposer")
+aide.egal(d.colonne_ratio(0, 100, {1, 1}, 2).centre, 76,
+  "géométrie : colonne_ratio après disposer")
+
+-- Sans curseur général, la console retrouve toute la largeur.
+local sans = d.disposer(etat(4, 12, false), 1024, 640, 30, 15, 16, 0)
+aide.egal(sans.bande, 0, "disposer : aucun bandeau sans curseur général")
+aide.egal(sans.l_jeux, 1024 - 2 * d.MARGE, "disposer : claviers sur toute la largeur sans bandeau")
 
 -- MIDI : 17 colonnes, lignes d'association et d'actions.
 local e4 = etat(4, 15, true)

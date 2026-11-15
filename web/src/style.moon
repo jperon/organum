@@ -713,32 +713,138 @@ CSS = [[
     #panel-orgue:not([hidden]) { flex: 1; min-height: 0; }
     .divisions { flex: 1; min-height: 0; grid-auto-rows: 1fr; align-items: stretch; }
     .division { min-height: 0; }
+    .division-corps { flex: 1 1 auto; min-height: 0; }
     .stops-grid { flex: 1; min-height: 0; grid-auto-rows: 1fr; }
     .stop { min-height: 0; }
   }
 
-  /* Page unique : volume général dans la barre, volume de chaque clavier
-     dans son en-tête. Curseurs horizontaux (le style de base des curseurs
-     est celui, pivoté, de l'ancien curseur vertical). */
-  .barre input[type="range"],
-  .division-tete input[type="range"] {
+  /* Page unique : console en deux parties. À gauche un bandeau vertical de
+     curseurs généraux (Volume système, Pédale), côte à côte, chacun avec son
+     étiquette au-dessus et sa valeur en % en dessous ; à droite la barre de
+     réglages et les claviers. Chaque clavier porte son curseur de gain
+     vertical à droite de ses jeux, de la hauteur du bloc de jeux.
+
+     Curseurs verticaux par écriture verticale (Chromium et Firefox) : le rail
+     reste fin, le pouce mesure 40 × 24 px et toute la colonne (44 px de large,
+     toute la hauteur) est la zone sensible. C'est la colonne qui reçoit les
+     événements du pointeur (saisie relative, voir client.moon), d'où
+     `pointer-events: none` sur l'input : le clavier reste utilisable, la
+     souris et le doigt passent par la colonne. */
+  .console {
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+    min-height: 0;
+  }
+  .bandeau {
+    display: flex;
+    align-items: stretch;
+    gap: 2px;
+    flex: 0 0 auto;
+    align-self: flex-start;
+    position: sticky;
+    top: 4px;
+    max-height: calc(100dvh - 8px);
+    padding: 2px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel);
+  }
+  .curseur-general {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    width: 48px;
+    min-width: 48px;
+    /* En étroit, les curseurs restent verticaux mais moins hauts ; la hauteur
+       suit la fenêtre, pour que le pouce reste visible sans défiler. */
+    height: min(46vh, 380px);
+    min-height: 140px;
+    touch-action: none;
+    cursor: ns-resize;
+  }
+  .curseur-general .volume-etiquette { font-size: 0.72rem; }
+  .curseur-general .value {
+    font-size: 0.8rem;
+    line-height: 1.1;
+    min-width: 0;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .console-principal {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+  }
+  .curseur-general input[type="range"],
+  .gain-colonne input[type="range"] {
     position: static;
     transform: none;
-    width: 100%;
-    height: 36px;
+    writing-mode: vertical-lr;
+    direction: rtl;
+    width: 44px;
+    height: 100%;
+    min-height: 96px;
+    flex: 1 1 auto;
+    margin: 0;
+    pointer-events: none;
   }
-  .volume-general {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex: 1 1 220px;
-    min-width: 0;
+  /* Remplissage vertical : le dégradé part du bas, `--fill` vient du client. */
+  .curseur-general input[type="range"]::-webkit-slider-runnable-track,
+  .gain-colonne input[type="range"]::-webkit-slider-runnable-track {
+    width: 12px;
+    height: 100%;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: linear-gradient(
+      to top,
+      var(--accent) 0%,
+      var(--accent) var(--fill),
+      var(--track) var(--fill),
+      var(--track) 100%
+    );
   }
-  .volume-general input[type="range"] { min-width: 0; }
-  .volume-general .value {
-    font-size: 1.1rem;
-    min-width: 3.5em;
-    text-align: right;
+  .curseur-general input[type="range"]::-webkit-slider-thumb,
+  .gain-colonne input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 40px;
+    height: 24px;
+    margin-top: 0;
+    margin-left: -14px;
+    border: 2px solid var(--accent-ink);
+    border-radius: 999px;
+    background: var(--accent-bright);
+    box-shadow: var(--shadow);
+    cursor: grab;
+  }
+  .curseur-general input[type="range"]::-moz-range-track,
+  .gain-colonne input[type="range"]::-moz-range-track {
+    width: 12px;
+    height: 100%;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--track);
+  }
+  .curseur-general input[type="range"]::-moz-range-progress,
+  .gain-colonne input[type="range"]::-moz-range-progress {
+    width: 12px;
+    border-radius: 999px;
+    background: var(--accent);
+  }
+  .curseur-general input[type="range"]::-moz-range-thumb,
+  .gain-colonne input[type="range"]::-moz-range-thumb {
+    width: 40px;
+    height: 24px;
+    border: 2px solid var(--accent-ink);
+    border-radius: 999px;
+    background: var(--accent-bright);
+    box-shadow: var(--shadow);
+    cursor: grab;
   }
   .volume-etiquette, .reverb { font-size: 0.85rem; color: var(--text-dim); }
   .barre .btn.mute,
@@ -747,13 +853,40 @@ CSS = [[
   .division-tete {
     display: flex;
     align-items: center;
-    gap: 8px;
+    justify-content: space-between;
+    gap: 6px;
   }
-  .division-tete .division-nom { flex: 0 0 auto; }
-  .division-tete .gain { flex: 1 1 auto; min-width: 60px; }
+  .division-tete .division-nom { flex: 1 1 auto; min-width: 0; }
+  .division-tete .cancel-division { flex: 0 0 auto; }
+  .division-corps {
+    display: flex;
+    align-items: stretch;
+    gap: 3px;
+    min-height: 0;
+  }
+  .division-corps .stops-grid { flex: 1 1 auto; min-width: 0; }
+  .gain-colonne {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    flex: 0 0 auto;
+    width: 48px;
+    min-width: 48px;
+    touch-action: none;
+    cursor: ns-resize;
+  }
+  .gain-libelle, .gain-valeur {
+    font-size: 0.7rem;
+    line-height: 1.1;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+  }
 
   @media (min-width: 900px) {
-    .volume-general { flex: 1 1 260px; }
+    .console { flex: 1 1 auto; min-height: 0; }
+    .console-principal { flex: 1 1 auto; min-height: 0; }
     .barre .btn.mute,
     .barre .btn.panic { flex: 0 0 auto; padding: 0 24px; margin: 0; }
   }

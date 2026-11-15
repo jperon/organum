@@ -68,14 +68,21 @@ division_html = (di, div, divisions, transposition = 0, colonne_transposition = 
   commande_transposition = ""
   if di + 1 == colonne_transposition and #liens == 0
     commande_transposition = transposition_html transposition
-  h.section class: "division",
-    h.div class: "division-tete",
-      h.h2 class: "division-nom", display div.name,
-      h.input type: "range", class: "gain", ["data-division"]: d, min: "0", max: "100", step: "1", value: tostring(gain), ["aria-label"]: "Volume #{escape div.name}",
-    h.div class: "stops-grid", table.unpack btns,
-    #liens > 0 and h.div(class: "links", table.unpack liens) or "",
-    commande_transposition,
-    h.button class: "btn small cancel-division", ["data-division"]: d, type: "button", "Tout annuler"
+  -- Curseur de gain vertical, à droite des jeux et de leur hauteur ; il a
+  -- quitté la rangée d'en-tête, qui garde le nom et « Annuler ». La valeur en
+  -- % est sous le curseur, le libellé au-dessus.
+  tete_html = h.div class: "division-tete",
+    h.h2(class: "division-nom", display div.name),
+    h.button(class: "btn small cancel-division", ["data-division"]: d, type: "button", "Tout annuler")
+  gain_html = h.div class: "gain-colonne",
+    h.span(class: "gain-libelle", "Gain"),
+    h.input(type: "range", class: "gain", ["data-division"]: d, min: "0", max: "100", step: "1", value: tostring(gain), ["aria-label"]: "Volume #{escape div.name}", style: "--fill: #{gain}%"),
+    h.span(class: "gain-valeur", ["aria-hidden"]: "true", "#{gain}\u{00A0}%")
+  corps_html = h.div class: "division-corps",
+    h.div(class: "stops-grid", table.unpack btns),
+    gain_html
+  liens_html = if #liens > 0 then h.div(class: "links", table.unpack liens) else ""
+  h.section class: "division", tete_html, corps_html, liens_html, commande_transposition
 
 -- Panneau repliable « Clavier », replié par défaut : <details> natif, sans
 -- JavaScript pour le repli. Une option par division réellement publiée par
@@ -135,6 +142,41 @@ clavier_html = (divisions) ->
     h.p class: "note degrade", id: "mode-degrade", table.concat messages, " "
   else
     ""
+  -- Console : bandeau vertical des curseurs généraux à gauche, claviers et
+  -- barre de réglages à droite. Le bandeau est une liste : le jour où un
+  -- troisième réglage (« Piano ») s'ajoute, il suffit d'une entrée de plus,
+  -- la disposition suit.
+  curseur_gen = (ident, etiquette) ->
+    h.div class: (if ident == "volume" then "curseur-general" else "curseur-general pedale-general"),
+      h.label(class: "volume-etiquette", ["for"]: ident, etiquette),
+      h.input(type: "range", id: ident, min: "0", max: "100", step: "1", value: "50", ["aria-valuetext"]: "50\u{00A0}%", style: "--fill: 50%"),
+      h.span(class: "value", id: "value#{if ident == "volume" then "" else "-pedale"}", ["aria-hidden"]: "true", "50\u{00A0}%")
+  etat_html = h.span class: "status #{modele.ETATS.rouge.classe}", id: "status", role: "status", ["aria-live"]: "polite", ["aria-atomic"]: "true", title: escape(modele.ETATS.rouge.title), ["data-libelle-vert"]: escape(modele.ETATS.vert.libelle), ["data-libelle-orange"]: escape(modele.ETATS.orange.libelle), ["data-libelle-rouge"]: escape(modele.ETATS.rouge.libelle), ["data-title-vert"]: escape(modele.ETATS.vert.title), ["data-title-orange"]: escape(modele.ETATS.orange.title), ["data-title-rouge"]: escape(modele.ETATS.rouge.title),
+    h.span class: "sr-only", escape(modele.ETATS.rouge.libelle)
+  combo_html = h.div class: "combo", ["aria-label"]: "Combinaison",
+    h.button(type: "button", class: "btn small", id: "combo-prev", ["aria-label"]: "Combinaison précédente", "◀"),
+    h.input(type: "number", id: "combo-num", min: "1", max: tostring(steps), value: "1", ["aria-label"]: "Numéro de combinaison"),
+    h.button(type: "button", class: "btn small", id: "combo-next", ["aria-label"]: "Combinaison suivante", "▶")
+  combos_html = h.div class: "combo-btns", ["aria-label"]: "Combinaisons",
+    table.unpack [h.button(type: "button", class: "combo-btn", ["data-step"]: tostring(n - 1), tostring n) for n = 1, steps]
+  lien_qualite = h.a class: "btn small lien-qualite charge-gris", href: "/audio", id: "lien-qualite", ["aria-label"]: "Audio — #{escape modele.CHARGE_NIVEAUX[1].libelle}", ["data-charge-classe-0"]: modele.CHARGE_NIVEAUX[1].classe, ["data-charge-classe-1"]: modele.CHARGE_NIVEAUX[2].classe, ["data-charge-classe-2"]: modele.CHARGE_NIVEAUX[3].classe, ["data-charge-classe-3"]: modele.CHARGE_NIVEAUX[4].classe, ["data-charge-libelle-0"]: escape(modele.CHARGE_NIVEAUX[1].libelle), ["data-charge-libelle-1"]: escape(modele.CHARGE_NIVEAUX[2].libelle), ["data-charge-libelle-2"]: escape(modele.CHARGE_NIVEAUX[3].libelle), ["data-charge-libelle-3"]: escape(modele.CHARGE_NIVEAUX[4].libelle), "Audio"
+  barre_html = h.div class: "barre", etat_html, h.noscript(h.span(class: "etat-fallback", "Hors ligne")),
+    h.button(type: "button", class: "btn mute", id: "mute", ["aria-pressed"]: "false", ["aria-label"]: "Couper le son", "Muet"),
+    combo_html,
+    combos_html,
+    h.button(type: "button", class: "btn panic", id: "panic", "Panique"),
+    h.a(class: "btn small", href: "/midi", "MIDI"),
+    lien_qualite
+  bandeau_html = h.div class: "bandeau", role: "group", ["aria-label"]: "Réglages généraux",
+    curseur_gen("volume", "Volume"),
+    curseur_gen("volume-pedale", "Pédale")
+  divisions_html = h.div class: "divisions",
+    table.unpack [division_html(di - 1, div, divisions, transposition, colonne_transposition) for di, div in ipairs divisions]
+  principal_html = h.div class: "console-principal", barre_html, bandeau_degrade,
+    h.p(class: "note", "L'affichage reflète l'état mémorisé par le serveur ; il peut différer si les jeux sont tirés ailleurs."),
+    divisions_html,
+    h.p(class: "note", h.a(href: "https://github.com/jperon/organum", "Code source (AGPL-3.0)"))
+  console_html = h.div class: "console", bandeau_html, principal_html
   page = h.html lang: "fr",
     h.head {},
       h.meta charset: "utf-8",
@@ -143,34 +185,8 @@ clavier_html = (divisions) ->
       h.style style,
     h.body {},
       h.main {},
-        h.section class: "tab-panel", id: "panel-orgue",
-          h.div class: "barre",
-            h.div class: "volume-general",
-              h.label class: "volume-etiquette", ["for"]: "volume", "Volume",
-              h.input type: "range", id: "volume", min: "0", max: "100", step: "1", value: "50", ["aria-valuetext"]: "50\u{00A0}%",
-              h.span class: "value", id: "value", ["aria-hidden"]: "true", "50\u{00A0}%",
-              h.span class: "status #{modele.ETATS.rouge.classe}", id: "status", role: "status", ["aria-live"]: "polite", ["aria-atomic"]: "true", title: escape(modele.ETATS.rouge.title), ["data-libelle-vert"]: escape(modele.ETATS.vert.libelle), ["data-libelle-orange"]: escape(modele.ETATS.orange.libelle), ["data-libelle-rouge"]: escape(modele.ETATS.rouge.libelle), ["data-title-vert"]: escape(modele.ETATS.vert.title), ["data-title-orange"]: escape(modele.ETATS.orange.title), ["data-title-rouge"]: escape(modele.ETATS.rouge.title),
-                h.span class: "sr-only", escape(modele.ETATS.rouge.libelle),
-              h.noscript h.span class: "etat-fallback", "Hors ligne",
-            h.div class: "volume-general pedale-general",
-              h.label class: "volume-etiquette", ["for"]: "volume-pedale", "Pédale",
-              h.input type: "range", id: "volume-pedale", min: "0", max: "100", step: "1", value: "50", ["aria-valuetext"]: "50\u{00A0}%",
-              h.span class: "value", id: "value-pedale", ["aria-hidden"]: "true", "50\u{00A0}%",
-            h.button type: "button", class: "btn mute", id: "mute", ["aria-pressed"]: "false", ["aria-label"]: "Couper le son", "Muet",
-            h.div class: "combo", ["aria-label"]: "Combinaison",
-              h.button type: "button", class: "btn small", id: "combo-prev", ["aria-label"]: "Combinaison précédente", "◀",
-              h.input type: "number", id: "combo-num", min: "1", max: tostring(steps), value: "1", ["aria-label"]: "Numéro de combinaison",
-              h.button type: "button", class: "btn small", id: "combo-next", ["aria-label"]: "Combinaison suivante", "▶",
-            h.div class: "combo-btns", ["aria-label"]: "Combinaisons",
-              table.unpack [h.button(type: "button", class: "combo-btn", ["data-step"]: tostring(n - 1), tostring n) for n = 1, steps],
-            h.button type: "button", class: "btn panic", id: "panic", "Panique",
-            h.a class: "btn small", href: "/midi", "MIDI",
-            h.a class: "btn small lien-qualite charge-gris", href: "/audio", id: "lien-qualite", ["aria-label"]: "Audio — #{escape modele.CHARGE_NIVEAUX[1].libelle}", ["data-charge-classe-0"]: modele.CHARGE_NIVEAUX[1].classe, ["data-charge-classe-1"]: modele.CHARGE_NIVEAUX[2].classe, ["data-charge-classe-2"]: modele.CHARGE_NIVEAUX[3].classe, ["data-charge-classe-3"]: modele.CHARGE_NIVEAUX[4].classe, ["data-charge-libelle-0"]: escape(modele.CHARGE_NIVEAUX[1].libelle), ["data-charge-libelle-1"]: escape(modele.CHARGE_NIVEAUX[2].libelle), ["data-charge-libelle-2"]: escape(modele.CHARGE_NIVEAUX[3].libelle), ["data-charge-libelle-3"]: escape(modele.CHARGE_NIVEAUX[4].libelle), "Audio",
-          bandeau_degrade,
-          h.p class: "note", "L'affichage reflète l'état mémorisé par le serveur ; il peut différer si les jeux sont tirés ailleurs.",
-          h.div class: "divisions", table.unpack [division_html(di - 1, div, divisions, transposition, colonne_transposition) for di, div in ipairs divisions],
-          h.p class: "note", h.a(href: "https://github.com/jperon/organum", "Code source (AGPL-3.0)"),
-        clavier_html divisions,
+        h.section(class: "tab-panel", id: "panel-orgue", console_html),
+        clavier_html(divisions),
       h.script client
 
   "<!DOCTYPE html>\n" .. page

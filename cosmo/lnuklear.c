@@ -17,6 +17,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -119,6 +120,18 @@ static int lnk_ouvrir(lua_State *L) {
   sel->text_normal_active = sel->text_hover_active = sel->text_pressed_active = nk_rgb(255, 255, 255);
   sel->normal = nk_style_item_color(nk_rgb(50, 50, 50));
   sel->hover = nk_style_item_color(nk_rgb(65, 65, 65));
+  // Curseurs : mêmes teintes que la page web (rail sombre, remplissage et
+  // bouton accentués), pour que le curseur vertical dessiné à la main
+  // (ui:curseur_vertical) reste lisible sur le fond sombre.
+  struct nk_style_slider *sl = &u->ctx->style.slider;
+  sl->bar_normal = nk_rgb(43, 54, 68);
+  sl->bar_hover = nk_rgb(52, 65, 82);
+  sl->bar_active = nk_rgb(120, 215, 255);
+  sl->bar_filled = nk_rgb(99, 210, 255);
+  sl->cursor_normal = nk_style_item_color(nk_rgb(166, 231, 255));
+  sl->cursor_hover = nk_style_item_color(nk_rgb(190, 240, 255));
+  sl->cursor_active = nk_style_item_color(nk_rgb(255, 255, 255));
+  sl->border_color = nk_rgb(2, 19, 28);
   luaL_getmetatable(L, "nk.ui");
   lua_setmetatable(L, -2);
   return 1;
@@ -222,10 +235,20 @@ static int ui_ligne_ratio(lua_State *L) {
   float h = (float)luaL_checknumber(L, 2);
   luaL_checktype(L, 3, LUA_TTABLE);
   int cols = (int)lua_rawlen(L, 3);
-  if (cols < 1 || cols > 16) return luaL_error(L, "poids : 1 à 16 colonnes");
+  // 32 : le bandeau des curseurs généraux occupe une colonne de plus que le
+  // nombre de claviers.
+  if (cols < 1 || cols > 32) return luaL_error(L, "poids : 1 à 32 colonnes");
   // Nuklear conserve un pointeur vers le tableau (pas une copie) : il doit
-  // rester valide jusqu'au placement des widgets de la rangée.
-  static float ratio[16];
+  // rester valide jusqu'au placement des widgets de la rangée. Une rangée
+  // d'un groupe est placée pendant que la rangée du panneau parent attend
+  // encore ses cases : chaque profondeur de panneau a donc son propre
+  // tableau, sinon la rangée d'un en-tête de clavier écraserait les poids de
+  // la rangée du bandeau et des claviers.
+  struct nk_panel *pan = u->ctx->current->layout;
+  int profondeur = 0;
+  while (pan && profondeur < 7) { pan = pan->parent; profondeur++; }
+  static float ratios[8][32];
+  float *ratio = ratios[profondeur];
   float somme = 0.0f;
   for (int i = 0; i < cols; ++i) {
     lua_rawgeti(L, 3, i + 1);
@@ -415,6 +438,139 @@ static int ui_curseur(lua_State *L) {
   return 1;
 }
 
+// État du curseur vertical en cours de glissement. Un seul pointeur à la
+// fois : une case suffit. La case du widget sert d'identité, ce qui évite
+// d'ajouter un identifiant côté Lua ; un redimensionnement l'interrompt.
+typedef struct {
+  int actif;
+  struct nk_rect case_widget;
+  float valeur0, souris0;
+} curseur_glissement_t;
+static curseur_glissement_t g_glissement;
+
+// Couleur d'un élément de style, avec repli si c'est une image.
+static struct nk_color couleur_item(const struct nk_style_item *item) {
+  return item->type == NK_STYLE_ITEM_COLOR ? item->data.color : nk_rgb(120, 120, 120);
+}
+
+// ui:curseur_vertical(valeur, min, max[, pas]) → valeur après interaction.
+//
+// Curseur vertical dessiné à la main (nk_slider est horizontal) : rail fin,
+// gros bouton de 40 × 24 px, case entière sensible. La saisie est relative :
+// un appui n'importe où dans la case ne change pas la valeur ; seul le
+// déplacement vertical la modifie depuis la valeur courante (vers le haut =
+// plus fort). Molette : ±pas par cran. Pas de remise à zéro au double-clic.
+static int ui_curseur_vertical(lua_State *L) {
+  ui_t *u = luaL_checkudata(L, 1, "nk.ui");
+  float v = (float)luaL_checknumber(L, 2);
+  float mn = (float)luaL_checknumber(L, 3);
+  float mx = (float)luaL_checknumber(L, 4);
+  float pas = (float)luaL_optnumber(L, 5, 0.01);
+  struct nk_context *ctx = u->ctx;
+  if (mx < mn) { float t = mn; mn = mx; mx = t; }
+  if (v < mn) v = mn;
+  if (v > mx) v = mx;
+
+  // Renseigné avant de consommer la case : nk_widget_is_hovered regarde la
+  // prochaine case, la même que nk_widget réserve ensuite.
+  int survole = nk_widget_is_hovered(ctx);
+  struct nk_rect b;
+  enum nk_widget_layout_states st = nk_widget(&b, ctx);
+  if (!st || st == NK_WIDGET_INVALID) { lua_pushnumber(L, v); return 1; }
+
+  struct nk_input *in = &ctx->input;
+  float plage = mx - mn;
+  float bouton_l = b.w < 40.0f ? b.w : 40.0f;
+  float bouton_h = b.h < 24.0f ? b.h : 24.0f;
+  // Course : la hauteur de la case moins le bouton, pour qu'il ne sorte pas.
+  float course = b.h - bouton_h;
+
+  // Appui : on note la valeur et la position, sans rien changer.
+  if (survole && in->mouse.buttons[NK_BUTTON_LEFT].clicked &&
+      in->mouse.buttons[NK_BUTTON_LEFT].down) {
+    g_glissement.actif = 1;
+    g_glissement.case_widget = b;
+    g_glissement.valeur0 = v;
+    g_glissement.souris0 = in->mouse.pos.y;
+  }
+  // Glissement relatif, tant que c'est la même case et le même bouton.
+  if (g_glissement.actif) {
+    if (!in->mouse.buttons[NK_BUTTON_LEFT].down ||
+        g_glissement.case_widget.x != b.x || g_glissement.case_widget.y != b.y ||
+        g_glissement.case_widget.w != b.w || g_glissement.case_widget.h != b.h) {
+      g_glissement.actif = 0;
+    } else if (course > 1.0f) {
+      float dy = g_glissement.souris0 - in->mouse.pos.y;
+      float nv = g_glissement.valeur0 + dy / course * plage;
+      v = nv < mn ? mn : (nv > mx ? mx : nv);
+    }
+  }
+  // Molette : un cran = un pas, consommé pour ne pas faire défiler la fenêtre.
+  if (survole && in->mouse.scroll_delta.y != 0.0f) {
+    v += pas * in->mouse.scroll_delta.y;
+    if (v < mn) v = mn;
+    if (v > mx) v = mx;
+    in->mouse.scroll_delta.y = 0.0f;
+  }
+  if (v < mn) v = mn;
+  if (v > mx) v = mx;
+
+  // Dessin : rail vertical, remplissage depuis le bas, bouton arrondi.
+  struct nk_command_buffer *out = &ctx->current->buffer;
+  const struct nk_style_slider *style = &ctx->style.slider;
+  float rail_l = 8.0f;
+  float rail_x = b.x + (b.w - rail_l) * 0.5f;
+  float haut = b.y + bouton_h * 0.5f;
+  float bas = b.y + b.h - bouton_h * 0.5f;
+  float frac = plage > 0.0f ? (v - mn) / plage : 0.0f;
+  float bouton_y = bas - frac * course - bouton_h * 0.5f;
+  struct nk_rect rail = nk_rect(rail_x, haut, rail_l, bas - haut);
+  struct nk_rect rempli = nk_rect(rail_x, bouton_y + bouton_h * 0.5f, rail_l,
+                                  bas - (bouton_y + bouton_h * 0.5f));
+  struct nk_rect bouton = nk_rect(b.x + (b.w - bouton_l) * 0.5f, bouton_y, bouton_l, bouton_h);
+  struct nk_color teinte = style->bar_normal;
+  struct nk_color accent = g_glissement.actif ? style->bar_active : style->bar_filled;
+  struct nk_color bouton_col = couleur_item(survole ? &style->cursor_hover : &style->cursor_normal);
+  if (g_glissement.actif) bouton_col = couleur_item(&style->cursor_active);
+  if (rail.h > 0.0f) {
+    nk_fill_rect(out, rail, rail_l * 0.5f, teinte);
+    if (rempli.h > 0.0f) nk_fill_rect(out, rempli, rail_l * 0.5f, accent);
+  }
+  nk_fill_rect(out, bouton, 6.0f, bouton_col);
+  nk_stroke_rect(out, bouton, 6.0f, 2.0f, style->border_color);
+
+  lua_pushnumber(L, v);
+  return 1;
+}
+
+// Espace de placement libre (layout space de Nuklear) : ui:espace_debut(h)
+// ouvre un bloc de h pixels de haut et toute la largeur du panneau courant ;
+// ui:place(x, y, l, h) place le prochain widget à une position en pixels
+// relative au bloc ; ui:espace_fin() le referme. C'est ce qui permet de poser
+// un curseur vertical sur toute la hauteur du bloc de jeux, à droite.
+static int ui_espace_debut(lua_State *L) {
+  ui_t *u = luaL_checkudata(L, 1, "nk.ui");
+  float h = (float)luaL_checknumber(L, 2);
+  nk_layout_space_begin(u->ctx, NK_STATIC, h, INT_MAX);
+  return 0;
+}
+
+static int ui_place(lua_State *L) {
+  ui_t *u = luaL_checkudata(L, 1, "nk.ui");
+  float x = (float)luaL_checknumber(L, 2);
+  float y = (float)luaL_checknumber(L, 3);
+  float l = (float)luaL_checknumber(L, 4);
+  float h = (float)luaL_checknumber(L, 5);
+  nk_layout_space_push(u->ctx, nk_rect(x, y, l, h));
+  return 0;
+}
+
+static int ui_espace_fin(lua_State *L) {
+  ui_t *u = luaL_checkudata(L, 1, "nk.ui");
+  nk_layout_space_end(u->ctx);
+  return 0;
+}
+
 static int ui_groupe_debut(lua_State *L) {
   ui_t *u = luaL_checkudata(L, 1, "nk.ui");
   const char *nom = luaL_checkstring(L, 2);
@@ -461,6 +617,10 @@ static const struct luaL_Reg uifuncs[] = {
   {"etat", ui_etat},
   {"case", ui_case},
   {"curseur", ui_curseur},
+  {"curseur_vertical", ui_curseur_vertical},
+  {"espace_debut", ui_espace_debut},
+  {"place", ui_place},
+  {"espace_fin", ui_espace_fin},
   {"groupe_debut", ui_groupe_debut},
   {"groupe_fin", ui_groupe_fin},
   {"dessiner", ui_dessiner},

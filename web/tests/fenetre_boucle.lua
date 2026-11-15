@@ -50,6 +50,10 @@ local function scenario(plan, nframes, options)
     if self.frame >= nframes then return false, false end
     self.frame = self.frame + 1
     self.clics = plan[self.frame] or {}
+    self.curseur_appels = 0
+    -- Curseurs simulés : le premier curseur de chaque image est celui du
+    -- bandeau (Volume), les suivants sont les gains des claviers.
+    self.bouger = (self.frame == options.bouger_frame) and options.bouger or nil
     return true, true
   end
   function ui:taille() return self.l, self.h end
@@ -72,6 +76,18 @@ local function scenario(plan, nframes, options)
     return selection
   end
   function ui:curseur(valeur) return valeur end
+  function ui:curseur_vertical(valeur)
+    self.curseur_appels = (self.curseur_appels or 0) + 1
+    if self.bouger == "general" and self.curseur_appels == 1 then
+      return valeur + 0.1
+    elseif self.bouger == "gains" and self.curseur_appels > 1 then
+      return valeur + 0.1
+    end
+    return valeur
+  end
+  function ui:espace_debut() end
+  function ui:place() end
+  function ui:espace_fin() end
   function ui:debut() return true end
   function ui:fin() end
   function ui:dessiner() end
@@ -156,15 +172,35 @@ aucune(cmd, "console : six images sans clic, aucune commande")
 aide.verifie(ui.lignes > 0, "console : le dessin a bien eu lieu")
 
 -- Console : un clic sur un jeu émet exactement une commande.
-cmd = scenario({[5] = {"Diapason 1"}}, 7)
+cmd = scenario({[5] = {"Double Open Diapason 1"}}, 7)
 aide.egal(#cmd, 1, "console : un clic sur un jeu, une commande")
 aide.egal(cmd[1] and cmd[1].nom, "jeu", "console : la commande est un jeu")
 aide.egal(cmd[1] and cmd[1].frame, 5, "console : commande à l'image du clic")
 
 -- Console : le clic sur un jeu déjà actif n'émet rien (valeur rendue = état).
 e = nil
-cmd = scenario({[5] = {"Diapason 1"}}, 7)
+cmd = scenario({[5] = {"Double Open Diapason 1"}}, 7)
 aide.egal(#cmd, 1, "console : second clic sur un jeu inactif, une commande")
+
+-- Curseur du bandeau : un mouvement n'émet qu'une commande de volume, et
+-- une seule par changement (les images suivantes ne renvoient rien).
+cmd = scenario({}, 6, {bouger_frame = 3, bouger = "general"})
+aide.egal(#cmd, 1, "bandeau : un mouvement de curseur, une commande")
+aide.egal(cmd[1] and cmd[1].nom, "volume", "bandeau : la commande est le volume")
+aide.egal(cmd[1] and cmd[1].frame, 3, "bandeau : commande à l'image du mouvement")
+
+-- Curseur de gain d'un clavier : placé à droite des jeux, il envoie bien
+-- organum.gain (un gain par clavier et par mouvement).
+cmd = scenario({}, 6, {bouger_frame = 3, bouger = "gains"})
+aide.egal(#cmd, 4, "gain : un mouvement de chaque curseur de clavier, quatre commandes")
+local gains, volumes = 0, 0
+for _, c in ipairs(cmd) do
+  if c.nom == "gain" then gains = gains + 1 end
+  if c.nom == "volume" then volumes = volumes + 1 end
+end
+aide.egal(gains, 4, "gain : commandes gain")
+aide.egal(volumes, 0, "gain : aucune commande de volume")
+aide.egal(cmd[1] and cmd[1].frame, 3, "gain : commande à l'image du mouvement")
 
 -- MIDI : navigation puis plusieurs images sans clic n'émettent rien.
 cmd = scenario({[1] = {"MIDI"}}, 7, {midi = true})

@@ -38,8 +38,7 @@ modele = require "modele"
 
 -- Disposition pure (tailles, police, découpe des noms) : module séparé,
 -- testable sans Nuklear ni moteur.
-{ :ESPACE, :MARGE, :MARGE_GROUPE
-  :LIGNE_POLICE, :POLICE_MIN, :POLICE_MAX
+{ :ESPACE, :MARGE, :POLICE_MAX
   :bouge, :decoupe
   :disposer, :disposer_midi, :disposer_connexions, :disposer_qualite
   :texte_calibration } = require "fenetre_disposition"
@@ -960,29 +959,39 @@ MAX_ASSOCIATIONS = 16
     -- Police visée : elle croît avec la largeur de la fenêtre, avec un
     -- plancher de 13 px pour les toutes petites fenêtres.
     cible = math.min POLICE_MAX, math.max 13, math.floor l / 64
-    p = disposer e, l, h, plus_long / police, plus_long_deux / police, cible
+    -- Curseurs généraux : bandeau vertical à gauche de la console. La liste
+    -- accueille un troisième réglage (« Piano ») sans refonte. Avec un volume
+    -- système, deux curseurs : le système et la pédale (volume du moteur,
+    -- distinct) ; sans lui, le curseur unique règle déjà le moteur.
+    deux = systeme and vol_sys
+    generaux = {}
+    if deux
+      table.insert generaux, {
+        etiquette: "Volume"
+        valeur: vol_sys
+        regler: (v) ->
+          vol_sys, a_envoyer = v, v if bouge vol_sys, v
+      }
+      table.insert generaux, {
+        etiquette: "Pédale"
+        valeur: e.volume
+        regler: (v) -> organum.volume v if bouge e.volume, v
+      }
+    else
+      table.insert generaux, {
+        etiquette: "Volume"
+        valeur: e.volume
+        regler: (v) -> organum.volume v if bouge e.volume, v
+      }
+    p = disposer e, l, h, plus_long / police, plus_long_deux / police, cible, #generaux
     if p.police != police
       ui\police p.police
       police = p.police
 
     if ui\debut "", 0, 0, l, h
       -- Réglages généraux (le bouton Qualité s'ajoute toujours, MIDI si fourni).
-      -- Avec un volume système, deux curseurs : le système et la pédale (volume
-      -- du moteur, distinct) ; sans lui, le curseur unique règle déjà le moteur.
-      deux = systeme and vol_sys
-      ui\ligne p.entete, (midi and 6 or 5) + (deux and 2 or 0)
-      if deux
-        ui\texte "Volume #{math.floor(vol_sys * 100 + 0.5)} %", "droite"
-        v = ui\curseur vol_sys, 0, 1, 0.01
-        vol_sys, a_envoyer = v, v if bouge vol_sys, v
-        ui\texte "Pédale #{math.floor(e.volume * 100 + 0.5)} %", "droite"
-        vp = ui\curseur e.volume, 0, 1, 0.01
-        organum.volume vp if bouge e.volume, vp
-      else
-        ui\texte "Volume", "droite"
-        v = ui\curseur e.volume, 0, 1, 0.01
-        organum.volume v if bouge e.volume, v
-      ui\texte ""
+      -- Six colonnes : les trois boutons restent compacts, le reste est vide.
+      ui\ligne p.entete, 6
       organum.panique! if ui\bouton "Panique"
       -- Accès au panneau Qualité : vert seulement pour « Confortable » ;
       -- orange et rouge colorent le bouton, la marque textuelle restant.
@@ -1015,8 +1024,8 @@ MAX_ASSOCIATIONS = 16
         actif = e.etape == n - 1
         organum.midi 0xCF, n - 1 if ui\choix(tostring(n), actif) and not actif
 
-      -- Claviers, un par colonne, sur toute la hauteur restante.
-      reste = h - 2 * MARGE - (1 + p.lignes_combi) * (p.entete + ESPACE) - ESPACE
+      -- Claviers, un par colonne, sur toute la hauteur restante : à gauche le
+      -- bandeau vertical des curseurs généraux, à droite les claviers.
       -- Transposition dans la colonne du Manuel III (sans accouplement). La
       -- rangée des accouplements n'existe que si au moins un clavier en a :
       -- elle fournit alors la place libre en bas de sa colonne.
@@ -1024,18 +1033,46 @@ MAX_ASSOCIATIONS = 16
       a_des_liens = false
       for dd in *e.divisions
         a_des_liens = true if #dd.liens > 0
-      ui\ligne reste, #e.divisions
+      -- Une rangée : le bandeau, puis une case par clavier. Les poids sont les
+      -- largeurs en pixels, normalisées par ui:ligne_ratio.
+      poids = {p.bande}
+      for i = 1, #e.divisions
+        table.insert poids, p.l_jeux / #e.divisions
+      ui\ligne_ratio p.reste, poids
+      if ui\groupe_debut "generaux"
+        -- Chaque curseur général : étiquette au-dessus, curseur vertical,
+        -- valeur en % en dessous ; tous côte à côte.
+        ui\ligne p.etiquette_curseur, #generaux
+        for c in *generaux
+          ui\texte c.etiquette, "centre"
+        ui\ligne p.bande_curseur, #generaux
+        valeurs = {}
+        for c in *generaux
+          v = ui\curseur_vertical c.valeur, 0, 1, 0.01
+          c.regler v
+          table.insert valeurs, v
+        ui\ligne p.etiquette_curseur, #generaux
+        for i = 1, #generaux
+          ui\texte "#{math.floor(valeurs[i] * 100 + 0.5)} %", "centre"
+        ui\groupe_fin!
       for d, div in ipairs e.divisions
         if ui\groupe_debut "clavier #{d}"
-          ui\ligne p.entete, 1
+          -- En-tête : le nom et « Annuler » ; le curseur de gain a quitté
+          -- cette rangée pour la droite des jeux.
+          ui\ligne_ratio p.entete, {3, 2}
           ui\texte div.nom, "centre"
-          ui\ligne p.entete, 2
-          g = ui\curseur div.gain, 0, 1, 0.01
-          organum.gain d, g if bouge div.gain, g
           if ui\bouton "Annuler"
             organum.jeu d, j, false for j = 1, #div.jeux
-          ui\ligne p.jeu, p.sous
+          -- Bloc de jeux, avec le curseur de gain vertical à sa droite, de la
+          -- même hauteur. Placement libre (ui:espace_debut, ui:place) : les
+          -- jeux gardent leur grille, le curseur occupe la colonne réservée.
+          bloc = p.rangs * p.jeu + (p.rangs - 1) * ESPACE
+          ligne_gain = math.min p.etiquette_curseur, math.max(0, bloc / 5)
+          ui\espace_debut bloc
           for j, jeu in ipairs div.jeux
+            rangee = math.floor (j - 1) / p.sous
+            colonne = (j - 1) % p.sous
+            ui\place colonne * (p.case + ESPACE), rangee * (p.jeu + ESPACE), p.case, p.jeu
             nom = modele.nom_jeu jeu
             nouveau = if ui\largeur_texte(nom) <= p.case - 4
               ui\choix nom, jeu.actif
@@ -1046,9 +1083,16 @@ MAX_ASSOCIATIONS = 16
               else
                 ui\choix nom, jeu.actif
             organum.jeu d, j, not jeu.actif if nouveau != jeu.actif
-          -- Lignes vides : les accouplements s'alignent en bas des colonnes.
-          vides = p.rangs * p.sous - #div.jeux
-          ui\texte "" for _ = 1, vides
+          x_gain = p.largeur_colonne - p.curseur_largeur
+          ui\place x_gain, 0, p.curseur_largeur, ligne_gain
+          ui\texte "Gain", "centre"
+          ui\place x_gain, ligne_gain, p.curseur_largeur, bloc - 2 * ligne_gain
+          g = ui\curseur_vertical div.gain, 0, 1, 0.01
+          organum.gain d, g if bouge div.gain, g
+          ui\place x_gain, bloc - ligne_gain, p.curseur_largeur, ligne_gain
+          ui\texte "#{math.floor(g * 100 + 0.5)} %", "centre"
+          ui\espace_fin!
+          -- Ligne des accouplements (ou transposition), sous les jeux.
           if #div.liens > 0
             ui\ligne p.jeu, #div.liens
             for i, lien in ipairs div.liens
@@ -1061,8 +1105,7 @@ MAX_ASSOCIATIONS = 16
             v = math.tointeger(e.transposition) or 0
             accent = v != 0
             ui\ligne_ratio p.jeu, {2, 1, 1.2, 1}
-            largeur_colonne = (l - 2 * MARGE) / #e.divisions - 2 * MARGE_GROUPE - ESPACE
-            ui\texte tronquer("Transposition", largeur_colonne * 2 / 5.2 - ESPACE)
+            ui\texte tronquer("Transposition", (p.largeur_colonne - 3 * ESPACE) * 2 / 5.2)
             -- Le jeu de police embarqué ne couvre que le latin : le signe
             -- moins U+2212 y manque, on garde l'hyphen ASCII côté natif.
             clique_moins = ui\etat("-", accent, false) != accent

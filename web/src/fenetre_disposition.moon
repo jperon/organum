@@ -8,6 +8,14 @@
 -- Marges de Nuklear (style par défaut) : intervalle entre lignes, marge de
 -- la fenêtre, marge et bordure des groupes.
 ESPACE, MARGE, MARGE_GROUPE = 4, 4, 6
+-- Cadre exact d'un groupe à bordure (NK_WINDOW_BORDER) : 1 px de bordure et
+-- 4 px de marge interne de chaque côté. MARGE_GROUPE reste la valeur
+-- historique des calculs de largeur (arrondie au-dessus) ; CADRE_GROUPE est
+-- la valeur exacte, utilisée pour la géométrie.
+CADRE_GROUPE = 10
+-- Curseur vertical : zone sensible de 44 px de large sur toute la hauteur,
+-- bouton de 40 × 24 px (voir ui:curseur_vertical dans cosmo/lnuklear.c).
+CURSEUR_LARGEUR, BOUTON_LARGEUR, BOUTON_HAUTEUR = 44, 40, 24
 -- Rapport hauteur de ligne / taille de police, et bornes de la police.
 LIGNE_POLICE, POLICE_MIN, POLICE_MAX = 1.25, 10, 64
 -- Identique à MAX_ASSOCIATIONS de cosmo/lorganum.c (#define, 16) : au-delà,
@@ -18,6 +26,38 @@ MAX_ASSOCIATIONS = 16
 -- Un curseur ne renvoie une commande que si l'utilisateur l'a bougé : la
 -- valeur rendue par Nuklear (flottant 32 bits) diffère sinon à peine de l'état.
 bouge = (avant, apres) -> math.abs(apres - avant) > 1e-4
+
+-- Géométrie des rangées de Nuklear, partagée par fenetre.moon et les tests de
+-- bout en bout (coordonnées cliquables). Tout est en pixels.
+
+-- Largeur d'une case d'une rangée dynamique de n colonnes.
+largeur_case = (largeur, n) -> (largeur - ESPACE * (n - 1)) / n
+
+-- Bord gauche puis centre de la case c (0 à n-1) d'une telle rangée.
+case_x = (x0, largeur, n, c) -> x0 + c * (largeur_case(largeur, n) + ESPACE)
+case_centre = (x0, largeur, n, c) -> case_x(x0, largeur, n, c) + largeur_case(largeur, n) / 2
+
+-- Ordonnée du centre de la rangée k : chaque rangée avance de sa hauteur
+-- plus ESPACE, la première commençant à MARGE + ESPACE.
+rangee_y = (k, hauteur) -> MARGE + ESPACE + k * (hauteur + ESPACE) + hauteur / 2
+
+-- Ordonnée du premier widget à l'intérieur d'un groupe : bordure et marge
+-- interne (CADRE_GROUPE / 2) puis espacement de la première rangée (ESPACE).
+groupe_contenu = (y) -> y + CADRE_GROUPE / 2 + ESPACE
+
+-- Case i (1 à #poids) d'une rangée à colonnes proportionnelles
+-- (ui:ligne_ratio) : renvoie {x, largeur, centre}.
+colonne_ratio = (x0, largeur, poids, i) ->
+  total = 0
+  for poids_i in *poids
+    total += poids_i
+  utile = largeur - ESPACE * (#poids - 1)
+  x = x0
+  for j = 1, i - 1
+    x += utile * poids[j] / total + ESPACE
+  l = utile * poids[i] / total
+  {x: x, largeur: l, centre: x + l / 2}
+
 
 -- Découpe un nom de jeu à un espace, en deux lignes les plus équilibrées
 -- possibles : renvoie {a, b, large} où large est la largeur de la ligne la
@@ -35,39 +75,70 @@ decoupe = (ui, texte) ->
 
 -- Disposition qui tient dans l × h : nombre de sous-colonnes de jeux par
 -- clavier (1 à 3), lignes de combinaisons, police, hauteurs de l'en-tête et
--- des boutons de jeu.
+-- des boutons de jeu, et largeur du bandeau des curseurs généraux.
 -- rapport : largeur du plus long nom de jeu / taille de police.
 -- rapport_deux : largeur de la plus longue moitié du meilleur découpage en
 -- deux lignes / taille de police.
+-- nb_generaux : nombre de curseurs généraux (Volume, Pédale, Piano…) placés
+-- côte à côte dans le bandeau vertical de gauche ; 0 pour s'en passer.
 --
 -- On maximise d'abord la police jusqu'à `cible`, puis, à police égale, la
 -- hauteur des boutons de jeu (donc plutôt plus de sous-colonnes). Les
--- rangées de réglages, combinaisons, nom et gain prennent une hauteur
--- confortable (environ 2,2 × police, 36 px si la place le permet) ; toute la
--- hauteur restante est répartie à parts égales entre les jeux et les
--- accouplements. Si aucune disposition ne tient, repli sur la plus grande
--- police possible.
-disposer = (e, l, h, rapport, rapport_deux, cible) ->
+-- rangées de réglages et de combinaisons prennent une hauteur confortable
+-- (environ 2,2 × police, 36 px si la place le permet) ; toute la hauteur
+-- restante revient aux claviers. Dans chaque clavier : une rangée pour le nom
+-- et « Annuler », le bloc de jeux avec, à droite, le curseur de gain vertical
+-- de la même hauteur, puis la rangée des accouplements. Si aucune disposition
+-- ne tient, repli sur la plus grande police possible.
+disposer = (e, l, h, rapport, rapport_deux, cible, nb_generaux = 0) ->
   ndiv = math.max 1, #e.divisions
   maxjeux, liens = 0, false
   for d in *e.divisions
     maxjeux = math.max maxjeux, #d.jeux
     liens or= #d.liens > 0
+  -- Bandeau des curseurs généraux : une colonne par curseur, côte à côte,
+  -- plus le cadre du groupe. La colonne fait au moins 44 px (zone sensible) et
+  -- un seizième de la largeur : la police visée valant largeur / 64, cela
+  -- laisse de quoi afficher six caractères (« Volume », « Pédale », « 100 % »)
+  -- sans chevaucher la colonne voisine. La liste accepte un curseur de plus
+  -- sans refonte (troisième réglage « Piano » prévu).
+  colonne_curseur = math.max CURSEUR_LARGEUR, l / 16
+  bande = if nb_generaux > 0
+    nb_generaux * colonne_curseur + (nb_generaux - 1) * ESPACE + CADRE_GROUPE
+  else
+    0
+  -- Largeur laissée aux claviers, une case par division. Plancher à 1 px :
+  -- une fenêtre minuscule ne doit pas produire un poids nul (refusé par
+  -- ui:ligne_ratio).
+  l_jeux = math.max 1, l - 2 * MARGE - (if nb_generaux > 0 then ESPACE else 0) - bande
+  bande = math.max 0, l - 2 * MARGE - (if nb_generaux > 0 then ESPACE else 0) - l_jeux
+  -- Largeur du contenu d'un groupe de clavier, et largeur de la grille de
+  -- jeux une fois réservée la colonne du curseur de gain. La colonne garde
+  -- sa largeur sensible (44 px) tant que la case du clavier le permet ; dans
+  -- une fenêtre minuscule elle se réduit plutôt que d'écraser les jeux.
+  largeur_colonne = l_jeux / ndiv - CADRE_GROUPE
+  curseur_largeur = math.min colonne_curseur, math.max(8, largeur_colonne - 2 * MARGE_GROUPE)
+  largeur_jeux = math.max 1, largeur_colonne - ESPACE - curseur_largeur
   meilleure, repli = nil, nil
   for sous = 1, 3
     rangs = math.ceil maxjeux / sous
     for lignes_combi = 1, 2
       -- Rangées : réglages puis combinaisons en haut ; dans chaque colonne,
-      -- le nom, le gain, les jeux et les accouplements.
+      -- le nom et « Annuler », les jeux et leur curseur de gain, puis les
+      -- accouplements.
       haut = 1 + lignes_combi
       col_jeu = math.max 1, rangs + (liens and 1 or 0)
-      col = 2 + col_jeu
-      fixe = 2 * MARGE + ESPACE * (haut + 1) + 2 * MARGE_GROUPE + ESPACE * col
-      largeur_case = (l - 2 * MARGE) / ndiv / sous - 2 * MARGE_GROUPE / sous - ESPACE
+      -- Hauteur occupée hors jeux : marges de la fenêtre et du groupe,
+      -- rangées du haut, en-tête du clavier, espacements (celui de la
+      -- première rangée du groupe et celui de la dernière rangée de jeux).
+      -- Chaque essai de hauteur d'en-tête en déduit la hauteur de jeu
+      -- disponible.
+      fixe = 2 * MARGE + CADRE_GROUPE + 2 * ESPACE + (haut + 1) * ESPACE
+      case_jeu = largeur_jeux / sous - ESPACE * (sous - 1) / sous
       -- Un nom sur deux lignes peut utiliser presque toute la case ; sur une
       -- ligne, ui:choix garde la marge de Selectable (2 px de chaque côté).
-      dispo_deux = math.max 0, largeur_case - 2
-      dispo_un = math.max 0, largeur_case - 4
+      dispo_deux = math.max 0, case_jeu - 2
+      dispo_un = math.max 0, case_jeu - 4
       combi = (l - 2 * MARGE) / math.ceil(e.netapes / lignes_combi) - ESPACE
       par_largeur = math.floor math.min POLICE_MAX, dispo_deux / math.max(rapport_deux, 0.001), combi / 1.5
       if par_largeur >= POLICE_MIN
@@ -80,23 +151,37 @@ disposer = (e, l, h, rapport, rapport_deux, cible) ->
           -- 36 px d'abord ; si la fenêtre ne le permet pas, 2,2 × police,
           -- puis seulement 2 × police pour ne pas écraser les jeux.
           for essai in *{math.max(36, math.ceil(2.2 * police)), math.ceil(2.2 * police), math.max(police + 4, 2 * police)}
-            hauteur = (h - fixe - (haut + 2) * essai) / col_jeu
+            hauteur = (h - fixe - (haut + 1) * essai) / col_jeu - ESPACE
             if hauteur >= min_jeu
               entete, jeu = essai, hauteur
               break
           if entete
             score = math.min police, cible
             if not meilleure or score > meilleure.score or (score == meilleure.score and jeu > meilleure.jeu)
-              meilleure = {police: police, entete: entete, jeu: jeu, case: largeur_case, :sous, :lignes_combi, :rangs, :score}
+              meilleure = {police: police, entete: entete, jeu: jeu, case: case_jeu, :sous, :lignes_combi, :rangs, :score}
             break
       -- Repli pour une fenêtre trop petite : la plus grande police possible,
       -- quitte à rogner les rangées d'en-tête.
       if not repli or par_largeur > repli.police
         police_repli = math.max POLICE_MIN, par_largeur
         entete_repli = math.max police_repli + 4, math.ceil(2.2 * police_repli)
-        jeu_repli = math.max 1, (h - fixe - (haut + 2) * entete_repli) / col_jeu
-        repli = {police: police_repli, entete: entete_repli, jeu: jeu_repli, case: largeur_case, :sous, :lignes_combi, :rangs}
-  meilleure or repli
+        jeu_repli = math.max 1, (h - fixe - (haut + 1) * entete_repli) / col_jeu - ESPACE
+        repli = {police: police_repli, entete: entete_repli, jeu: jeu_repli, case: case_jeu, :sous, :lignes_combi, :rangs}
+  p = meilleure or repli
+  p.bande, p.l_jeux, p.nb_generaux = bande, l_jeux, nb_generaux
+  p.largeur_colonne, p.largeur_jeux = largeur_colonne, largeur_jeux
+  p.curseur_largeur, p.colonne_curseur = curseur_largeur, colonne_curseur
+  p.haut = 1 + p.lignes_combi
+  -- Hauteur de la rangée principale (bandeau et claviers) : tout ce qui
+  -- reste après les rangées du haut et l'espacement de fin de rangée.
+  p.reste = h - 2 * MARGE - p.haut * (p.entete + ESPACE) - ESPACE
+  -- Hauteur d'une ligne d'étiquette ou de valeur d'un curseur vertical, et
+  -- hauteur du curseur du bandeau (celui des claviers occupe tout le bloc).
+  etiquette = math.min p.entete, math.max(p.police + 2, 14)
+  p.etiquette_curseur = etiquette
+  p.bande_curseur = math.max BOUTON_HAUTEUR,
+    p.reste - CADRE_GROUPE - 2 * ESPACE - 2 * (etiquette + ESPACE)
+  p
 
 -- Disposition du panneau MIDI : en-tête sur deux lignes (navigation, puis
 -- compteurs), une ligne par clavier, contrôle, expression, actions, puis une
@@ -234,8 +319,10 @@ texte_calibration = (c) ->
 
 {
   :ESPACE, :MARGE, :MARGE_GROUPE
+  :CADRE_GROUPE, :CURSEUR_LARGEUR, :BOUTON_LARGEUR, :BOUTON_HAUTEUR
   :LIGNE_POLICE, :POLICE_MIN, :POLICE_MAX
   :bouge, :decoupe
+  :largeur_case, :case_x, :case_centre, :rangee_y, :groupe_contenu, :colonne_ratio
   :disposer, :disposer_midi, :disposer_connexions, :disposer_qualite
   :texte_calibration
 }

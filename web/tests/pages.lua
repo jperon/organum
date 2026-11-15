@@ -67,6 +67,31 @@ aide.verifie(html_page:find('value="25"', 1, true) ~= nil,
   "page : gain 0,25 rendu en 25")
 aide.verifie(html_page:find('value="50"', 1, true) ~= nil,
   "page : gain absent rendu en 50")
+-- Bandeau vertical des curseurs généraux, à gauche de la console, et
+-- curseurs de gain verticaux à droite des jeux (l'en-tête garde le nom et
+-- « Tout annuler »).
+aide.verifie(html_page:find('class="bandeau"', 1, true) ~= nil,
+  "page : bandeau des curseurs généraux")
+aide.verifie(html_page:find('class="console"', 1, true) ~= nil,
+  "page : console en deux parties")
+aide.egal(select(2, html_page:gsub('class="curseur%-general', "")), 2,
+  "page : deux curseurs généraux côte à côte")
+aide.verifie(html_page:find('class="volume-general"', 1, true) == nil,
+  "page : plus de volume horizontal dans la barre")
+aide.egal(select(2, html_page:gsub('class="gain%-colonne"', "")), 3,
+  "page : une colonne de gain par division")
+aide.egal(select(2, html_page:gsub('class="gain%-valeur"', "")), 3,
+  "page : une valeur en %% par curseur de gain")
+aide.verifie(html_page:find('style="--fill: 25%"', 1, true) ~= nil,
+  "page : remplissage initial du curseur de gain")
+local pos_gain = html_page:find('class="gain-colonne"', 1, true)
+local pos_stops = html_page:find('class="stops-grid"', 1, true)
+aide.verifie(pos_stops and pos_gain and pos_stops < pos_gain,
+  "page : curseur de gain après les jeux")
+local pos_tete_fin = html_page:find('</div>', html_page:find('class="division-tete"', 1, true) or 1, true)
+local pos_annuler = html_page:find('cancel-division', 1, true)
+aide.verifie(pos_tete_fin and pos_annuler and pos_annuler < pos_tete_fin,
+  "page : bouton Tout annuler dans l'en-tête")
 aide.verifie(html_page:find("P+I", 1, true) ~= nil,
   "page : accouplement abrégé P+I")
 aide.verifie(html_page:find('data-step="0"', 1, true) ~= nil,
@@ -253,6 +278,8 @@ aide.verifie(type(client) == "string" and #client > 1000, "client : chaîne Java
 aide.verifie(client:find("setProperty('--fill'", 1, true) ~= nil,
   "client : volume pose --fill")
 aide.verifie(client:find("pedalSlider", 1, true) ~= nil, "client : curseur pédale")
+aide.verifie(client:find("saisieVerticale", 1, true) ~= nil,
+  "client : saisie relative des curseurs verticaux")
 aide.verifie(client:find("lienQualite", 1, true) ~= nil, "client : lien qualité")
 aide.verifie(client:find("startOrgueLoop", 1, true) ~= nil, "client : boucle orgue")
 

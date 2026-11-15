@@ -230,6 +230,43 @@ async function clic(expression, fx = 0.5, fy = 0.5) {
   return false;
 }
 
+// Glissement vertical relatif : la colonne (curseur général ou de gain)
+// reçoit le pointeur ; le déplacement de la fraction demandée de la course
+// ajuste la valeur depuis la valeur courante (haut = plus fort, donc une
+// fraction négative baisse). Aucun saut au point cliqué.
+async function glisserVertical(expression, fraction) {
+  const r = await rect(expression);
+  if (!r) {
+    echec(`colonne de curseur introuvable : ${expression}`);
+    return false;
+  }
+  const x = r.x + r.w / 2;
+  const y = r.y + r.h / 2;
+  if (!(await cibleSousPoint(expression, x, y))) {
+    echec(`colonne de curseur non cliquable : ${expression}`);
+    return false;
+  }
+  const course = r.h - 24;
+  // fraction positive : vers le haut (valeur qui monte) ; négative : vers le bas.
+  const arrivee = Math.round(Math.max(r.y + 2, Math.min(r.y + r.h - 2, y - fraction * course)));
+  await cdp.envoyer('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+  await cdp.envoyer('Input.dispatchMouseEvent', {
+    type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1
+  });
+  await delay(60);
+  for (let pas = 1; pas <= 4; pas += 1) {
+    await cdp.envoyer('Input.dispatchMouseEvent', {
+      type: 'mouseMoved', x, y: y + (arrivee - y) * pas / 4, button: 'left', buttons: 1
+    });
+    await delay(40);
+  }
+  await cdp.envoyer('Input.dispatchMouseEvent', {
+    type: 'mouseReleased', x, y: arrivee, button: 'left', buttons: 0, clickCount: 1
+  });
+  await delay(250);
+  return true;
+}
+
 function selecteur(groupe, valeur) {
   return `document.querySelector('#${groupe} [data-valeur="${valeur}"]')`;
 }
@@ -342,22 +379,61 @@ async function testAccueil() {
     await poster('/api/volume', { muted: true });
   }
 
-  await clic('document.getElementById("volume")', 0.3);
+  // Curseurs généraux verticaux, dans le bandeau de gauche : un appui seul
+  // ne change rien (saisie relative), le glissement ajuste la valeur depuis
+  // la valeur courante ; la valeur est relue dans l'API.
+  await poster('/api/volume', { volume: 50, muted: false });
+  await attendre(async () => (await api('/api/volume')).volume === 50,
+    'web / : volume système remis à 50 avant le glissement');
+  await glisserVertical('document.querySelector(".curseur-general")', -0.2);
   await attendre(
     async () => {
       const etat = await api('/api/volume');
-      return etat.volume >= 20 && etat.volume <= 40;
+      return etat.volume >= 24 && etat.volume <= 36;
     },
-    'web / : curseur de volume système à ~30 % par clic'
+    'web / : curseur de volume système, glissement de −20 % (≈ 30 %)'
   );
-  await clic('document.getElementById("volume-pedale")', 0.7);
+  await poster('/api/orgue', { volume: 0.5 });
+  await attendre(async () => Math.abs((await api('/api/orgue')).volume - 0.5) < 0.02,
+    'web / : pédale remise à 50 avant le glissement');
+  await glisserVertical('document.querySelector(".pedale-general")', 0.2);
   await attendre(
     async () => {
       const etat = await api('/api/orgue');
-      return etat.volume >= 0.6 && etat.volume <= 0.8;
+      return etat.volume >= 0.64 && etat.volume <= 0.76;
     },
-    'web / : curseur de pédale à ~70 % par clic'
+    'web / : curseur de pédale, glissement de +20 % (≈ 70 %)'
   );
+  // Un appui simple, sans déplacement, ne doit pas faire sauter la valeur.
+  const avantAppui = (await api('/api/orgue')).volume;
+  await clic('document.querySelector(".pedale-general")', 0.5, 0.15);
+  await delay(300);
+  const apresAppui = (await api('/api/orgue')).volume;
+  verifie(Math.abs(apresAppui - avantAppui) < 0.02,
+    `web / : un appui dans la colonne ne change pas la valeur (${avantAppui.toFixed(2)} → ${apresAppui.toFixed(2)})`);
+
+  // Curseur de gain d'un clavier : vertical, à droite des jeux, même saisie
+  // relative ; la valeur est relue dans l'API.
+  await poster('/api/orgue', { gain: { division: 0, value: 0.5 } });
+  await attendre(async () => Math.abs((await api('/api/orgue')).divisions[0].gain - 0.5) < 0.02,
+    'web / : gain de la première division remis à 50 avant le glissement');
+  await glisserVertical('document.querySelectorAll(".gain-colonne")[0]', -0.2);
+  await attendre(
+    async () => {
+      const etat = await api('/api/orgue');
+      return etat.divisions[0].gain >= 0.24 && etat.divisions[0].gain <= 0.36;
+    },
+    'web / : curseur de gain d’un clavier, glissement de −20 % (≈ 30 %)'
+  );
+  const valeurGain = await evaluer(`(() => {
+    const colonne = document.querySelectorAll('.gain-colonne')[0];
+    return colonne ? colonne.querySelector('.gain-valeur').textContent.trim() : '';
+  })()`);
+  verifie(/^3\d\u00a0%$/.test(valeurGain),
+    `web / : valeur du curseur de gain affichée en % (${valeurGain})`);
+  await poster('/api/orgue', { gain: { division: 0, value: 0.5 } });
+  await attendre(async () => Math.abs((await api('/api/orgue')).divisions[0].gain - 0.5) < 0.02,
+    'web / : gain de la première division remis à 50 après le test');
 
   // Transposition globale : boutons réels, valeur relue dans l'API, accent
   // et bornes. Un POST doit aussi se refléter dans le DOM (autre interface).
@@ -1033,10 +1109,28 @@ async function testResponsive() {
             }
           }
         }
+        const curseurs = [];
+        if (${JSON.stringify(chemin)} === '/') {
+          for (const s of document.querySelectorAll('.curseur-general, .gain-colonne')) {
+            if (s.offsetParent === null) continue;
+            const r = s.getBoundingClientRect();
+            curseurs.push({ classe: s.className, w: r.width, h: r.height });
+          }
+        }
+        const verticaux = [];
+        if (${JSON.stringify(chemin)} === '/') {
+          for (const e of document.querySelectorAll('.bandeau input[type="range"], .gain-colonne input[type="range"]')) {
+            if (e.offsetParent === null) continue;
+            const r = e.getBoundingClientRect();
+            verticaux.push({ id: e.id || e.className, w: r.width, h: r.height });
+          }
+        }
         return {
           debord,
           petits,
           petitsTrans,
+          curseurs,
+          verticaux,
           remplissages: ${JSON.stringify(chemin)} === '/audio'
             ? [remplissage('reverb'), remplissage('qualite-polyphonie')]
             : (${JSON.stringify(chemin)} === '/' ? [remplissage('volume'), remplissage('volume-pedale')] : [])
@@ -1047,6 +1141,16 @@ async function testResponsive() {
         verifie(
           mesure.petitsTrans.length === 0,
           `web / à ${largeur} px : cibles de transposition ≥ 44 px (${mesure.petitsTrans.join(', ') || 'toutes'})`
+        );
+        const etroites = mesure.curseurs.filter((c) => c.w < 44);
+        verifie(
+          mesure.curseurs.length >= 5 && etroites.length === 0,
+          `web / à ${largeur} px : colonnes de curseurs verticales ≥ 44 px (${mesure.curseurs.length} colonnes, ${etroites.map((c) => c.w.toFixed(0)).join(', ') || 'toutes'})`
+        );
+        const horizontaux = mesure.verticaux.filter((c) => c.h <= c.w);
+        verifie(
+          mesure.verticaux.length >= 5 && horizontaux.length === 0,
+          `web / à ${largeur} px : curseurs verticaux (${mesure.verticaux.length} curseurs, ${horizontaux.map((c) => c.id).join(', ') || 'tous verticaux'})`
         );
       }
       if (chemin === '/audio') {
