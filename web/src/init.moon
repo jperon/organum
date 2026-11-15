@@ -944,6 +944,13 @@ if organum.demarrer
   if type(etat_sauve.gains) == "table"
     for i, g in ipairs etat_sauve.gains
       organum.gain i, g if type(g) == "number" and i <= #organum.etat!.divisions
+  -- Piano échantillonné : volume et drapeaux par division. Absents d'un
+  -- fichier d'état ancien : le volume garde son défaut (0,5) et aucune
+  -- division ne joue sur le piano.
+  organum.piano_volume etat_sauve.piano_volume if type(etat_sauve.piano_volume) == "number"
+  if type(etat_sauve.pianos) == "table"
+    for i, actif in ipairs etat_sauve.pianos
+      organum.piano i, actif if type(actif) == "boolean" and i <= #organum.etat!.divisions
 
 -- Sauvegarde, dans le processus principal (seul à accéder au moteur), dès
 -- que l'état a changé ; redbean appelle ce crochet régulièrement.
@@ -961,6 +968,8 @@ sauvegarder_etat = ->
     volume: e.volume, reverb: e.reverb
     temperament: e.temperament
     gains: [d.gain for d in *e.divisions]
+    piano_volume: e.piano_volume
+    pianos: [d.piano == true for d in *e.divisions]
     qualite: {
       bruit_attaque: e.qualite.bruit_attaque
       instabilite: e.qualite.instabilite
@@ -1380,6 +1389,9 @@ etat_orgue = ->
   {
     source: "aeolus", instance: INSTANCE, seq: e.seq, step: e.etape, steps: e.netapes
     volume: e.volume, reverb: e.reverb, xruns: e.xruns, midi: e.midi, temps_reel: e.temps_reel
+    piano_disponible: e.piano_disponible == true
+    piano_volume: e.piano_volume or 0
+    piano_voix: e.piano_voix or 0
     taux: e.taux, periode: e.periode, nb_periodes: e.nb_periodes, erreurs_ecriture: e.erreurs_ecriture
     audio_disponible: e.audio_disponible == true
     midi_disponible: e.midi_disponible == true
@@ -1392,6 +1404,7 @@ etat_orgue = ->
     divisions: for d in *e.divisions
       {
         name: d.nom, gain: d.gain
+        piano: d.piano == true
         canaux: modele.canaux_liste d.canaux
         links: [{division: l.division - 1, on: l.actif} for l in *d.liens]
         stops: [{name: j.nom\gsub("\n", " "), on: j.actif} for j in *d.jeux]
@@ -1581,6 +1594,11 @@ handle_orgue = ->
     when "gain"
       g = data.gain
       organum.gain g.division + 1, g.value
+    when "piano"
+      p = data.piano
+      organum.piano p.division + 1, p.actif
+    when "piano_volume"
+      organum.piano_volume data.piano_volume
     when "qualite"
       reponse, err = regler_qualite data.qualite
       if reponse

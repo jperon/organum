@@ -53,6 +53,7 @@ enum {
   CMD_CANAUX_DIVISION, CMD_CANAUX_CONTROLE, CMD_CANAUX_EXPRESSION,
   CMD_ASSOCIATION, CMD_NB_ASSOCIATIONS, CMD_LIEN, CMD_QUALITE,
   CMD_LIMITEUR, CMD_TETE, CMD_RECONFIG, CMD_TRANSPOSITION,
+  CMD_PIANO, CMD_PIANO_VOLUME,
 };
 
 // Demande de reconfiguration audio : le tube ne transporte que des
@@ -87,6 +88,7 @@ struct etat {
     char nom[MAX_NOM];
     float gain;
     int canaux;  // masque des canaux MIDI qui jouent sur ce clavier
+    unsigned char piano;  // cette division joue aussi sur le piano
     int nliens;  // accouplements : ce clavier fait aussi parler ceux-ci
     struct {
       int division;
@@ -184,10 +186,15 @@ static int g_limiteur = 1;
 static int g_transposition;
 // Notes réellement envoyées, fil audio uniquement (voir transposition.h).
 static struct transposition_etat g_transposition_etat;
-// Piano échantillonné : chargé au démarrage, avant le fil audio. Son volume
-// n'est touché que par le fil audio et publié par publier().
+// Piano échantillonné : chargé au démarrage, avant le fil audio. Les
+// drapeaux par division, le volume et les masques de canaux ne sont touchés
+// que par le fil audio (comme g_transposition) et publiés par publier().
 static struct piano *g_piano;
+static unsigned char g_piano_division[MAX_DIVISIONS];
 static float g_piano_volume = 0.5f;
+// Copie des masques de canaux de chaque division (aeolus_canaux_division),
+// tenue ici pour ne pas interroger le moteur à chaque note MIDI.
+static int g_canaux_piano[MAX_DIVISIONS];
 static char g_audio_erreur[ERREUR_MAX];
 static int g_xruns_base;  // xruns cumulés des descripteurs déjà fermés
 static struct demande_audio g_demande_pendante;
@@ -465,6 +472,10 @@ static void publier(void) {
     }
     int c = aeolus_canaux_division(g_moteur, d);
     if (c != e->divisions[d].canaux) e->divisions[d].canaux = c, change = 1;
+    // Masque tenu à jour pour l'aiguillage du piano (jamais interrogé par note).
+    g_canaux_piano[d] = c;
+    if (g_piano_division[d] != e->divisions[d].piano)
+      e->divisions[d].piano = g_piano_division[d], change = 1;
     for (int j = 0; j < e->divisions[d].njeux; ++j) {
       unsigned char a = aeolus_jeu_actif(g_moteur, d, j);
       if (a != e->divisions[d].jeux[j].actif)
@@ -556,11 +567,43 @@ static void publier(void) {
 // Envoie un message MIDI au moteur après le filtre de transposition. Appelé
 // uniquement dans le fil audio ; la table retient les notes réellement
 // envoyées. Aucun verrou, aucune allocation.
+static void piano_midi(const unsigned char m[3]);
+
 static void envoyer_midi_filtre(const unsigned char entree[3]) {
   unsigned char sortie[3];
-  if (transposition_filtrer(&g_transposition_etat, g_transposition, entree,
-                            sortie))
-    aeolus_midi(g_moteur, sortie, 3);
+  if (!transposition_filtrer(&g_transposition_etat, g_transposition, entree,
+                             sortie))
+    return;
+  aeolus_midi(g_moteur, sortie, 3);
+  piano_midi(sortie);
+}
+
+// Aiguillage du piano : le message filtré par la transposition est aussi joué
+// par le piano pour chaque division dont le drapeau est vrai et dont le
+// masque de canaux contient ce canal. Les accouplements de l'orgue ne
+// propagent rien ici : seuls les drapeaux de division comptent.
+static void piano_midi(const unsigned char m[3]) {
+  if (!g_piano) return;
+  const int type = m[0] & 0xF0;
+  const int canal = m[0] & 0x0F;
+  const int ndiv = g_etat->ndivisions;
+  if (type == 0xB0) {
+    if (m[1] != 64) return;  // pédale de sustain
+    for (int d = 0; d < ndiv; ++d)
+      if (g_piano_division[d] && (g_canaux_piano[d] & (1 << canal)))
+        piano_sustain(g_piano, d, m[2] >= 64);
+    return;
+  }
+  if (type != 0x90 && type != 0x80) return;
+  const int note = m[1], velocite = m[2];
+  const int appui = type == 0x90 && velocite > 0;
+  for (int d = 0; d < ndiv; ++d) {
+    if (!g_piano_division[d] || !(g_canaux_piano[d] & (1 << canal))) continue;
+    if (appui)
+      piano_note_on(g_piano, d, note, velocite);
+    else
+      piano_note_off(g_piano, d, note);
+  }
 }
 
 static void panique(void) {
@@ -571,6 +614,7 @@ static void panique(void) {
   // Toutes les notes sont relâchées : la table ne doit retenir aucune note,
   // sinon un relâchement ultérieur viserait une note qui n'existe plus.
   transposition_reinitialiser(&g_transposition_etat);
+  piano_panique(g_piano);
 }
 
 static void appliquer(const struct commande *c) {
@@ -605,6 +649,7 @@ static void appliquer(const struct commande *c) {
       break;
     case CMD_CANAUX_DIVISION:
       aeolus_fixer_canaux_division(g_moteur, c->a, c->masque);
+      if (c->a < MAX_DIVISIONS) g_canaux_piano[c->a] = c->masque & 0xFFFF;
       break;
     case CMD_CANAUX_CONTROLE:
       aeolus_fixer_canaux_controle(g_moteur, c->masque);
@@ -650,6 +695,19 @@ static void appliquer(const struct commande *c) {
       // notes tenues n'est pas remise à zéro : chacune garde sa hauteur
       // jusqu'à son relâchement.
       g_transposition = (int8_t)c->a;
+      break;
+    case CMD_PIANO:
+      // Drapeau par division. Le couper relâche les notes que cette division
+      // tenait au piano, pédale comprise ; ailleurs rien ne change.
+      if (c->a < MAX_DIVISIONS) {
+        if (!c->b && g_piano_division[c->a])
+          piano_relacher_canal(g_piano, c->a);
+        g_piano_division[c->a] = c->b ? 1 : 0;
+      }
+      break;
+    case CMD_PIANO_VOLUME:
+      g_piano_volume =
+          c->valeur < 0 ? 0 : (c->valeur > 1 ? 1 : c->valeur);
       break;
     case CMD_RECONFIG:
       // Traité par boucle_audio, qui possède les tampons de rendu.
@@ -1527,6 +1585,10 @@ static int l_demarrer(lua_State *L) {
   g_piano = piano_charger(taux, PIANO_MAX_VOIX, MAX_DIVISIONS);
   g_etat->piano_disponible = g_piano != NULL;
   g_etat->piano_volume = g_piano_volume;
+  // Canaux par défaut du moteur (tous) : publiés par le premier publier(),
+  // mais l'aiguillage du piano en a besoin dès la première note.
+  for (int d = 0; d < MAX_DIVISIONS; ++d)
+    g_canaux_piano[d] = aeolus_canaux_division(g_moteur, d);
   // Ne pas tenter de borner audio_ouvrir() par SIGALRM : cosmo_dlopen fait
   // passer les appels dans libasound par un trampoline qui bloque tous les
   // signaux, y compris SIGALRM. Un serveur audio figé peut donc encore
@@ -1769,8 +1831,10 @@ static void envoyer(lua_State *L, struct commande c) {
 //                            audio_socket, audio_assistant (1/0/-1),
 //                            audio_chemin, trames_jouees, capacite,
 //                            latence_ms, audio_demarre)},
-//                   divisions={{nom, gain, jeux={{nom, actif}, …}}, …}}
+//                   divisions={{nom, gain, canaux, piano, jeux={{nom, actif}, …}}, …}}
 // canaux_actifs est éphémère (activité des 250 dernières ms) et hors de seq.
+// piano_disponible, piano_volume et piano_voix décrivent le piano
+// échantillonné ; piano_voix est éphémère, comme canaux_actifs.
 static int l_etat(lua_State *L) {
   struct etat *e = etat_ou_erreur(L);
   struct etat copie;
@@ -1814,6 +1878,12 @@ static int l_etat(lua_State *L) {
   lua_pushinteger(L, seq), lua_setfield(L, -2, "seq");
   lua_pushnumber(L, copie.volume), lua_setfield(L, -2, "volume");
   lua_pushnumber(L, copie.reverb), lua_setfield(L, -2, "reverb");
+  lua_pushboolean(L, copie.piano_disponible);
+  lua_setfield(L, -2, "piano_disponible");
+  lua_pushnumber(L, copie.piano_volume);
+  lua_setfield(L, -2, "piano_volume");
+  lua_pushinteger(L, copie.piano_voix);
+  lua_setfield(L, -2, "piano_voix");
   lua_pushinteger(L, copie.xruns), lua_setfield(L, -2, "xruns");
   lua_pushboolean(L, copie.temps_reel), lua_setfield(L, -2, "temps_reel");
   lua_pushboolean(L, copie.audio_disponible);
@@ -1912,6 +1982,8 @@ static int l_etat(lua_State *L) {
     lua_pushstring(L, copie.divisions[d].nom), lua_setfield(L, -2, "nom");
     lua_pushnumber(L, copie.divisions[d].gain), lua_setfield(L, -2, "gain");
     lua_pushinteger(L, copie.divisions[d].canaux), lua_setfield(L, -2, "canaux");
+    lua_pushboolean(L, copie.divisions[d].piano);
+    lua_setfield(L, -2, "piano");
     lua_createtable(L, copie.divisions[d].nliens, 0);
     for (int l = 0; l < copie.divisions[d].nliens; ++l) {
       lua_createtable(L, 0, 2);
@@ -1972,6 +2044,21 @@ static int l_volume(lua_State *L) {
 
 static int l_reverb(lua_State *L) {
   envoyer(L, (struct commande){CMD_REVERB, .valeur = luaL_checknumber(L, 1)});
+  return 0;
+}
+
+// organum.piano(division, actif) : cette division joue aussi sur le piano
+// échantillonné (indices à partir de 1). La couper relâche ses notes piano.
+static int l_piano(lua_State *L) {
+  envoyer(L, (struct commande){CMD_PIANO, luaL_checkinteger(L, 1) - 1,
+                               lua_toboolean(L, 2) ? 1 : 0});
+  return 0;
+}
+
+// organum.piano_volume(v) : volume propre du piano, 0..1 (borné en C).
+static int l_piano_volume(lua_State *L) {
+  envoyer(L, (struct commande){CMD_PIANO_VOLUME,
+                               .valeur = (float)luaL_checknumber(L, 1)});
   return 0;
 }
 
@@ -2247,6 +2334,7 @@ static const luaL_Reg kFonctions[] = {
     {"demarrer", l_demarrer}, {"etat", l_etat},     {"attendre", l_attendre},
     {"jeu", l_jeu},           {"gain", l_gain},     {"volume", l_volume},
     {"reverb", l_reverb},     {"midi", l_midi},     {"panique", l_panique},
+    {"piano", l_piano},       {"piano_volume", l_piano_volume},
     {"qualite", l_qualite}, {"calibrer", l_calibrer},
     {"charge_niveau", l_charge_niveau_diag},
     {"limiteur", l_limiteur}, {"tete_reverb", l_tete_reverb},

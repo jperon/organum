@@ -100,7 +100,7 @@ impositions = (env, defaut) ->
 ACTIONS_ORGUE = {
   stop: true, cancel: true, step: true, reverb: true, panic: true,
   gain: true, link: true, qualite: true, volume: true, temperament: true,
-  transposition: true, note: true
+  transposition: true, note: true, piano: true, piano_volume: true
 }
 
 -- Champs acceptés par POST /api/orgue {note}. Une note du clavier web entre
@@ -168,6 +168,18 @@ valider_orgue = (data, divisions, nb_etapes, max_temperament) ->
            is_finite_number(g.value) and g.value >= 0 and g.value <= 1
       return nil, "gain invalide"
     "gain"
+  elseif p = data.piano
+    -- Drapeau du piano échantillonné sur une division (comme gain, il
+    -- porte une division ; l'activer ne change rien à l'orgue lui-même).
+    unless type(p) == "table" and division_valide(p.division, divisions) and
+           type(p.actif) == "boolean"
+      return nil, "piano invalide"
+    "piano"
+  elseif data.piano_volume != nil
+    unless is_finite_number(data.piano_volume) and data.piano_volume >= 0 and
+           data.piano_volume <= 1
+      return nil, "piano_volume hors limites"
+    "piano_volume"
   elseif data.qualite != nil
     "qualite"
   elseif data.temperament != nil

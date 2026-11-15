@@ -394,6 +394,56 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   police latin embarquée n'a pas U+2212). Tests réels :
   `web/scripts/test-transposition.sh`, e2e web et natif (dont croisé),
   `scripts/tests-unitaires.sh` pour l'en-tête C.
+- Piano échantillonné, joué en parallèle de l'orgue : `cosmo/piano/`
+  (`piano.c`, `piano.h`, `tsf.h` de TinySoundFont, `stb_vorbis.c`).
+  Aeolus n'est pas modifié : le piano est un second générateur, mixé dans le
+  fil audio juste après `aeolus_rendre`. Les deux sources Tierces sont
+  vendues dans le dépôt avec leurs licences (MIT, domaine public) ;
+  `cosmo/piano/ressources/piano.sf3` est le SoundFont CC0 « Upright Piano KW »
+  (FreePats, 26 échantillons Ogg Vorbis, 1,0 Mo), embarqué par
+  `web/scripts/build.sh` sous `piano/piano.sf3`, donc lu par `open()` sous
+  `/zip/piano/piano.sf3`. La lecture d'un SF3 exige stb_vorbis : sans lui TSF
+  prendrait les octets Ogg pour du PCM (bruit) ; `cosmo/piano/piano.c` est la
+  seule unité de compilation qui inclut les deux. **Chargement** :
+  `organum.demarrer` appelle `piano_charger` avant de lancer le fil audio
+  (décodage Ogg ~0,1 s, 48 voix préallouées par `tsf_set_max_voices`, un canal
+  TSF par division sur le programme 0, `tsf_set_output` au taux courant).
+  Échec (fichier absent, SoundFont refusé, mémoire) : un seul message au
+  journal, `piano_disponible` reste faux, l'orgue est intact. Un changement de
+  taux (`CMD_RECONFIG`) rappelle `piano_taux` entre deux tampons, qui coupe
+  les voix en cours et refait `tsf_set_output`. **Rendu** : dans le fil audio,
+  `piano_rendre` remplit un tampon préalloué (`2 × période` flottants,
+  réalloué avec les autres à un changement de période) puis l'ajoute ×
+  `g_piano_volume` dans `g`/`d`, entre les deux lectures d'horloge : son coût
+  entre donc dans la mesure de charge. Le mixage vient **après** le limiteur
+  d'Aeolus : le volume du piano est la seule marge avant écrêtage (d'où le
+  défaut 0,5), il ne faut pas le pousser à 1 sur un accord dense. Toutes les
+  allocations (voix, canaux,
+  décodage) ont lieu avant le fil ; `tsf_note_on` ne réalloue plus et les
+  fonctions de canal ne créent plus de canal. Ce SoundFont produit une voix
+  par note ; au-delà de 48 voix simultanées, TSF coupe la voix la plus avancée
+  dans son relâchement. **Aiguillage MIDI** : un drapeau `piano` par division
+  (défaut faux) et le masque de canaux de la division (`CMD_CANAUX_DIVISION`,
+  recopié dans `g_canaux_piano` pour ne pas interroger le moteur à chaque
+  note) décident si le message **filtré par la transposition** part aussi au
+  piano, sur le canal TSF de la division ; les accouplements de l'orgue ne
+  propagent jamais le piano. CC 64 du canal d'une division à drapeau vrai →
+  pédale de sustain de son canal TSF ; `panique()` appelle en plus
+  `tsf_note_off_all` ; couper le drapeau relâche les notes de la division
+  (pédale comprise). **Commandes et état** : `CMD_PIANO` (division, actif) et
+  `CMD_PIANO_VOLUME` (0..1, défaut 0,5, borné en C) dans `struct commande` ;
+  `struct etat` publie `piano_disponible`, `piano_volume`, `piano_voix`
+  (nombre de voix actives, écrit sans incrémenter `seq`, comme la charge) et
+  `divisions[d].piano`. Lua : `organum.piano(d, actif)`,
+  `organum.piano_volume(v)`, champs correspondants d'`organum.etat()`.
+  HTTP : `POST /api/orgue {"piano":{"division":N,"actif":bool}}` et
+  `{"piano_volume":0..1}` (validation dans `web/src/validation.moon`),
+  publiés par `GET /api/orgue`. Persistance : clés `piano_volume` et
+  `pianos` d'`etat.json` ; absentes d'un fichier ancien, le volume garde 0,5
+  et aucune division ne joue sur le piano. Tests : `web/scripts/test-piano.sh`
+  (48 notes avec pédale, relâchements retenus puis relâchés, drapeau coupé,
+  panique, xruns, charge avec et sans piano, volume borné, persistance),
+  `web/tests/validation_test.lua` pour les nouvelles actions.
 - Authentification facultative HTTP Digest SHA-256 (RFC 7616, `qop=auth`,
   royaume `organum`) : désactivée sans mot de passe ; ne sert qu'à vérifier
   les droits, sans chiffrement. Règles pures dans

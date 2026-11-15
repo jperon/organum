@@ -178,6 +178,26 @@ aide.egal(orgue({gain = {division = 0, value = 0 / 0}}), nil, "orgue : gain NaN"
 aide.egal(orgue({gain = {division = 0, value = math.huge}}), nil, "orgue : gain infini")
 aide.egal(orgue({gain = {division = 0, value = "0.5"}}), nil, "orgue : gain chaîne")
 
+aide.egal(orgue({piano = {division = 0, actif = true}}), "piano", "orgue : piano activé")
+aide.egal(orgue({piano = {division = 1, actif = false}}), "piano", "orgue : piano désactivé")
+aide.egal(orgue({piano = {division = 2, actif = true}}), nil, "orgue : piano division hors limites")
+aide.egal(orgue({piano = {division = 0.5, actif = true}}), nil, "orgue : piano division flottante")
+aide.egal(orgue({piano = {division = 0, actif = 1}}), nil, "orgue : piano actif non booléen")
+aide.egal(orgue({piano = {division = 0}}), nil, "orgue : piano actif manquant")
+aide.egal(orgue({piano = "x"}), nil, "orgue : piano non table")
+aide.egal(orgue({piano = {division = 0, actif = true, extra = 1}}), "piano",
+  "orgue : piano ignore les champs en trop (comme gain)")
+
+aide.egal(orgue({piano_volume = 0}), "piano_volume", "orgue : piano_volume 0")
+aide.egal(orgue({piano_volume = 1}), "piano_volume", "orgue : piano_volume 1")
+aide.egal(orgue({piano_volume = 0.5}), "piano_volume", "orgue : piano_volume 0,5")
+aide.egal(orgue({piano_volume = -0.1}), nil, "orgue : piano_volume négatif")
+aide.egal(orgue({piano_volume = 1.1}), nil, "orgue : piano_volume trop grand")
+aide.egal(orgue({piano_volume = 0 / 0}), nil, "orgue : piano_volume NaN")
+aide.egal(orgue({piano_volume = math.huge}), nil, "orgue : piano_volume infini")
+aide.egal(orgue({piano_volume = "0.5"}), nil, "orgue : piano_volume chaîne")
+aide.egal(orgue({piano_volume = true}), nil, "orgue : piano_volume booléen")
+
 aide.egal(orgue({qualite = {}}), "qualite", "orgue : qualité déléguée")
 aide.egal(orgue({qualite = 5}), "qualite", "orgue : qualité non table déléguée")
 
@@ -278,7 +298,7 @@ aide.egal(v.PERIODES_VALIDES[100], nil, "constantes : période 100 absente")
 aide.egal(v.DEMARRAGE_DEFAUT.periode, 512, "constantes : période par défaut")
 for _, cle in ipairs({"stop", "cancel", "step", "reverb", "panic", "gain",
                       "link", "qualite", "volume", "temperament",
-                      "transposition"}) do
+                      "transposition", "note", "piano", "piano_volume"}) do
   aide.egal(v.ACTIONS_ORGUE[cle], true, "constantes : action " .. cle)
 end
 
