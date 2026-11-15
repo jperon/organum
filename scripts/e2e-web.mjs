@@ -258,12 +258,15 @@ async function glisserVertical(expression, fraction) {
     await cdp.envoyer('Input.dispatchMouseEvent', {
       type: 'mouseMoved', x, y: y + (arrivee - y) * pas / 4, button: 'left', buttons: 1
     });
-    await delay(40);
+    await delay(50);
   }
+  // Le dernier mouvement doit être traité avant le relâchement : sinon le
+  // client envoie la valeur de l'avant-dernier pas (glissement à moitié).
+  await delay(120);
   await cdp.envoyer('Input.dispatchMouseEvent', {
     type: 'mouseReleased', x, y: arrivee, button: 'left', buttons: 0, clickCount: 1
   });
-  await delay(250);
+  await delay(300);
   return true;
 }
 
@@ -405,11 +408,12 @@ async function testAccueil() {
   await poster('/api/volume', { volume: 50, muted: false });
   await attendre(async () => (await api('/api/volume')).volume === 50,
     'web / : volume système remis à 50 avant le glissement');
+  const avantVolume = (await api('/api/volume')).volume;
   await glisserVertical('document.querySelector(".curseur-general")', -0.2);
   const glisseVolume = await attendre(
     async () => {
       const etat = await api('/api/volume');
-      return etat.volume >= 24 && etat.volume <= 36 ? etat.volume : null;
+      return Math.abs(etat.volume - (avantVolume - 20)) <= 6 ? etat.volume : null;
     },
     'web / : curseur de volume système, glissement de −20 % (≈ 30 %)'
   );
@@ -417,11 +421,12 @@ async function testAccueil() {
   await poster('/api/orgue', { volume: 0.5 });
   await attendre(async () => Math.abs((await api('/api/orgue')).volume - 0.5) < 0.02,
     'web / : pédale remise à 50 avant le glissement');
+  const avantPedale = (await api('/api/orgue')).volume;
   await glisserVertical('document.querySelector(".pedale-general")', 0.2);
   const glissePedale = await attendre(
     async () => {
       const etat = await api('/api/orgue');
-      return etat.volume >= 0.64 && etat.volume <= 0.76 ? Math.round(etat.volume * 100) : null;
+      return Math.abs(etat.volume - (avantPedale + 0.2)) <= 0.06 ? Math.round(etat.volume * 100) : null;
     },
     'web / : curseur de pédale, glissement de +20 % (≈ 70 %)'
   );
@@ -450,12 +455,13 @@ async function testAccueil() {
   await poster('/api/orgue', { gain: { division: 0, value: 0.5 } });
   await attendre(async () => Math.abs((await api('/api/orgue')).divisions[0].gain - 0.5) < 0.02,
     'web / : gain de la première division remis à 50 avant le glissement');
+  const avantGain = (await api('/api/orgue')).divisions[0].gain;
   await glisserVertical('document.querySelectorAll(".gain-colonne")[0]', -0.2);
   const glisseGain = await attendre(
     async () => {
       const etat = await api('/api/orgue');
-      return etat.divisions[0].gain >= 0.24 && etat.divisions[0].gain <= 0.36
-        ? Math.round(etat.divisions[0].gain * 100) : null;
+      const g = etat.divisions[0].gain;
+      return Math.abs(g - (avantGain - 0.2)) <= 0.06 ? Math.round(g * 100) : null;
     },
     'web / : curseur de gain d’un clavier, glissement de −20 % (≈ 30 %)'
   );
