@@ -35,6 +35,7 @@
 #include "../plateforme/audio.h"
 #include "../plateforme/midi.h"
 #include "charge_niveau.h"
+#include "piano/piano.h"
 #include "sortie_null.h"
 #include "transposition.h"
 
@@ -98,6 +99,12 @@ struct etat {
     } jeux[MAX_JEUX];
   } divisions[MAX_DIVISIONS];
   float volume, reverb;
+  // Piano échantillonné : disponible (SoundFont chargé), volume propre
+  // (0..1) et nombre de voix actives. Ce dernier est écrit à part, sans
+  // réveiller les attentes (comme la charge), car il change souvent.
+  int piano_disponible;
+  float piano_volume;
+  int piano_voix;
   // Réglages de qualité publiés par le moteur (voir aeolus_qualite).
   int bruit_attaque, instabilite, spatialisation, polyphonie_max;
   // Tête de réverbération : valeur effective (option + ORGANUM_REVERB_TETE)
@@ -177,6 +184,10 @@ static int g_limiteur = 1;
 static int g_transposition;
 // Notes réellement envoyées, fil audio uniquement (voir transposition.h).
 static struct transposition_etat g_transposition_etat;
+// Piano échantillonné : chargé au démarrage, avant le fil audio. Son volume
+// n'est touché que par le fil audio et publié par publier().
+static struct piano *g_piano;
+static float g_piano_volume = 0.5f;
 static char g_audio_erreur[ERREUR_MAX];
 static int g_xruns_base;  // xruns cumulés des descripteurs déjà fermés
 static struct demande_audio g_demande_pendante;
@@ -404,6 +415,8 @@ static void oublier_audio_fils(void) {
 // l_demarrer refuserait de redémarrer.
 static void liberer_demarrage(void) {
   arreter_fil_temperament();
+  piano_fermer(g_piano);
+  g_piano = NULL;
   if (g_midi) {
     midi_fermer(g_midi);
     g_midi = NULL;
@@ -462,6 +475,10 @@ static void publier(void) {
   int x = g_xruns_base + (g_audio ? audio_xruns(g_audio) : 0);
   if (v != e->volume) e->volume = v, change = 1;
   if (r != e->reverb) e->reverb = r, change = 1;
+  if (g_piano_volume != e->piano_volume) e->piano_volume = g_piano_volume, change = 1;
+  // Nombre de voix du piano : éphémère, comme l'activité des canaux, donc
+  // écrit sans incrémenter seq (une interface le lit au passage).
+  e->piano_voix = piano_voix(g_piano);
   if (x != e->xruns) e->xruns = x, change = 1;
   if (g_taux != e->taux) e->taux = g_taux, change = 1;
   if (g_periode != e->periode) e->periode = g_periode, change = 1;
@@ -891,7 +908,7 @@ static int ouvrir_audio_attente(const struct demande_audio *d, long limite_ms) {
 // l'ancienne configuration ; si elle ne s'ouvre pas non plus, la demande
 // reste en attente et sera réessayée par la boucle.
 static int appliquer_demande(struct demande_audio *dem, float **bg,
-                             float **bd, float **be) {
+                             float **bd, float **be, float **bp) {
   if (g_sans_backend) {
     // Aucun backend : retenir la demande pour que les valeurs publiées et
     // enregistrées restent cohérentes, sans tenter d'ouvrir quoi que ce soit.
@@ -932,14 +949,15 @@ static int appliquer_demande(struct demande_audio *dem, float **bg,
 
   // Nouvelle sortie ouverte : préparer les tampons avant de toucher au
   // moteur, pour pouvoir revenir en arrière sans état à moitié changé.
-  float *ng = *bg, *nd = *bd, *ne = *be;
+  float *ng = *bg, *nd = *bd, *ne = *be, *np = *bp;
   int nouveaux_tampons = dem->periode != ancien_periode;
   if (nouveaux_tampons) {
     ng = malloc((size_t)dem->periode * sizeof(float));
     nd = malloc((size_t)dem->periode * sizeof(float));
     ne = malloc((size_t)dem->periode * 2 * sizeof(float));
-    if (!ng || !nd || !ne) {
-      free(ng); free(nd); free(ne);
+    np = malloc((size_t)dem->periode * 2 * sizeof(float));
+    if (!ng || !nd || !ne || !np) {
+      free(ng); free(nd); free(ne); free(np);
       struct demande_audio ancienne = {ancien_taux, ancien_periode, {0}};
       strlcpy(ancienne.peripherique, ancien_periph, sizeof(ancienne.peripherique));
       fermer_audio_cumuler();
@@ -954,7 +972,7 @@ static int appliquer_demande(struct demande_audio *dem, float **bg,
   }
 
   if (dem->taux != ancien_taux && !recreer_moteur(dem->taux)) {
-    if (nouveaux_tampons) { free(ng); free(nd); free(ne); }
+    if (nouveaux_tampons) { free(ng); free(nd); free(ne); free(np); }
     struct demande_audio ancienne = {ancien_taux, ancien_periode, {0}};
     strlcpy(ancienne.peripherique, ancien_periph, sizeof(ancienne.peripherique));
     fermer_audio_cumuler();
@@ -967,9 +985,13 @@ static int appliquer_demande(struct demande_audio *dem, float **bg,
     return 0;
   }
 
+  // Le taux du piano suit celui du moteur : ses voix en cours visaient
+  // l'ancien, piano_taux() les coupe avant de régler la nouvelle sortie.
+  if (dem->taux != ancien_taux) piano_taux(g_piano, dem->taux);
+
   if (nouveaux_tampons) {
-    free(*bg); free(*bd); free(*be);
-    *bg = ng; *bd = nd; *be = ne;
+    free(*bg); free(*bd); free(*be); free(*bp);
+    *bg = ng; *bd = nd; *be = ne; *bp = np;
   }
   g_taux = dem->taux;
   g_periode = dem->periode;
@@ -1074,6 +1096,13 @@ static void *boucle_audio(void *arg) {
   float *g = malloc(g_periode * sizeof(float));
   float *d = malloc(g_periode * sizeof(float));
   float *entrelace = malloc(g_periode * 2 * sizeof(float));
+  // Tampon du piano, préalloué : le rendu n'alloue jamais. Sans lui, l'orgue
+  // joue seul (un seul message, au démarrage du fil).
+  float *piano_tampon = malloc((size_t)g_periode * 2 * sizeof(float));
+  if (!piano_tampon && g_piano)
+    fprintf(stderr,
+            "organum : piano muet (tampon de rendu indisponible) ; l'orgue "
+            "continue\n");
   midi_msg_t msgs[64];
   struct commande cmds[32];
   int tours = 0;
@@ -1106,7 +1135,7 @@ static void *boucle_audio(void *arg) {
         if (cmds[i].type == CMD_RECONFIG) {
           struct demande_audio dem;
           copier_demande(&dem);
-          appliquer_demande(&dem, &g, &d, &entrelace);
+          appliquer_demande(&dem, &g, &d, &entrelace, &piano_tampon);
           // Nouveau réglage audio : la pointe repart de zéro et les xruns des
           // trois secondes qui suivent (dont ceux de l'ouverture) sont ignorés.
           mesure_reinitialiser();
@@ -1138,7 +1167,7 @@ static void *boucle_audio(void *arg) {
             dem.periode = g_periode;
             strlcpy(dem.peripherique, g_peripherique, sizeof(dem.peripherique));
           }
-          appliquer_demande(&dem, &g, &d, &entrelace);
+          appliquer_demande(&dem, &g, &d, &entrelace, &piano_tampon);
           mesure_reinitialiser();
           g_xruns_blocage =
               g_echantillons + (unsigned long long)g_taux * XRUNS_BLOCAGE_SECONDES;
@@ -1184,6 +1213,15 @@ static void *boucle_audio(void *arg) {
     struct timespec t0, t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
     aeolus_rendre(g_moteur, g, d, g_periode);
+    // Piano : rendu dans son tampon préalloué, puis ajout × volume dans les
+    // deux canaux. Entre t0 et t1, donc compté dans la mesure de charge.
+    if (piano_tampon && piano_rendre(g_piano, piano_tampon, g_periode)) {
+      const float volume = g_piano_volume;
+      for (int i = 0; i < g_periode; ++i) {
+        g[i] += piano_tampon[2 * i] * volume;
+        d[i] += piano_tampon[2 * i + 1] * volume;
+      }
+    }
     clock_gettime(CLOCK_MONOTONIC, &t1);
     for (int i = 0; i < g_periode; ++i) {
       entrelace[2 * i] = g[i];
@@ -1482,6 +1520,13 @@ static int l_demarrer(lua_State *L) {
     g_etat->tete_reverb = aeolus_lire_reverb_tete(g_moteur);
     g_etat->tete_reverb_impose = impose;
   }
+  // Piano échantillonné : le SoundFont embarqué est décodé ici, avant le fil
+  // audio, pour qu'aucune allocation n'ait lieu dans le fil. Un échec laisse
+  // l'orgue intact : piano_disponible reste faux et un seul message part au
+  // journal (voir piano_charger).
+  g_piano = piano_charger(taux, PIANO_MAX_VOIX, MAX_DIVISIONS);
+  g_etat->piano_disponible = g_piano != NULL;
+  g_etat->piano_volume = g_piano_volume;
   // Ne pas tenter de borner audio_ouvrir() par SIGALRM : cosmo_dlopen fait
   // passer les appels dans libasound par un trampoline qui bloque tous les
   // signaux, y compris SIGALRM. Un serveur audio figé peut donc encore
