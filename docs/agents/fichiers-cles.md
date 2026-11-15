@@ -516,7 +516,16 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   40 × 24, `--fill` conservé ; l'input est en `pointer-events: none` et la
   colonne reçoit la saisie relative (`saisieVerticale` de
   `web/src/client.moon` : pointer events et molette ; le clavier reste
-  utilisable).
+  utilisable). En largeur étroite (≤ 600 px), le bandeau se serre à deux
+  colonnes de 44 px sans marge ni bordure, et la largeur gagnée revient aux
+  jeux ; en natif, la colonne garde déjà 44 px minimum dès que la largeur
+  manque (le cadre du groupe, 10 px, reste la seule marge).
+  Les boutons de jeux gardent le texte complet sur deux ou trois lignes :
+  colonnes d'au moins 78 px (une de plus que la colonne de gain), rangées à
+  la hauteur de leur contenu avec 44 px minimum, grille qui ne se laisse pas
+  écraser (`flex: 1 0 auto`, `grid-auto-rows: max-content`). L'e2e web
+  vérifie sur chaque bouton `scrollHeight <= clientHeight + 1` et une hauteur
+  ≥ 44 px, aux largeurs 420 et 1100 px.
   La réverbération n'est plus sur la console principale : elle est réglée
   dans le panneau « Audio », comme le curseur de la page web.
   Exigence : tout doit tenir dans la fenêtre, sans défilement, et grossir

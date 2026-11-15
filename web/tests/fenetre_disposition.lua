@@ -200,6 +200,14 @@ aide.egal(d.case_centre(0, 100, 2, 1), 76, "géométrie : case_centre après dis
 aide.egal(d.colonne_ratio(0, 100, {1, 1}, 2).centre, 76,
   "géométrie : colonne_ratio après disposer")
 
+-- Bandeau étroit (même règle que la page web sous 600 px) : dès que la place
+-- manque, la colonne garde les 44 px de la zone sensible et rien de plus.
+local etroit = d.disposer(etat(4, 12, false), 480, 800, 30, 15, 13, 2)
+aide.egal(etroit.colonne_curseur, d.CURSEUR_LARGEUR,
+  "disposer : colonne du bandeau à 44 px en étroit")
+aide.egal(etroit.bande, 2 * d.CURSEUR_LARGEUR + d.ESPACE + d.CADRE_GROUPE,
+  "disposer : bandeau serré en étroit")
+
 -- Sans curseur général, la console retrouve toute la largeur.
 local sans = d.disposer(etat(4, 12, false), 1024, 640, 30, 15, 16, 0)
 aide.egal(sans.bande, 0, "disposer : aucun bandeau sans curseur général")
