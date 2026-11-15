@@ -503,8 +503,16 @@ e = json.load(open(sys.argv[1]))
 divs = e.get("divisions", [])
 maxjeux = max([len(d.get("stops", [])) for d in divs] or [10])
 liens = 1 if any(d.get("links") for d in divs) else 0
-print(len(divs), maxjeux, liens)
+piano = 1 if e.get("piano_disponible") is True else 0
+print(len(divs), maxjeux, liens, piano)
 PY
+}
+
+# Nombre d'accouplements d'une division, depuis l'état publié.
+liens_division() {
+  lire_api | python3 -c 'import json,sys
+e = json.load(sys.stdin)
+print(len(e["divisions"][int(sys.argv[1])].get("links") or {}))' "$1"
 }
 
 parametres_midi() {
@@ -577,6 +585,11 @@ if mode == "console" then
   local maxjeux = tonumber(os.getenv("MAXJEUX") or "10")
   local a_liens = os.getenv("LIENS") == "1"
   local nb = tonumber(os.getenv("GENERAUX") or "2")
+  -- Piano : le bouton existe quand le SoundFont est chargé (PIANO=1) ; NLIENS
+  -- est le nombre d'accouplements de la colonne visée, 0 pour le clavier qui
+  -- porte la transposition.
+  local piano = os.getenv("PIANO") == "1"
+  local nliens = tonumber(os.getenv("NLIENS") or "0")
   local divisions = {}
   for i = 1, ndiv do
     local jeux = {}
@@ -620,13 +633,22 @@ if mode == "console" then
   print("gain_h=" .. arrondi(gain_course))
   -- Transposition : une seule rangée (celle des accouplements) en bas de la
   -- colonne. Quatre cellules de poids {2, 1, 1.2, 1} : le libellé, « − », la
-  -- valeur signée, « + ».
+  -- valeur signée, « + » ; le bouton Piano, quand il est là, occupe une
+  -- cinquième cellule à poids {1.9, 0.7, 0.9, 0.7, 1.25}.
   local yr = arrondi(bloc_y + bloc + d.ESPACE + p.jeu / 2)
-  local poids = {2, 1, 1.2, 1}
+  local poids = piano and {1.9, 0.7, 0.9, 0.7, 1.25} or {2, 1, 1.2, 1}
   print("trans_moins_x=" .. arrondi(d.colonne_ratio(cx, p.largeur_colonne, poids, 2).centre))
   print("trans_valeur_x=" .. arrondi(d.colonne_ratio(cx, p.largeur_colonne, poids, 3).centre))
   print("trans_plus_x=" .. arrondi(d.colonne_ratio(cx, p.largeur_colonne, poids, 4).centre))
   print("trans_y=" .. yr)
+  -- Bouton Piano : dernier de la rangée basse. Rangée des accouplements
+  -- (nliens + 1 cases égales) ou rangée de transposition (5 cases à poids).
+  if nliens > 0 then
+    print("piano_x=" .. arrondi(d.case_centre(cx, p.largeur_colonne, nliens + 1, nliens)))
+  else
+    print("piano_x=" .. arrondi(d.colonne_ratio(cx, p.largeur_colonne, poids, #poids).centre))
+  end
+  print("piano_y=" .. yr)
 elseif mode == "qualite" then
   local rows = tonumber(os.getenv("ROWS")); local cols = tonumber(os.getenv("COLS"))
   local p = d.disposer_qualite(rows, l, h, cols)
@@ -743,6 +765,12 @@ echo "      durée authentification web : $(duree "$DEBUT_AUTH" "$FIN_AUTH")"
 DEBUT_NATIF=$(date +%s%N)
 if demarrer_xvfb && demarrer_organum oui && attendre_fenetre; then
   chemin_capture_lu=0
+  # Paramètres réels de la console : nombre de claviers, de jeux et
+  # d'accouplements, et présence du piano échantillonné (SoundFont chargé).
+  # La fenêtre reçoit alors deux curseurs généraux (Volume par le faux wpctl,
+  # Pédale) plus Piano : les coordonnées cliquables doivent compter les trois.
+  read -r NDIV MAXJEUX LIENS PIANO <<<"$(parametres_transposition)"
+  NGENERAUX=$((2 + PIANO))
   for taille in "800 480" "1024 640" "1920 1080"; do
     set -- $taille
     largeur=$1
@@ -750,7 +778,7 @@ if demarrer_xvfb && demarrer_organum oui && attendre_fenetre; then
     redimensionner "$largeur" "$hauteur"
 
     read -r R1 R2 <<<"$(parametres_console)"
-    eval "$(coords console "$largeur" "$hauteur" "$R1" "$R2")"
+    eval "$(GENERAUX=$NGENERAUX coords console "$largeur" "$hauteur" "$R1" "$R2")"
 
     capturer "console-$largeur-$hauteur"
     H_CONSOLE=$(md5sum "$CAPTURES/console-$largeur-$hauteur.png" | cut -d' ' -f1)
@@ -802,13 +830,12 @@ if demarrer_xvfb && demarrer_organum oui && attendre_fenetre; then
   # Commandes réelles à 1920×1080, où les cibles sont les plus grandes.
   redimensionner 1920 1080
   read -r R1 R2 <<<"$(parametres_console)"
-  eval "$(coords console 1920 1080 "$R1" "$R2")"
+  eval "$(GENERAUX=$NGENERAUX coords console 1920 1080 "$R1" "$R2")"
 
   # Bandeau des curseurs généraux : « Volume » (système, faux wpctl) et
   # « Pédale » (volume du moteur) côte à côte et verticaux. Saisie relative :
   # un appui seul ne change rien, un glissement de 20 % baisse la valeur.
-  read -r NDIV MAXJEUX LIENS <<<"$(parametres_transposition)"
-  eval "$(NDIV=$NDIV MAXJEUX=$MAXJEUX LIENS=$LIENS COL=0 GENERAUX=2 coords console 1920 1080 "$R1" "$R2")"
+  eval "$(NDIV=$NDIV MAXJEUX=$MAXJEUX LIENS=$LIENS COL=0 GENERAUX=$NGENERAUX coords console 1920 1080 "$R1" "$R2")"
   ecrire_json_api '{"volume":0.5}'
   attendre_valeur 'e["volume"]' 0.5 0.01 50
   VOL_AVANT=$(lire_api | python3 -c 'import json,sys; print(json.load(sys.stdin)["volume"])' 2>/dev/null || echo 0.5)
@@ -861,7 +888,7 @@ PY
 
   ecrire_json_api '{"gain":{"division":0,"value":0.5}}'
   attendre_valeur 'e["divisions"][0]["gain"]' 0.5 0.01 50
-  eval "$(NDIV=$NDIV MAXJEUX=$MAXJEUX LIENS=$LIENS COL=0 GENERAUX=2 coords console 1920 1080 "$R1" "$R2")"
+  eval "$(NDIV=$NDIV MAXJEUX=$MAXJEUX LIENS=$LIENS COL=0 GENERAUX=$NGENERAUX coords console 1920 1080 "$R1" "$R2")"
   eval "$(python3 - "$gain_x" "$gain_y" "$gain_h" <<'PY'
 import sys
 x, y, h = float(sys.argv[1]), float(sys.argv[2]), float(sys.argv[3])
@@ -880,7 +907,7 @@ PY
 
   # Transposition : clic réel sur « + » dans la colonne du Manuel III, valeur
   # relue par l'API, accent visible (captures), borne haute inactive.
-  eval "$(NDIV=$NDIV MAXJEUX=$MAXJEUX LIENS=$LIENS COL=0 coords console 1920 1080 "$R1" "$R2")"
+  eval "$(NDIV=$NDIV MAXJEUX=$MAXJEUX LIENS=$LIENS COL=0 PIANO=$PIANO NLIENS=0 GENERAUX=$NGENERAUX coords console 1920 1080 "$R1" "$R2")"
   ecrire_json_api '{"transposition":0}'
   attendre_api '"transposition":0' 50
   capturer "trans-avant"
@@ -916,6 +943,94 @@ PY
   fi
   ecrire_json_api '{"transposition":0}'
   attendre_api '"transposition":0' 50
+
+  # Piano échantillonné : bouton de chaque clavier (dernier de la rangée
+  # basse) et curseur du bandeau. Les cibles viennent de fenetre_disposition
+  # par le même calcul que la fenêtre ; l'état est relu dans /api/orgue.
+  if [ "$PIANO" = 1 ]; then
+    # 1. Dernier clavier (le pédalier) : ses accouplements puis Piano,
+    # dernière case de la rangée.
+    DERNIERE=$((NDIV - 1))
+    ecrire_json_api "{\"piano\":{\"division\":$DERNIERE,\"actif\":false}}"
+    if ! attendre_valeur "e[\"divisions\"][$DERNIERE][\"piano\"]" 0 0 50; then
+      echec "natif : le piano du pédalier ne se remet pas à l'arrêt"
+    fi
+    NL_PEDALE=$(liens_division "$DERNIERE")
+    eval "$(NDIV=$NDIV MAXJEUX=$MAXJEUX LIENS=$LIENS PIANO=1 NLIENS=$NL_PEDALE COL=$DERNIERE GENERAUX=$NGENERAUX coords console 1920 1080 "$R1" "$R2")"
+    capturer "piano-avant"
+    H_PIANO_AVANT=$(md5sum "$CAPTURES/piano-avant.png" | cut -d' ' -f1)
+    clic_xy "$piano_x" "$piano_y"
+    if attendre_valeur "e[\"divisions\"][$DERNIERE][\"piano\"]" 1 0 50; then
+      ok "natif : bouton Piano du pédalier, état relu dans divisions[$DERNIERE].piano"
+    else
+      echec "natif : le clic sur Piano (pédalier) ne change pas divisions[$DERNIERE].piano"
+    fi
+    capturer "piano-apres"
+    H_PIANO_APRES=$(md5sum "$CAPTURES/piano-apres.png" | cut -d' ' -f1)
+    if [ "$H_PIANO_AVANT" = "$H_PIANO_APRES" ]; then
+      echec "natif : le bouton Piano enfoncé ne change pas l'affichage"
+    else
+      ok "natif : bouton Piano enfoncé visible (capture changée)"
+    fi
+    clic_xy "$piano_x" "$piano_y"
+    if attendre_valeur "e[\"divisions\"][$DERNIERE][\"piano\"]" 0 0 50; then
+      ok "natif : second clic sur Piano relâche la division"
+    else
+      echec "natif : le second clic sur Piano ne relâche pas la division"
+    fi
+
+    # 2. Manuel III : Piano partage sa rangée avec la Transposition, qui ne
+    # doit pas bouger.
+    ecrire_json_api '{"transposition":0}'
+    attendre_api '"transposition":0' 50
+    ecrire_json_api '{"piano":{"division":0,"actif":false}}'
+    attendre_valeur 'e["divisions"][0]["piano"]' 0 0 50
+    eval "$(NDIV=$NDIV MAXJEUX=$MAXJEUX LIENS=$LIENS PIANO=1 NLIENS=0 COL=0 GENERAUX=$NGENERAUX coords console 1920 1080 "$R1" "$R2")"
+    clic_xy "$piano_x" "$piano_y"
+    if attendre_valeur 'e["divisions"][0]["piano"]' 1 0 50; then
+      ok "natif : bouton Piano du clavier à transposition, état relu"
+    else
+      echec "natif : le clic sur Piano (Manuel III) ne change pas divisions[0].piano"
+    fi
+    if lire_api | grep -qF '"transposition":0'; then
+      ok "natif : la transposition reste à 0 après le clic sur Piano"
+    else
+      echec "natif : le clic sur Piano a modifié la transposition"
+    fi
+    ecrire_json_api '{"piano":{"division":0,"actif":false}}'
+    attendre_valeur 'e["divisions"][0]["piano"]' 0 0 50
+
+    # 3. Curseur Piano du bandeau : troisième colonne, après « Pédale ».
+    ecrire_json_api '{"piano_volume":0.5}'
+    attendre_valeur 'e["piano_volume"]' 0.5 0.01 50
+    eval "$(NDIV=$NDIV MAXJEUX=$MAXJEUX LIENS=$LIENS COL=0 GENERAUX=$NGENERAUX coords console 1920 1080 "$R1" "$R2")"
+    eval "$(python3 - "$general_2_x" "$general_y" "$general_h" <<'PY'
+import sys
+x, y, h = float(sys.argv[1]), float(sys.argv[2]), float(sys.argv[3])
+course = h - 24
+print("piano_depart_y=%d piano_arrivee_y=%d" % (round(y), round(y + 0.2 * course)))
+PY
+)"
+    glisser_xy "$general_2_x" "$piano_depart_y" "$general_2_x" "$piano_arrivee_y"
+    if attendre_valeur 'e["piano_volume"]' 0.3 0.05 60; then
+      ok "natif : glissement du curseur Piano, piano_volume relu dans /api/orgue"
+    else
+      echec "natif : le glissement du curseur Piano ne donne pas ~0,3 ($(lire_api | head -c 200))"
+    fi
+    xdotool mousemove --window "$WID" "$general_2_x" "$general_y"
+    sleep 0.2
+    xdotool click 4
+    sleep 0.4
+    if attendre_valeur 'e["piano_volume"]' 0.31 0.01 40; then
+      ok "natif : molette d'un cran sur le curseur Piano (+1 %)"
+    else
+      echec "natif : la molette n'a pas augmenté le piano de 1 % ($(lire_api | head -c 120))"
+    fi
+    ecrire_json_api '{"piano_volume":0.5}'
+    attendre_valeur 'e["piano_volume"]' 0.5 0.01 50
+  else
+    ignore "natif : piano indisponible (SoundFont non chargé), contrôles Piano sautés"
+  fi
 
   clic_xy "$audio_x" "$audio_y"
   read -r QROWS QCOLS QPER <<<"$(parametres_qualite)"
@@ -1007,7 +1122,7 @@ PY
 
   clic_xy "$retour_x" "$retour_y"
   read -r R1 R2 <<<"$(parametres_console)"
-  eval "$(coords console 1920 1080 "$R1" "$R2")"
+  eval "$(GENERAUX=$NGENERAUX coords console 1920 1080 "$R1" "$R2")"
   ecrire_json_api '{"stop":{"division":0,"index":0,"on":true}}'
   attendre_api '"on":true' 50
   sleep 0.3
@@ -1050,9 +1165,8 @@ PY
   # les deux. La fenêtre native est déjà ouverte sur ce serveur.
   redimensionner 1920 1080
   read -r R1 R2 <<<"$(parametres_console)"
-  eval "$(coords console 1920 1080 "$R1" "$R2")"
-  read -r NDIV MAXJEUX LIENS <<<"$(parametres_transposition)"
-  eval "$(NDIV=$NDIV MAXJEUX=$MAXJEUX LIENS=$LIENS COL=0 coords console 1920 1080 "$R1" "$R2")"
+  eval "$(GENERAUX=$NGENERAUX coords console 1920 1080 "$R1" "$R2")"
+  eval "$(NDIV=$NDIV MAXJEUX=$MAXJEUX LIENS=$LIENS COL=0 PIANO=$PIANO NLIENS=0 GENERAUX=$NGENERAUX coords console 1920 1080 "$R1" "$R2")"
   clic_xy "$audio_x" "$audio_y"
   read -r QROWS QCOLS QPER <<<"$(parametres_qualite)"
   eval "$(coords qualite 1920 1080 "$QROWS" "$QCOLS" 0.25 "$QPER")"

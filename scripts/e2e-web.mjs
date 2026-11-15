@@ -551,13 +551,138 @@ async function testAccueil() {
       return { attendu: (v - min) / (max - min) * 100,
                vu: parseFloat(e.style.getPropertyValue('--fill')) };
     }
-    return { volume: mesure('volume'), pedale: mesure('volume-pedale') };
+    return { volume: mesure('volume'), pedale: mesure('volume-pedale'),
+             piano: mesure('piano-volume') };
   })()`);
   for (const [nom, m] of Object.entries(remplissages)) {
     verifie(
       m && Math.abs(m.attendu - m.vu) < 1.5,
       `web / : --fill cohérent avec le pouce (${nom} ${m ? `${m.vu}% / ${m.attendu.toFixed(1)}%` : 'absent'})`
     );
+  }
+
+  // Piano échantillonné : un bouton par clavier, dernier de la rangée basse,
+  // qui bascule divisions[d].piano ; le curseur du bandeau règle
+  // piano_volume. Tout est absent si le SoundFont n'a pas été chargé.
+  const pianoDisponible = (await api('/api/orgue')).piano_disponible === true;
+  verifie(pianoDisponible, 'web / : piano échantillonné disponible');
+  if (pianoDisponible) {
+    const nbBoutons = await evaluer('document.querySelectorAll(".piano-bouton").length');
+    verifie(nbBoutons === ndiv, `web / : un bouton Piano par clavier (${nbBoutons}/${ndiv})`);
+    const rangs = await evaluer(`(() => {
+      const anomalies = [];
+      document.querySelectorAll('.division').forEach((section, i) => {
+        const bouton = section.querySelector('.piano-bouton');
+        if (!bouton) { anomalies.push('absent ' + i); return; }
+        const rangee = bouton.parentNode;
+        if (rangee.lastElementChild !== bouton) { anomalies.push('pas en dernier ' + i); }
+      });
+      return anomalies;
+    })()`);
+    verifie(rangs.length === 0,
+      `web / : bouton Piano en dernier sur chaque rangée (${rangs.join(', ') || 'tous'})`);
+    const memeRangee = await evaluer(`(() => {
+      const t = document.querySelector('.transposition');
+      if (!t) return null;
+      const rangee = t.parentNode;
+      return !!(rangee.querySelector('.piano-bouton') &&
+        rangee.querySelector('.transposition'));
+    })()`);
+    verifie(memeRangee === true, 'web / : Piano et Transposition sur la même rangée');
+
+    // Clic réel sur le bouton du dernier clavier (le pédalier) : état relu
+    // dans l'API et bouton enfoncé (data-state).
+    const dp = ndiv - 1;
+    const boutonPiano = `document.querySelectorAll('.division')[${dp}].querySelector('.piano-bouton')`;
+    await poster('/api/orgue', { piano: { division: dp, actif: false } });
+    await attendre(async () => (await api('/api/orgue')).divisions[dp].piano === false,
+      'web / : piano du dernier clavier remis à l’arrêt');
+    await clic(boutonPiano);
+    const pianoActif = await attendre(
+      async () => {
+        const e = await api('/api/orgue');
+        const etat = await evaluer(`${boutonPiano}.getAttribute('data-state')`);
+        return (e.divisions[dp].piano === true && etat === 'on') ? e : null;
+      },
+      'web / : bouton Piano du dernier clavier bascule et s’affiche enfoncé'
+    );
+    verifie(!!pianoActif,
+      `web / : divisions[${dp}].piano vrai après le clic, bouton enfoncé`);
+    await clic(boutonPiano);
+    await attendre(async () => (await api('/api/orgue')).divisions[dp].piano === false,
+      'web / : second clic sur Piano relâche la division');
+
+    // Le clavier qui porte la Transposition : le clic sur Piano ne la touche
+    // pas, et un POST d'une autre interface se reflète dans le bouton.
+    const dtrans = await evaluer(`(() => {
+      const t = document.querySelector('.transposition');
+      if (!t) return -1;
+      return Array.prototype.indexOf.call(
+        document.querySelectorAll('.division'), t.closest('.division'));
+    })()`);
+    if (dtrans >= 0) {
+      await poster('/api/orgue', { transposition: 0 });
+      await attendre(async () => (await api('/api/orgue')).transposition === 0,
+        'web / : transposition remise à 0 avant le bouton Piano');
+      await poster('/api/orgue', { piano: { division: dtrans, actif: false } });
+      await attendre(async () => (await api('/api/orgue')).divisions[dtrans].piano === false,
+        'web / : piano du clavier à transposition remis à l’arrêt');
+      await clic(`document.querySelectorAll('.division')[${dtrans}].querySelector('.piano-bouton')`);
+      const vu = await attendre(
+        async () => {
+          const e = await api('/api/orgue');
+          return (e.divisions[dtrans].piano === true && e.transposition === 0) ? e : null;
+        },
+        'web / : Piano du clavier à transposition, transposition inchangée'
+      );
+      verifie(!!vu, `web / : divisions[${dtrans}].piano vrai et transposition à 0`);
+      // POST venu d'ailleurs : le bouton suit par l'attente longue.
+      await poster('/api/orgue', { piano: { division: dtrans, actif: false } });
+      const relache = await attendre(
+        async () => {
+          const etat = await evaluer(
+            `document.querySelectorAll('.division')[${dtrans}].querySelector('.piano-bouton').getAttribute('data-state')`);
+          return etat === 'off' ? etat : null;
+        },
+        'web / : bouton Piano reflète un changement venu de l’API'
+      );
+      verifie(!!relache, 'web / : bouton Piano relâché par un POST extérieur');
+    }
+
+    // Curseur Piano du bandeau : même saisie relative que les autres.
+    await poster('/api/orgue', { piano_volume: 0.5 });
+    await attendre(async () => Math.abs((await api('/api/orgue')).piano_volume - 0.5) < 0.02,
+      'web / : volume du piano remis à 50 avant le glissement');
+    const avantPiano = (await api('/api/orgue')).piano_volume;
+    await glisserVertical('document.querySelector(".piano-general")', -0.2);
+    const glissePiano = await attendre(
+      async () => {
+        const etat = await api('/api/orgue');
+        return Math.abs(etat.piano_volume - (avantPiano - 0.2)) <= 0.06
+          ? Math.round(etat.piano_volume * 100) : null;
+      },
+      'web / : curseur Piano, glissement de −20 % (≈ 30 %)'
+    );
+    verifie(!!glissePiano,
+      `web / : curseur Piano glissé, piano_volume relu (${glissePiano || '?'} %)`);
+    const valeurPiano = await evaluer(`(() => {
+      const colonne = document.querySelector('.piano-general');
+      return colonne ? colonne.querySelector('.value').textContent.trim() : '';
+    })()`);
+    verifie(/^3\d\u00a0%$/.test(valeurPiano),
+      `web / : valeur du curseur Piano affichée en % (${valeurPiano})`);
+    await poster('/api/orgue', { piano_volume: 0.6 });
+    const pianoVenu = await attendre(
+      async () => {
+        const e = await api('/api/orgue');
+        const valeur = await evaluer(
+          'document.getElementById("piano-volume").value');
+        return (Math.abs(e.piano_volume - 0.6) < 0.02 && valeur === '60') ? e : null;
+      },
+      'web / : curseur Piano suit un POST extérieur'
+    );
+    verifie(!!pianoVenu, 'web / : curseur Piano mis à jour par l’attente longue');
+    await poster('/api/orgue', { piano_volume: 0.5 });
   }
 }
 
@@ -1178,6 +1303,16 @@ async function testResponsive() {
                          sw: e.scrollWidth, cw: e.clientWidth });
           }
         }
+        const pianos = [];
+        if (${JSON.stringify(chemin)} === '/') {
+          for (const e of document.querySelectorAll('.piano-bouton')) {
+            if (e.offsetParent === null) continue;
+            const r = e.getBoundingClientRect();
+            pianos.push({ texte: e.textContent.trim(),
+                          h: r.height, sh: e.scrollHeight, ch: e.clientHeight,
+                          sw: e.scrollWidth, cw: e.clientWidth });
+          }
+        }
         return {
           debord,
           petits,
@@ -1185,9 +1320,12 @@ async function testResponsive() {
           curseurs,
           verticaux,
           stops,
+          pianos,
           remplissages: ${JSON.stringify(chemin)} === '/audio'
             ? [remplissage('reverb'), remplissage('qualite-polyphonie')]
-            : (${JSON.stringify(chemin)} === '/' ? [remplissage('volume'), remplissage('volume-pedale')] : [])
+            : (${JSON.stringify(chemin)} === '/'
+              ? [remplissage('volume'), remplissage('volume-pedale'), remplissage('piano-volume')]
+              : [])
         };
       })()`);
       verifie(mesure.debord <= 1, `web ${chemin} à ${largeur} px : aucun débordement horizontal (${mesure.debord} px)`);
@@ -1221,6 +1359,19 @@ async function testResponsive() {
         verifie(
           petitsStops.length === 0,
           `web / à ${largeur} px : boutons de jeu ≥ 44 px (${petitsStops.map((b) => b.texte + '=' + b.h.toFixed(0)).join(', ') || 'tous'})`
+        );
+        // Le bouton Piano garde son libellé entier et la cible tactile, aux
+        // deux largeurs : il partage la rangée des accouplements (ou de la
+        // transposition).
+        const debordPianos = mesure.pianos.filter((b) => b.sh > b.ch + 1 || b.sw > b.cw + 1);
+        verifie(
+          mesure.pianos.length > 0 && debordPianos.length === 0,
+          `web / à ${largeur} px : aucun texte de bouton Piano ne déborde (${debordPianos.map((b) => b.texte + ' ' + b.sh + '>' + b.ch + ' / ' + b.sw + '>' + b.cw).join(', ') || mesure.pianos.length + ' boutons complets'})`
+        );
+        const petitsPianos = mesure.pianos.filter((b) => b.h < 44);
+        verifie(
+          petitsPianos.length === 0,
+          `web / à ${largeur} px : boutons Piano ≥ 44 px (${petitsPianos.map((b) => b.texte + '=' + b.h.toFixed(0)).join(', ') || 'tous'})`
         );
       }
       if (chemin === '/audio') {

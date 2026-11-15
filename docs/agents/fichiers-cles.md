@@ -390,7 +390,11 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   choisie par `modele.colonne_transposition` : Manuel III, sinon première
   division sans accouplement) ; valeur non nulle accentuée, bornes inactives,
   cibles web ≥ 44 px. Un clic sur la valeur centrale (page web et fenêtre
-  native) remet la transposition à 0. Côté natif, le signe moins est l'hyphen ASCII (la
+  native) remet la transposition à 0. Quand le piano est disponible, cette
+  rangée porte aussi son bouton, en dernier : côté natif les poids passent à
+  {1.9, 0.7, 0.9, 0.7, 1.25} et le libellé est tronqué à la largeur de sa
+  case ; côté web le bloc de transposition et le bouton partagent la rangée
+  `.links`. Côté natif, le signe moins est l'hyphen ASCII (la
   police latin embarquée n'a pas U+2212). Tests réels :
   `web/scripts/test-transposition.sh`, e2e web et natif (dont croisé),
   `scripts/tests-unitaires.sh` pour l'en-tête C.
@@ -440,10 +444,24 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   `{"piano_volume":0..1}` (validation dans `web/src/validation.moon`),
   publiés par `GET /api/orgue`. Persistance : clés `piano_volume` et
   `pianos` d'`etat.json` ; absentes d'un fichier ancien, le volume garde 0,5
-  et aucune division ne joue sur le piano. Tests : `web/scripts/test-piano.sh`
+  et aucune division ne joue sur le piano. **Interface** (web et native,
+  mêmes contrôles) : un bouton « Piano » par clavier, en dernier sur la
+  rangée des accouplements, même style et même bascule (`data-state`,
+  `aria-pressed`) que ceux-ci ; un clavier sans accouplement (le Manuel III)
+  le partage avec la Transposition, sans la déplacer. Un curseur vertical
+  « Piano » s'ajoute dans le bandeau après « Pédale » (id `piano-volume` côté
+  web, troisième entrée de `generaux` côté natif). Les deux sont **absents**
+  quand `piano_disponible` est faux, et suivent l'état par l'attente longue
+  de `client.moon` (`window.majPianos`) comme par `organum.etat` dans
+  `fenetre.moon`. Tests : `web/scripts/test-piano.sh`
   (48 notes avec pédale, relâchements retenus puis relâchés, drapeau coupé,
   panique, xruns, charge avec et sans piano, volume borné, persistance),
-  `web/tests/validation_test.lua` pour les nouvelles actions.
+  `web/tests/validation_test.lua` pour les nouvelles actions,
+  `web/tests/pages.lua` (bouton, curseur, ordre, absence),
+  `web/tests/fenetre_boucle.lua` (clic Piano, curseur Piano, absence) et les
+  contrôles e2e web et natifs (`scripts/tests-e2e.sh`) : clic réel sur le
+  bouton du pédalier et sur celui du clavier à transposition, glissement et
+  molette du curseur Piano, état relu dans `/api/orgue`.
 - Authentification facultative HTTP Digest SHA-256 (RFC 7616, `qop=auth`,
   royaume `organum`) : désactivée sans mot de passe ; ne sert qu'à vérifier
   les droits, sans chiffrement. Règles pures dans
@@ -536,15 +554,15 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   (`ORGANUM_FENETRE=non` pour s'en passer).
   **Curseurs verticaux** (même disposition que la page web) : un bandeau à
   gauche de la console réunit côte à côte les curseurs généraux — « Volume »
-  (système) et « Pédale » (volume du moteur) ; sans volume système, le seul
-  curseur « Volume » règle le moteur. La liste `generaux` accepte un
-  troisième réglage (« Piano ») sans refonte : la largeur du bandeau suit le
-  nombre de curseurs (une colonne par curseur, au moins 44 px et un seizième
-  de la largeur). Chaque clavier garde dans son en-tête le nom et
-  « Annuler » ; son curseur de gain devient une colonne verticale à droite
-  des jeux, de la hauteur du bloc de jeux ; la rangée des accouplements
-  reste en dessous. Chaque curseur affiche son étiquette au-dessus et sa
-  valeur en % en dessous.
+  (système), « Pédale » (volume du moteur) et « Piano » (volume du piano
+  échantillonné, présent seulement si le SoundFont est chargé) ; sans volume
+  système, le premier curseur « Volume » règle le moteur. La largeur du
+  bandeau suit le nombre de curseurs (une colonne par curseur, au moins
+  44 px et un seizième de la largeur). Chaque clavier garde dans son en-tête
+  le nom et « Annuler » ; son curseur de gain devient une colonne verticale à
+  droite des jeux, de la hauteur du bloc de jeux ; la rangée des
+  accouplements reste en dessous. Chaque curseur affiche son étiquette
+  au-dessus et sa valeur en % en dessous.
   `ui:curseur_vertical` (`cosmo/lnuklear.c`) dessine le curseur à la main
   (rail fin, bouton 40 × 24, case sensible sur toute la hauteur) : saisie
   relative — un appui ne fait pas sauter la valeur, le déplacement vertical
@@ -591,7 +609,12 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   (36 px si la place le permet) et toute la hauteur restante est répartie
   entre jeux et accouplements. Un nom de jeu trop large est coupé en deux
   lignes équilibrées par `ui:choix_deux` (`cosmo/lnuklear.c`) ; sur une
-  ligne, le rendu reste celui de `ui:choix`.
+  ligne, le rendu reste celui de `ui:choix`. Quand aucune disposition
+  confortable ne tient (800 × 480, quatre claviers de quinze jeux et trois
+  curseurs généraux), le repli de `disposer` retient la variante dont les
+  rangées peuvent afficher deux lignes de texte, puis la plus large case :
+  deux sous-colonnes légèrement rognées plutôt qu'une colonne unique aux
+  noms superposés.
   Essai hors moteur : `ui/essai_fenetre.moon` (état factice). X11 : socket
   Unix pour `:n`, TCP (port 6000+n) pour `hôte:n` ; testable sans
   rien ouvrir sur le bureau avec `Xvfb :2 -listen tcp -ac` et `DISPLAY=localhost:2`
