@@ -134,6 +134,8 @@ if [ -x "$RACINE/web/build/organum.com" ]; then
     sh "$RACINE/web/scripts/test-transposition.sh"
   executer "clavier web (web/scripts/test-clavier.sh)" \
     sh "$RACINE/web/scripts/test-clavier.sh"
+  executer "piano échantillonné (web/scripts/test-piano.sh)" \
+    sh "$RACINE/web/scripts/test-piano.sh"
 else
   ignore "API qualité (web/build/organum.com absent ; lancer web/scripts/build.sh)"
   ignore "délai de première réponse (web/build/organum.com absent ; lancer web/scripts/build.sh)"
@@ -144,6 +146,7 @@ else
   ignore "contrôle d'accès par sous-réseau (web/build/organum.com absent ; lancer web/scripts/build.sh)"
   ignore "transposition (web/build/organum.com absent ; lancer web/scripts/build.sh)"
   ignore "clavier web (web/build/organum.com absent ; lancer web/scripts/build.sh)"
+  ignore "piano échantillonné (web/build/organum.com absent ; lancer web/scripts/build.sh)"
 fi
 
 # --- Couche plate-forme sans carte -----------------------------------------

@@ -46,6 +46,11 @@ if [ -z "$WEB" ]; then
   cp "$ROOT/../ui/polices/"* "$STAGE/.polices/"
   FICHIERS+=" .polices/*"
 fi
+# Piano échantillonné : SoundFont SF3 CC0 (1,0 Mo), lu par cosmo/piano/piano.c
+# sous /zip/piano/piano.sf3.
+mkdir -p "$STAGE/piano"
+cp "$ROOT/../cosmo/piano/ressources/piano.sf3" "$STAGE/piano/piano.sf3"
+FICHIERS+=" piano/*"
 # Assistant natif macOS (CoreMIDI et CoreAudio) : embarqué pour que
 # l'utilisateur n'ait qu'un seul binaire à lancer. Absent d'une machine
 # Linux : avertissement sans échec, organum.com reste utilisable. Les droits

@@ -11,6 +11,8 @@ organum © 2026 jperon, sous licence AGPL-3.0 (voir `LICENSE.txt`).
 | JUCE 8.0.7 (juce_core, juce_events, juce_data_structures, juce_audio_basics, juce_audio_formats) | téléchargé dans `externe/` | Raw Material Software | AGPLv3 (ou commerciale) |
 | libMTSClient | `moteur/mts/` | © 2021 ODDSound Ltd | permissive (type 0BSD) |
 | Nuklear (et ses moteurs de rendu rawfb, stb_truetype, stb_rect_pack) | `ui/externe/` | © 2017 Micha Mettke et contributeurs ; stb © Sean Barrett | MIT ou domaine public (au choix) |
+| TinySoundFont (`tsf.h`) | `cosmo/piano/` | © 2017-2025 Bernhard Schelling, d'après SFZero (© 2012 Steve Folta) | MIT (`cosmo/piano/LICENSE-tsf.txt`) |
+| stb_vorbis | `cosmo/piano/` | © 2007 Sean Barrett et contributeurs | domaine public ou MIT, au choix (`cosmo/piano/LICENSE-stb_vorbis.txt`) |
 | cosmopolitan, redbean, loader APE arm64 (`plateforme/macos/ape-m1.c`) | téléchargé dans `externe/` ; copie du loader dans `plateforme/macos/` | © Justine Tunney | ISC |
 
 ## Police
@@ -41,3 +43,17 @@ Licences relevées sur les pages d'openairlib.net (archives de 2018).
 
 La réponse « Elveden Hall, Suffolk » du greffon d'origine a été retirée : sa
 licence (CC BY-NC-ND) n'est pas compatible avec l'AGPL.
+
+## SoundFont du piano
+
+`cosmo/piano/ressources/piano.sf3` : « Upright Piano KW » (version 2019-07-03),
+enregistré sur un piano droit Kawai par Gonzalo et Roberto, projet FreePats
+(<https://freepats.zenvoid.org/Piano/acoustic-grand-piano.html#UprightKW>).
+Publié sous CC0 1.0 (domaine public) : la licence est recopiée dans
+`cosmo/piano/ressources/LICENSE-CC0-1.0.txt` et la provenance dans
+`cosmo/piano/ressources/PROVENANCE.txt`.
+
+Le fichier embarqué est la variante SF3 (échantillons Ogg Vorbis, 26
+échantillons, 1,0 Mo) dérivée du SF2 d'origine pour organum : le `pdta` de la
+source est recopié tel quel, seuls `smpl` et `shdr` sont réécrits pour la
+compression Vorbis, sans troncature ni modification des boucles.
