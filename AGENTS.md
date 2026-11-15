@@ -81,7 +81,7 @@ sans dépendance nouvelle) sur `/`, `/midi` et `/audio` : clics réels, valeurs
 relues dans l'API, erreurs console, stabilité de `seq` et des `on`, largeurs
 420/1100 px, cibles tactiles, curseurs verticaux (glissement relatif,
 molette, remplissage `--fill`), valeurs en % affichées et texte des boutons
-de jeux complet (aucun débordement, cible ≥ 44 px). Il pilote
+de jeux complet (ni en largeur ni en hauteur, cible ≥ 44 px). Il pilote
 aussi la fenêtre native sous Xvfb avec xdotool (console, Audio, MIDI,
 Connexions aux trois tailles ; tempérament, réverbération, volume et gain
 par clic, glissement ou molette), puis

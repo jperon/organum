@@ -521,11 +521,16 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   jeux ; en natif, la colonne garde déjà 44 px minimum dès que la largeur
   manque (le cadre du groupe, 10 px, reste la seule marge).
   Les boutons de jeux gardent le texte complet sur deux ou trois lignes :
-  colonnes d'au moins 78 px (une de plus que la colonne de gain), rangées à
-  la hauteur de leur contenu avec 44 px minimum, grille qui ne se laisse pas
-  écraser (`flex: 1 0 auto`, `grid-auto-rows: max-content`). L'e2e web
-  vérifie sur chaque bouton `scrollHeight <= clientHeight + 1` et une hauteur
-  ≥ 44 px, aux largeurs 420 et 1100 px.
+  colonnes d'au moins 112 px — de quoi loger le mot le plus long de l'orgue
+  par défaut dans la police des boutons (0,85 rem), « Sesquialtera » ≈ 97 px,
+  plus marges et bordure, un mot n'est jamais coupé au bord —, rangées à la
+  hauteur de leur contenu avec 44 px minimum, grille qui ne se laisse pas
+  écraser (`flex: 1 0 auto`, `grid-auto-rows: max-content`). Les claviers
+  eux-mêmes sont posés sur `minmax(min(100%, 380px), 1fr)` pour garder trois
+  colonnes de jeux à 1100 px sans dépasser la hauteur de la fenêtre. L'e2e
+  web vérifie sur chaque bouton `scrollWidth <= clientWidth + 1` **et**
+  `scrollHeight <= clientHeight + 1`, ainsi qu'une hauteur ≥ 44 px, aux
+  largeurs 420 et 1100 px.
   La réverbération n'est plus sur la console principale : elle est réglée
   dans le panneau « Audio », comme le curseur de la page web.
   Exigence : tout doit tenir dans la fenêtre, sans défilement, et grossir
