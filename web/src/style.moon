@@ -793,6 +793,14 @@ CSS = [[
     gap: 2px;
     flex: 0 0 auto;
   }
+  /* Dans le rail, le pied ne doit pas élargir le bandeau : sa largeur
+     intrinsèque est neutralisée (width: 0), puis il prend celle des curseurs
+     (min-width: 100 %). Sans cela, la transposition à plat (libellé et trois
+     boutons sur une ligne, 224 px) imposait un bandeau de 230 px alors que
+     les trois curseurs n'en demandent que 148. */
+  @media (min-width: 601px) {
+    .bandeau-pied { width: 0; min-width: 100%; }
+  }
   .bandeau .transposition {
     margin: 0;
     gap: 2px;
@@ -815,9 +823,11 @@ CSS = [[
     font-size: 1rem;
   }
   /* Bouton de remise à zéro des volumes : icône seule, sous les curseurs,
-     pleine largeur du bandeau et cible tactile de 44 px. */
+     pleine largeur du bandeau et cible tactile de 44 px. Sa largeur minimale
+     est de 44 px (jamais plus : c'est le bandeau qui la règle). */
   .bandeau .reset-volumes {
     width: 100%;
+    min-width: 44px;
     min-height: 44px;
     padding: 0 4px;
     font-size: 1.45rem;

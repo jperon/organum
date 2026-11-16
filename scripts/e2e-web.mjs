@@ -1496,7 +1496,9 @@ async function testResponsive() {
           const b = document.getElementById('reinitialiser-volumes');
           if (b) {
             const r = b.getBoundingClientRect();
-            reset.push({ w: r.width, h: r.height, texte: b.textContent.trim() });
+            const s = getComputedStyle(b);
+            reset.push({ w: r.width, h: r.height, texte: b.textContent.trim(),
+                         minW: parseFloat(s.minWidth) });
           }
         }
         const pianos = [];
@@ -1521,6 +1523,8 @@ async function testResponsive() {
           bandeau.push({
             h: b.height, haut: b.top, bas: b.bottom, vue: window.innerHeight,
             consoleBas: consoleR.bottom, curseur: c.height, defile: window.scrollY,
+            largeur: b.width,
+            curseursLargeur: document.querySelector('.curseurs-generaux').getBoundingClientRect().width,
             clavierHaut: summary ? summary.getBoundingClientRect().top : null
           });
         }
@@ -1619,11 +1623,23 @@ async function testResponsive() {
           reset && reset.h >= 44 && reset.w >= 44 && reset.texte === '↺',
           `web / à ${largeur} px : bouton de remise à zéro ≥ 44 px et à icône seule (${reset ? `${reset.w.toFixed(0)}x${reset.h.toFixed(0)} « ${reset.texte} »` : 'absent'})`
         );
+        // La largeur minimale du bouton ↺ est exactement 44 px : le bandeau
+        // n'est pas élargi par lui, et sa largeur effective suit le bandeau.
+        verifie(
+          reset && Math.abs(reset.minW - 44) <= 0.5,
+          `web / à ${largeur} px : min-width du bouton ↺ = 44 px (${reset ? reset.minW : '?'})`
+        );
         // Bandeau : rail vertical pleine hauteur au grand écran (barre
         // « Clavier » dégagée dessous) ; barre compacte en haut de la page en
         // étroit, la plus basse possible pour libérer l'écran.
         const b = mesure.bandeau[0];
         if (largeur >= 900) {
+          // Le rail est large comme ses curseurs : ni le ↺ ni la
+          // transposition ne l'élargissent.
+          verifie(
+            b && b.largeur <= b.curseursLargeur + 16,
+            `web / à ${largeur} px : largeur du bandeau ≤ curseurs + 16 px (${b ? b.largeur.toFixed(0) : '?'} ≤ ${b ? b.curseursLargeur.toFixed(0) : '?'} + 16)`
+          );
           verifie(
             b && b.h >= b.vue * 0.9,
             `web / à ${largeur} px : bandeau sur toute la hauteur visible (${b ? b.h.toFixed(0) : '?'} px sur ${b ? b.vue : '?'})`
@@ -1641,6 +1657,10 @@ async function testResponsive() {
           verifie(
             b && b.h <= 200 && b.haut <= 6,
             `web / à ${largeur} px : bandeau compact en haut de la page (${b ? b.h.toFixed(0) : '?'} px, haut ${b ? b.haut.toFixed(0) : '?'})`
+          );
+          verifie(
+            reset && Math.abs(reset.w - 44) <= 0.5,
+            `web / à ${largeur} px : ↺ large de 44 px en mode étroit (${reset ? reset.w.toFixed(1) : '?'})`
           );
           verifie(
             b && b.h < b.vue / 2,
