@@ -622,7 +622,13 @@ déconnexion d'un client n'affecte pas l'autre axe, la perte du périphérique
   visible : hauteur `calc(100dvh - 8px)` avec repli `calc(100vh - 8px)`,
   `position: sticky` et `top: 4px` ; les curseurs s'étirent
   (`.curseurs-generaux` en `flex: 1`) et le pied `.bandeau-pied` (↺ puis
-  transposition) reste en bas. Au-delà de 900 px, il prend la hauteur de la
+  transposition) reste en bas. La largeur du rail est celle des curseurs et
+  d'elle seule : le pied a une largeur intrinsèque nulle (`width: 0`) et
+  prend 100 % du rail, sinon la transposition à plat (libellé et trois
+  boutons, 224 px) élargirait le bandeau à 230 px pour 148 de curseurs ; ↺
+  porte une `min-width` de 44 px (jamais plus) et suit la largeur du rail,
+  la transposition se repliant sur deux lignes (libellé, puis − 0 + de
+  44 px). Au-delà de 900 px, il prend la hauteur de la
   console (`height: 100%`), la barre « Clavier » restant visible dessous,
   sans défilement.
   **En largeur étroite (≤ 600 px)**, le rail disparaît au profit d'une barre
